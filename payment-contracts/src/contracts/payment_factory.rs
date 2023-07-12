@@ -7,16 +7,14 @@ pub use payment_factory::*;
     clippy::upper_case_acronyms,
     clippy::type_complexity,
     dead_code,
-    non_camel_case_types
+    non_camel_case_types,
 )]
 pub mod payment_factory {
     #[rustfmt::skip]
     const __ABI: &str = "[\n    {\n        \"name\": \"NewPaymentAddress\",\n        \"inputs\": [\n            {\n                \"name\": \"account\",\n                \"type\": \"address\",\n                \"indexed\": false\n            },\n            {\n                \"name\": \"payment_address\",\n                \"type\": \"address\",\n                \"indexed\": false\n            }\n        ],\n        \"anonymous\": false,\n        \"type\": \"event\"\n    },\n    {\n        \"name\": \"PaymentReceived\",\n        \"inputs\": [\n            {\n                \"name\": \"account\",\n                \"type\": \"address\",\n                \"indexed\": false\n            },\n            {\n                \"name\": \"token\",\n                \"type\": \"address\",\n                \"indexed\": false\n            },\n            {\n                \"name\": \"amount\",\n                \"type\": \"uint256\",\n                \"indexed\": false\n            }\n        ],\n        \"anonymous\": false,\n        \"type\": \"event\"\n    },\n    {\n        \"name\": \"NewOwnerCommitted\",\n        \"inputs\": [\n            {\n                \"name\": \"owner\",\n                \"type\": \"address\",\n                \"indexed\": false\n            },\n            {\n                \"name\": \"new_owner\",\n                \"type\": \"address\",\n                \"indexed\": false\n            },\n            {\n                \"name\": \"finalize_time\",\n                \"type\": \"uint256\",\n                \"indexed\": false\n            }\n        ],\n        \"anonymous\": false,\n        \"type\": \"event\"\n    },\n    {\n        \"name\": \"NewOwnerAccepted\",\n        \"inputs\": [\n            {\n                \"name\": \"old_owner\",\n                \"type\": \"address\",\n                \"indexed\": false\n            },\n            {\n                \"name\": \"owner\",\n                \"type\": \"address\",\n                \"indexed\": false\n            }\n        ],\n        \"anonymous\": false,\n        \"type\": \"event\"\n    },\n    {\n        \"name\": \"NewSweeperCommitted\",\n        \"inputs\": [\n            {\n                \"name\": \"sweeper\",\n                \"type\": \"address\",\n                \"indexed\": false\n            },\n            {\n                \"name\": \"new_sweeper\",\n                \"type\": \"address\",\n                \"indexed\": false\n            },\n            {\n                \"name\": \"finalize_time\",\n                \"type\": \"uint256\",\n                \"indexed\": false\n            }\n        ],\n        \"anonymous\": false,\n        \"type\": \"event\"\n    },\n    {\n        \"name\": \"NewSweeperSet\",\n        \"inputs\": [\n            {\n                \"name\": \"old_sweeper\",\n                \"type\": \"address\",\n                \"indexed\": false\n            },\n            {\n                \"name\": \"sweeper\",\n                \"type\": \"address\",\n                \"indexed\": false\n            }\n        ],\n        \"anonymous\": false,\n        \"type\": \"event\"\n    },\n    {\n        \"name\": \"NewReceiverCommitted\",\n        \"inputs\": [\n            {\n                \"name\": \"receiver\",\n                \"type\": \"address\",\n                \"indexed\": false\n            },\n            {\n                \"name\": \"new_receiver\",\n                \"type\": \"address\",\n                \"indexed\": false\n            },\n            {\n                \"name\": \"finalize_time\",\n                \"type\": \"uint256\",\n                \"indexed\": false\n            }\n        ],\n        \"anonymous\": false,\n        \"type\": \"event\"\n    },\n    {\n        \"name\": \"NewReceiverSet\",\n        \"inputs\": [\n            {\n                \"name\": \"old_receiver\",\n                \"type\": \"address\",\n                \"indexed\": false\n            },\n            {\n                \"name\": \"receiver\",\n                \"type\": \"address\",\n                \"indexed\": false\n            }\n        ],\n        \"anonymous\": false,\n        \"type\": \"event\"\n    },\n    {\n        \"stateMutability\": \"nonpayable\",\n        \"type\": \"constructor\",\n        \"inputs\": [\n            {\n                \"name\": \"_owner\",\n                \"type\": \"address\"\n            },\n            {\n                \"name\": \"_receiver\",\n                \"type\": \"address\"\n            },\n            {\n                \"name\": \"_sweeper\",\n                \"type\": \"address\"\n            },\n            {\n                \"name\": \"_proxy\",\n                \"type\": \"address\"\n            }\n        ],\n        \"outputs\": []\n    },\n    {\n        \"stateMutability\": \"view\",\n        \"type\": \"function\",\n        \"name\": \"get_approved_tokens\",\n        \"inputs\": [],\n        \"outputs\": [\n            {\n                \"name\": \"\",\n                \"type\": \"address[]\"\n            }\n        ]\n    },\n    {\n        \"stateMutability\": \"nonpayable\",\n        \"type\": \"function\",\n        \"name\": \"payment_received\",\n        \"inputs\": [\n            {\n                \"name\": \"_token\",\n                \"type\": \"address\"\n            },\n            {\n                \"name\": \"_amount\",\n                \"type\": \"uint256\"\n            }\n        ],\n        \"outputs\": [\n            {\n                \"name\": \"\",\n                \"type\": \"bool\"\n            }\n        ]\n    },\n    {\n        \"stateMutability\": \"nonpayable\",\n        \"type\": \"function\",\n        \"name\": \"create_payment_address\",\n        \"inputs\": [],\n        \"outputs\": []\n    },\n    {\n        \"stateMutability\": \"nonpayable\",\n        \"type\": \"function\",\n        \"name\": \"create_payment_address\",\n        \"inputs\": [\n            {\n                \"name\": \"_account\",\n                \"type\": \"address\"\n            }\n        ],\n        \"outputs\": []\n    },\n    {\n        \"stateMutability\": \"nonpayable\",\n        \"type\": \"function\",\n        \"name\": \"set_token_approvals\",\n        \"inputs\": [\n            {\n                \"name\": \"_tokens\",\n                \"type\": \"address[]\"\n            },\n            {\n                \"name\": \"_approved\",\n                \"type\": \"bool\"\n            }\n        ],\n        \"outputs\": []\n    },\n    {\n        \"stateMutability\": \"nonpayable\",\n        \"type\": \"function\",\n        \"name\": \"commit_new_sweeper_implementation\",\n        \"inputs\": [\n            {\n                \"name\": \"_sweeper\",\n                \"type\": \"address\"\n            }\n        ],\n        \"outputs\": []\n    },\n    {\n        \"stateMutability\": \"nonpayable\",\n        \"type\": \"function\",\n        \"name\": \"finalize_new_sweeper_implementation\",\n        \"inputs\": [],\n        \"outputs\": []\n    },\n    {\n        \"stateMutability\": \"nonpayable\",\n        \"type\": \"function\",\n        \"name\": \"commit_new_receiver\",\n        \"inputs\": [\n            {\n                \"name\": \"_receiver\",\n                \"type\": \"address\"\n            }\n        ],\n        \"outputs\": []\n    },\n    {\n        \"stateMutability\": \"nonpayable\",\n        \"type\": \"function\",\n        \"name\": \"finalize_new_receiver\",\n        \"inputs\": [],\n        \"outputs\": []\n    },\n    {\n        \"stateMutability\": \"nonpayable\",\n        \"type\": \"function\",\n        \"name\": \"commit_transfer_ownership\",\n        \"inputs\": [\n            {\n                \"name\": \"_new_owner\",\n                \"type\": \"address\"\n            }\n        ],\n        \"outputs\": []\n    },\n    {\n        \"stateMutability\": \"nonpayable\",\n        \"type\": \"function\",\n        \"name\": \"accept_transfer_ownership\",\n        \"inputs\": [],\n        \"outputs\": []\n    },\n    {\n        \"stateMutability\": \"view\",\n        \"type\": \"function\",\n        \"name\": \"PROXY_IMPLEMENTATION\",\n        \"inputs\": [],\n        \"outputs\": [\n            {\n                \"name\": \"\",\n                \"type\": \"address\"\n            }\n        ]\n    },\n    {\n        \"stateMutability\": \"view\",\n        \"type\": \"function\",\n        \"name\": \"sweeper_implementation\",\n        \"inputs\": [],\n        \"outputs\": [\n            {\n                \"name\": \"\",\n                \"type\": \"address\"\n            }\n        ]\n    },\n    {\n        \"stateMutability\": \"view\",\n        \"type\": \"function\",\n        \"name\": \"future_sweeper_implementation\",\n        \"inputs\": [],\n        \"outputs\": [\n            {\n                \"name\": \"\",\n                \"type\": \"address\"\n            }\n        ]\n    },\n    {\n        \"stateMutability\": \"view\",\n        \"type\": \"function\",\n        \"name\": \"owner\",\n        \"inputs\": [],\n        \"outputs\": [\n            {\n                \"name\": \"\",\n                \"type\": \"address\"\n            }\n        ]\n    },\n    {\n        \"stateMutability\": \"view\",\n        \"type\": \"function\",\n        \"name\": \"future_owner\",\n        \"inputs\": [],\n        \"outputs\": [\n            {\n                \"name\": \"\",\n                \"type\": \"address\"\n            }\n        ]\n    },\n    {\n        \"stateMutability\": \"view\",\n        \"type\": \"function\",\n        \"name\": \"receiver\",\n        \"inputs\": [],\n        \"outputs\": [\n            {\n                \"name\": \"\",\n                \"type\": \"address\"\n            }\n        ]\n    },\n    {\n        \"stateMutability\": \"view\",\n        \"type\": \"function\",\n        \"name\": \"future_receiver\",\n        \"inputs\": [],\n        \"outputs\": [\n            {\n                \"name\": \"\",\n                \"type\": \"address\"\n            }\n        ]\n    },\n    {\n        \"stateMutability\": \"view\",\n        \"type\": \"function\",\n        \"name\": \"transfer_ownership_timestamp\",\n        \"inputs\": [],\n        \"outputs\": [\n            {\n                \"name\": \"\",\n                \"type\": \"uint256\"\n            }\n        ]\n    },\n    {\n        \"stateMutability\": \"view\",\n        \"type\": \"function\",\n        \"name\": \"new_sweeper_timestamp\",\n        \"inputs\": [],\n        \"outputs\": [\n            {\n                \"name\": \"\",\n                \"type\": \"uint256\"\n            }\n        ]\n    },\n    {\n        \"stateMutability\": \"view\",\n        \"type\": \"function\",\n        \"name\": \"new_receiver_timestamp\",\n        \"inputs\": [],\n        \"outputs\": [\n            {\n                \"name\": \"\",\n                \"type\": \"uint256\"\n            }\n        ]\n    },\n    {\n        \"stateMutability\": \"view\",\n        \"type\": \"function\",\n        \"name\": \"is_approved_token\",\n        \"inputs\": [\n            {\n                \"name\": \"arg0\",\n                \"type\": \"address\"\n            }\n        ],\n        \"outputs\": [\n            {\n                \"name\": \"\",\n                \"type\": \"bool\"\n            }\n        ]\n    },\n    {\n        \"stateMutability\": \"view\",\n        \"type\": \"function\",\n        \"name\": \"account_to_payment_address\",\n        \"inputs\": [\n            {\n                \"name\": \"arg0\",\n                \"type\": \"address\"\n            }\n        ],\n        \"outputs\": [\n            {\n                \"name\": \"\",\n                \"type\": \"address\"\n            }\n        ]\n    },\n    {\n        \"stateMutability\": \"view\",\n        \"type\": \"function\",\n        \"name\": \"payment_address_to_account\",\n        \"inputs\": [\n            {\n                \"name\": \"arg0\",\n                \"type\": \"address\"\n            }\n        ],\n        \"outputs\": [\n            {\n                \"name\": \"\",\n                \"type\": \"address\"\n            }\n        ]\n    }\n]";
     ///The parsed JSON ABI of the contract.
-    pub static PAYMENTFACTORY_ABI: ::ethers::contract::Lazy<::ethers::core::abi::Abi> =
-        ::ethers::contract::Lazy::new(|| {
-            ::ethers::core::utils::__serde_json::from_str(__ABI).expect("ABI is always valid")
-        });
+    pub static PAYMENTFACTORY_ABI: ::ethers::contract::Lazy<::ethers::core::abi::Abi> = ::ethers::contract::Lazy::new(||
+    ::ethers::core::utils::__serde_json::from_str(__ABI).expect("ABI is always valid"));
     pub struct PaymentFactory<M>(::ethers::contract::Contract<M>);
     impl<M> ::core::clone::Clone for PaymentFactory<M> {
         fn clone(&self) -> Self {
@@ -36,9 +34,7 @@ pub mod payment_factory {
     }
     impl<M> ::core::fmt::Debug for PaymentFactory<M> {
         fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-            f.debug_tuple(stringify!(PaymentFactory))
-                .field(&self.address())
-                .finish()
+            f.debug_tuple(stringify!(PaymentFactory)).field(&self.address()).finish()
         }
     }
     impl<M: ::ethers::providers::Middleware> PaymentFactory<M> {
@@ -48,16 +44,21 @@ pub mod payment_factory {
             address: T,
             client: ::std::sync::Arc<M>,
         ) -> Self {
-            Self(::ethers::contract::Contract::new(
-                address.into(),
-                PAYMENTFACTORY_ABI.clone(),
-                client,
-            ))
+            Self(
+                ::ethers::contract::Contract::new(
+                    address.into(),
+                    PAYMENTFACTORY_ABI.clone(),
+                    client,
+                ),
+            )
         }
         ///Calls the contract's `PROXY_IMPLEMENTATION` (0x5c7a7d99) function
         pub fn proxy_implementation(
             &self,
-        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::Address> {
+        ) -> ::ethers::contract::builders::ContractCall<
+            M,
+            ::ethers::core::types::Address,
+        > {
             self.0
                 .method_hash([92, 122, 125, 153], ())
                 .expect("method not found (this should never happen)")
@@ -74,7 +75,10 @@ pub mod payment_factory {
         pub fn account_to_payment_address(
             &self,
             arg_0: ::ethers::core::types::Address,
-        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::Address> {
+        ) -> ::ethers::contract::builders::ContractCall<
+            M,
+            ::ethers::core::types::Address,
+        > {
             self.0
                 .method_hash([11, 129, 2, 48], arg_0)
                 .expect("method not found (this should never happen)")
@@ -107,7 +111,9 @@ pub mod payment_factory {
                 .expect("method not found (this should never happen)")
         }
         ///Calls the contract's `create_payment_address` (0x6248d5c6) function
-        pub fn create_payment_address(&self) -> ::ethers::contract::builders::ContractCall<M, ()> {
+        pub fn create_payment_address(
+            &self,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
             self.0
                 .method_hash([98, 72, 213, 198], ())
                 .expect("method not found (this should never happen)")
@@ -122,7 +128,9 @@ pub mod payment_factory {
                 .expect("method not found (this should never happen)")
         }
         ///Calls the contract's `finalize_new_receiver` (0x73d02b33) function
-        pub fn finalize_new_receiver(&self) -> ::ethers::contract::builders::ContractCall<M, ()> {
+        pub fn finalize_new_receiver(
+            &self,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
             self.0
                 .method_hash([115, 208, 43, 51], ())
                 .expect("method not found (this should never happen)")
@@ -138,7 +146,10 @@ pub mod payment_factory {
         ///Calls the contract's `future_owner` (0x1ec0cdc1) function
         pub fn future_owner(
             &self,
-        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::Address> {
+        ) -> ::ethers::contract::builders::ContractCall<
+            M,
+            ::ethers::core::types::Address,
+        > {
             self.0
                 .method_hash([30, 192, 205, 193], ())
                 .expect("method not found (this should never happen)")
@@ -146,7 +157,10 @@ pub mod payment_factory {
         ///Calls the contract's `future_receiver` (0x3bea9ddd) function
         pub fn future_receiver(
             &self,
-        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::Address> {
+        ) -> ::ethers::contract::builders::ContractCall<
+            M,
+            ::ethers::core::types::Address,
+        > {
             self.0
                 .method_hash([59, 234, 157, 221], ())
                 .expect("method not found (this should never happen)")
@@ -154,7 +168,10 @@ pub mod payment_factory {
         ///Calls the contract's `future_sweeper_implementation` (0x4333d02b) function
         pub fn future_sweeper_implementation(
             &self,
-        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::Address> {
+        ) -> ::ethers::contract::builders::ContractCall<
+            M,
+            ::ethers::core::types::Address,
+        > {
             self.0
                 .method_hash([67, 51, 208, 43], ())
                 .expect("method not found (this should never happen)")
@@ -198,7 +215,10 @@ pub mod payment_factory {
         ///Calls the contract's `owner` (0x8da5cb5b) function
         pub fn owner(
             &self,
-        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::Address> {
+        ) -> ::ethers::contract::builders::ContractCall<
+            M,
+            ::ethers::core::types::Address,
+        > {
             self.0
                 .method_hash([141, 165, 203, 91], ())
                 .expect("method not found (this should never happen)")
@@ -207,7 +227,10 @@ pub mod payment_factory {
         pub fn payment_address_to_account(
             &self,
             arg_0: ::ethers::core::types::Address,
-        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::Address> {
+        ) -> ::ethers::contract::builders::ContractCall<
+            M,
+            ::ethers::core::types::Address,
+        > {
             self.0
                 .method_hash([224, 147, 73, 130], arg_0)
                 .expect("method not found (this should never happen)")
@@ -225,7 +248,10 @@ pub mod payment_factory {
         ///Calls the contract's `receiver` (0xf7260d3e) function
         pub fn receiver(
             &self,
-        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::Address> {
+        ) -> ::ethers::contract::builders::ContractCall<
+            M,
+            ::ethers::core::types::Address,
+        > {
             self.0
                 .method_hash([247, 38, 13, 62], ())
                 .expect("method not found (this should never happen)")
@@ -243,7 +269,10 @@ pub mod payment_factory {
         ///Calls the contract's `sweeper_implementation` (0x791cc746) function
         pub fn sweeper_implementation(
             &self,
-        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::Address> {
+        ) -> ::ethers::contract::builders::ContractCall<
+            M,
+            ::ethers::core::types::Address,
+        > {
             self.0
                 .method_hash([121, 28, 199, 70], ())
                 .expect("method not found (this should never happen)")
@@ -259,71 +288,96 @@ pub mod payment_factory {
         ///Gets the contract's `NewOwnerAccepted` event
         pub fn new_owner_accepted_filter(
             &self,
-        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, NewOwnerAcceptedFilter>
-        {
+        ) -> ::ethers::contract::builders::Event<
+            ::std::sync::Arc<M>,
+            M,
+            NewOwnerAcceptedFilter,
+        > {
             self.0.event()
         }
         ///Gets the contract's `NewOwnerCommitted` event
         pub fn new_owner_committed_filter(
             &self,
-        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, NewOwnerCommittedFilter>
-        {
+        ) -> ::ethers::contract::builders::Event<
+            ::std::sync::Arc<M>,
+            M,
+            NewOwnerCommittedFilter,
+        > {
             self.0.event()
         }
         ///Gets the contract's `NewPaymentAddress` event
         pub fn new_payment_address_filter(
             &self,
-        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, NewPaymentAddressFilter>
-        {
+        ) -> ::ethers::contract::builders::Event<
+            ::std::sync::Arc<M>,
+            M,
+            NewPaymentAddressFilter,
+        > {
             self.0.event()
         }
         ///Gets the contract's `NewReceiverCommitted` event
         pub fn new_receiver_committed_filter(
             &self,
-        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, NewReceiverCommittedFilter>
-        {
+        ) -> ::ethers::contract::builders::Event<
+            ::std::sync::Arc<M>,
+            M,
+            NewReceiverCommittedFilter,
+        > {
             self.0.event()
         }
         ///Gets the contract's `NewReceiverSet` event
         pub fn new_receiver_set_filter(
             &self,
-        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, NewReceiverSetFilter>
-        {
+        ) -> ::ethers::contract::builders::Event<
+            ::std::sync::Arc<M>,
+            M,
+            NewReceiverSetFilter,
+        > {
             self.0.event()
         }
         ///Gets the contract's `NewSweeperCommitted` event
         pub fn new_sweeper_committed_filter(
             &self,
-        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, NewSweeperCommittedFilter>
-        {
+        ) -> ::ethers::contract::builders::Event<
+            ::std::sync::Arc<M>,
+            M,
+            NewSweeperCommittedFilter,
+        > {
             self.0.event()
         }
         ///Gets the contract's `NewSweeperSet` event
         pub fn new_sweeper_set_filter(
             &self,
-        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, NewSweeperSetFilter>
-        {
+        ) -> ::ethers::contract::builders::Event<
+            ::std::sync::Arc<M>,
+            M,
+            NewSweeperSetFilter,
+        > {
             self.0.event()
         }
         ///Gets the contract's `PaymentReceived` event
         pub fn payment_received_filter(
             &self,
-        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, PaymentReceivedFilter>
-        {
+        ) -> ::ethers::contract::builders::Event<
+            ::std::sync::Arc<M>,
+            M,
+            PaymentReceivedFilter,
+        > {
             self.0.event()
         }
         /// Returns an `Event` builder for all the events of this contract.
         pub fn events(
             &self,
-        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, PaymentFactoryEvents>
-        {
-            self.0
-                .event_with_filter(::core::default::Default::default())
+        ) -> ::ethers::contract::builders::Event<
+            ::std::sync::Arc<M>,
+            M,
+            PaymentFactoryEvents,
+        > {
+            self.0.event_with_filter(::core::default::Default::default())
         }
     }
     impl<M: ::ethers::providers::Middleware> From<::ethers::contract::Contract<M>>
-        for PaymentFactory<M>
-    {
+    for PaymentFactory<M> {
         fn from(contract: ::ethers::contract::Contract<M>) -> Self {
             Self::new(contract.address(), contract.client())
         }
@@ -336,7 +390,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethevent(name = "NewOwnerAccepted", abi = "NewOwnerAccepted(address,address)")]
     pub struct NewOwnerAcceptedFilter {
@@ -351,7 +405,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethevent(
         name = "NewOwnerCommitted",
@@ -370,7 +424,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethevent(name = "NewPaymentAddress", abi = "NewPaymentAddress(address,address)")]
     pub struct NewPaymentAddressFilter {
@@ -385,7 +439,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethevent(
         name = "NewReceiverCommitted",
@@ -404,7 +458,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethevent(name = "NewReceiverSet", abi = "NewReceiverSet(address,address)")]
     pub struct NewReceiverSetFilter {
@@ -419,7 +473,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethevent(
         name = "NewSweeperCommitted",
@@ -438,7 +492,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethevent(name = "NewSweeperSet", abi = "NewSweeperSet(address,address)")]
     pub struct NewSweeperSetFilter {
@@ -453,7 +507,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethevent(
         name = "PaymentReceived",
@@ -510,14 +564,30 @@ pub mod payment_factory {
     impl ::core::fmt::Display for PaymentFactoryEvents {
         fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
             match self {
-                Self::NewOwnerAcceptedFilter(element) => ::core::fmt::Display::fmt(element, f),
-                Self::NewOwnerCommittedFilter(element) => ::core::fmt::Display::fmt(element, f),
-                Self::NewPaymentAddressFilter(element) => ::core::fmt::Display::fmt(element, f),
-                Self::NewReceiverCommittedFilter(element) => ::core::fmt::Display::fmt(element, f),
-                Self::NewReceiverSetFilter(element) => ::core::fmt::Display::fmt(element, f),
-                Self::NewSweeperCommittedFilter(element) => ::core::fmt::Display::fmt(element, f),
-                Self::NewSweeperSetFilter(element) => ::core::fmt::Display::fmt(element, f),
-                Self::PaymentReceivedFilter(element) => ::core::fmt::Display::fmt(element, f),
+                Self::NewOwnerAcceptedFilter(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::NewOwnerCommittedFilter(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::NewPaymentAddressFilter(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::NewReceiverCommittedFilter(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::NewReceiverSetFilter(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::NewSweeperCommittedFilter(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::NewSweeperSetFilter(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::PaymentReceivedFilter(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
             }
         }
     }
@@ -570,7 +640,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethcall(name = "PROXY_IMPLEMENTATION", abi = "PROXY_IMPLEMENTATION()")]
     pub struct ProxyImplementationCall;
@@ -583,12 +653,9 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
-    #[ethcall(
-        name = "accept_transfer_ownership",
-        abi = "accept_transfer_ownership()"
-    )]
+    #[ethcall(name = "accept_transfer_ownership", abi = "accept_transfer_ownership()")]
     pub struct AcceptTransferOwnershipCall;
     ///Container type for all input parameters for the `account_to_payment_address` function with signature `account_to_payment_address(address)` and selector `0x0b810230`
     #[derive(
@@ -599,7 +666,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethcall(
         name = "account_to_payment_address",
@@ -617,7 +684,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethcall(name = "commit_new_receiver", abi = "commit_new_receiver(address)")]
     pub struct CommitNewReceiverCall {
@@ -632,7 +699,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethcall(
         name = "commit_new_sweeper_implementation",
@@ -650,7 +717,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethcall(
         name = "commit_transfer_ownership",
@@ -668,7 +735,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethcall(name = "create_payment_address", abi = "create_payment_address()")]
     pub struct CreatePaymentAddressCall;
@@ -681,12 +748,9 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
-    #[ethcall(
-        name = "create_payment_address",
-        abi = "create_payment_address(address)"
-    )]
+    #[ethcall(name = "create_payment_address", abi = "create_payment_address(address)")]
     pub struct CreatePaymentAddressWithAccountCall {
         pub account: ::ethers::core::types::Address,
     }
@@ -699,7 +763,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethcall(name = "finalize_new_receiver", abi = "finalize_new_receiver()")]
     pub struct FinalizeNewReceiverCall;
@@ -712,7 +776,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethcall(
         name = "finalize_new_sweeper_implementation",
@@ -728,7 +792,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethcall(name = "future_owner", abi = "future_owner()")]
     pub struct FutureOwnerCall;
@@ -741,7 +805,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethcall(name = "future_receiver", abi = "future_receiver()")]
     pub struct FutureReceiverCall;
@@ -754,7 +818,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethcall(
         name = "future_sweeper_implementation",
@@ -770,7 +834,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethcall(name = "get_approved_tokens", abi = "get_approved_tokens()")]
     pub struct GetApprovedTokensCall;
@@ -783,7 +847,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethcall(name = "is_approved_token", abi = "is_approved_token(address)")]
     pub struct IsApprovedTokenCall {
@@ -798,7 +862,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethcall(name = "new_receiver_timestamp", abi = "new_receiver_timestamp()")]
     pub struct NewReceiverTimestampCall;
@@ -811,7 +875,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethcall(name = "new_sweeper_timestamp", abi = "new_sweeper_timestamp()")]
     pub struct NewSweeperTimestampCall;
@@ -824,7 +888,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethcall(name = "owner", abi = "owner()")]
     pub struct OwnerCall;
@@ -837,7 +901,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethcall(
         name = "payment_address_to_account",
@@ -855,7 +919,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethcall(name = "payment_received", abi = "payment_received(address,uint256)")]
     pub struct PaymentReceivedCall {
@@ -871,7 +935,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethcall(name = "receiver", abi = "receiver()")]
     pub struct ReceiverCall;
@@ -884,12 +948,9 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
-    #[ethcall(
-        name = "set_token_approvals",
-        abi = "set_token_approvals(address[],bool)"
-    )]
+    #[ethcall(name = "set_token_approvals", abi = "set_token_approvals(address[],bool)")]
     pub struct SetTokenApprovalsCall {
         pub tokens: ::std::vec::Vec<::ethers::core::types::Address>,
         pub approved: bool,
@@ -903,7 +964,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethcall(name = "sweeper_implementation", abi = "sweeper_implementation()")]
     pub struct SweeperImplementationCall;
@@ -916,7 +977,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     #[ethcall(
         name = "transfer_ownership_timestamp",
@@ -956,122 +1017,136 @@ pub mod payment_factory {
             data: impl AsRef<[u8]>,
         ) -> ::core::result::Result<Self, ::ethers::core::abi::AbiError> {
             let data = data.as_ref();
-            if let Ok(decoded) =
-                <ProxyImplementationCall as ::ethers::core::abi::AbiDecode>::decode(data)
-            {
+            if let Ok(decoded)
+                = <ProxyImplementationCall as ::ethers::core::abi::AbiDecode>::decode(
+                    data,
+                ) {
                 return Ok(Self::ProxyImplementation(decoded));
             }
-            if let Ok(decoded) =
-                <AcceptTransferOwnershipCall as ::ethers::core::abi::AbiDecode>::decode(data)
-            {
+            if let Ok(decoded)
+                = <AcceptTransferOwnershipCall as ::ethers::core::abi::AbiDecode>::decode(
+                    data,
+                ) {
                 return Ok(Self::AcceptTransferOwnership(decoded));
             }
-            if let Ok(decoded) =
-                <AccountToPaymentAddressCall as ::ethers::core::abi::AbiDecode>::decode(data)
-            {
+            if let Ok(decoded)
+                = <AccountToPaymentAddressCall as ::ethers::core::abi::AbiDecode>::decode(
+                    data,
+                ) {
                 return Ok(Self::AccountToPaymentAddress(decoded));
             }
-            if let Ok(decoded) =
-                <CommitNewReceiverCall as ::ethers::core::abi::AbiDecode>::decode(data)
-            {
+            if let Ok(decoded)
+                = <CommitNewReceiverCall as ::ethers::core::abi::AbiDecode>::decode(
+                    data,
+                ) {
                 return Ok(Self::CommitNewReceiver(decoded));
             }
-            if let Ok(decoded) =
-                <CommitNewSweeperImplementationCall as ::ethers::core::abi::AbiDecode>::decode(data)
-            {
+            if let Ok(decoded)
+                = <CommitNewSweeperImplementationCall as ::ethers::core::abi::AbiDecode>::decode(
+                    data,
+                ) {
                 return Ok(Self::CommitNewSweeperImplementation(decoded));
             }
-            if let Ok(decoded) =
-                <CommitTransferOwnershipCall as ::ethers::core::abi::AbiDecode>::decode(data)
-            {
+            if let Ok(decoded)
+                = <CommitTransferOwnershipCall as ::ethers::core::abi::AbiDecode>::decode(
+                    data,
+                ) {
                 return Ok(Self::CommitTransferOwnership(decoded));
             }
-            if let Ok(decoded) =
-                <CreatePaymentAddressCall as ::ethers::core::abi::AbiDecode>::decode(data)
-            {
+            if let Ok(decoded)
+                = <CreatePaymentAddressCall as ::ethers::core::abi::AbiDecode>::decode(
+                    data,
+                ) {
                 return Ok(Self::CreatePaymentAddress(decoded));
             }
-            if let Ok(decoded) =
-                <CreatePaymentAddressWithAccountCall as ::ethers::core::abi::AbiDecode>::decode(
+            if let Ok(decoded)
+                = <CreatePaymentAddressWithAccountCall as ::ethers::core::abi::AbiDecode>::decode(
                     data,
-                )
-            {
+                ) {
                 return Ok(Self::CreatePaymentAddressWithAccount(decoded));
             }
-            if let Ok(decoded) =
-                <FinalizeNewReceiverCall as ::ethers::core::abi::AbiDecode>::decode(data)
-            {
+            if let Ok(decoded)
+                = <FinalizeNewReceiverCall as ::ethers::core::abi::AbiDecode>::decode(
+                    data,
+                ) {
                 return Ok(Self::FinalizeNewReceiver(decoded));
             }
-            if let Ok(decoded) =
-                <FinalizeNewSweeperImplementationCall as ::ethers::core::abi::AbiDecode>::decode(
+            if let Ok(decoded)
+                = <FinalizeNewSweeperImplementationCall as ::ethers::core::abi::AbiDecode>::decode(
                     data,
-                )
-            {
+                ) {
                 return Ok(Self::FinalizeNewSweeperImplementation(decoded));
             }
-            if let Ok(decoded) = <FutureOwnerCall as ::ethers::core::abi::AbiDecode>::decode(data) {
+            if let Ok(decoded)
+                = <FutureOwnerCall as ::ethers::core::abi::AbiDecode>::decode(data) {
                 return Ok(Self::FutureOwner(decoded));
             }
-            if let Ok(decoded) =
-                <FutureReceiverCall as ::ethers::core::abi::AbiDecode>::decode(data)
-            {
+            if let Ok(decoded)
+                = <FutureReceiverCall as ::ethers::core::abi::AbiDecode>::decode(data) {
                 return Ok(Self::FutureReceiver(decoded));
             }
-            if let Ok(decoded) =
-                <FutureSweeperImplementationCall as ::ethers::core::abi::AbiDecode>::decode(data)
-            {
+            if let Ok(decoded)
+                = <FutureSweeperImplementationCall as ::ethers::core::abi::AbiDecode>::decode(
+                    data,
+                ) {
                 return Ok(Self::FutureSweeperImplementation(decoded));
             }
-            if let Ok(decoded) =
-                <GetApprovedTokensCall as ::ethers::core::abi::AbiDecode>::decode(data)
-            {
+            if let Ok(decoded)
+                = <GetApprovedTokensCall as ::ethers::core::abi::AbiDecode>::decode(
+                    data,
+                ) {
                 return Ok(Self::GetApprovedTokens(decoded));
             }
-            if let Ok(decoded) =
-                <IsApprovedTokenCall as ::ethers::core::abi::AbiDecode>::decode(data)
-            {
+            if let Ok(decoded)
+                = <IsApprovedTokenCall as ::ethers::core::abi::AbiDecode>::decode(data) {
                 return Ok(Self::IsApprovedToken(decoded));
             }
-            if let Ok(decoded) =
-                <NewReceiverTimestampCall as ::ethers::core::abi::AbiDecode>::decode(data)
-            {
+            if let Ok(decoded)
+                = <NewReceiverTimestampCall as ::ethers::core::abi::AbiDecode>::decode(
+                    data,
+                ) {
                 return Ok(Self::NewReceiverTimestamp(decoded));
             }
-            if let Ok(decoded) =
-                <NewSweeperTimestampCall as ::ethers::core::abi::AbiDecode>::decode(data)
-            {
+            if let Ok(decoded)
+                = <NewSweeperTimestampCall as ::ethers::core::abi::AbiDecode>::decode(
+                    data,
+                ) {
                 return Ok(Self::NewSweeperTimestamp(decoded));
             }
-            if let Ok(decoded) = <OwnerCall as ::ethers::core::abi::AbiDecode>::decode(data) {
+            if let Ok(decoded)
+                = <OwnerCall as ::ethers::core::abi::AbiDecode>::decode(data) {
                 return Ok(Self::Owner(decoded));
             }
-            if let Ok(decoded) =
-                <PaymentAddressToAccountCall as ::ethers::core::abi::AbiDecode>::decode(data)
-            {
+            if let Ok(decoded)
+                = <PaymentAddressToAccountCall as ::ethers::core::abi::AbiDecode>::decode(
+                    data,
+                ) {
                 return Ok(Self::PaymentAddressToAccount(decoded));
             }
-            if let Ok(decoded) =
-                <PaymentReceivedCall as ::ethers::core::abi::AbiDecode>::decode(data)
-            {
+            if let Ok(decoded)
+                = <PaymentReceivedCall as ::ethers::core::abi::AbiDecode>::decode(data) {
                 return Ok(Self::PaymentReceived(decoded));
             }
-            if let Ok(decoded) = <ReceiverCall as ::ethers::core::abi::AbiDecode>::decode(data) {
+            if let Ok(decoded)
+                = <ReceiverCall as ::ethers::core::abi::AbiDecode>::decode(data) {
                 return Ok(Self::Receiver(decoded));
             }
-            if let Ok(decoded) =
-                <SetTokenApprovalsCall as ::ethers::core::abi::AbiDecode>::decode(data)
-            {
+            if let Ok(decoded)
+                = <SetTokenApprovalsCall as ::ethers::core::abi::AbiDecode>::decode(
+                    data,
+                ) {
                 return Ok(Self::SetTokenApprovals(decoded));
             }
-            if let Ok(decoded) =
-                <SweeperImplementationCall as ::ethers::core::abi::AbiDecode>::decode(data)
-            {
+            if let Ok(decoded)
+                = <SweeperImplementationCall as ::ethers::core::abi::AbiDecode>::decode(
+                    data,
+                ) {
                 return Ok(Self::SweeperImplementation(decoded));
             }
-            if let Ok(decoded) =
-                <TransferOwnershipTimestampCall as ::ethers::core::abi::AbiDecode>::decode(data)
-            {
+            if let Ok(decoded)
+                = <TransferOwnershipTimestampCall as ::ethers::core::abi::AbiDecode>::decode(
+                    data,
+                ) {
                 return Ok(Self::TransferOwnershipTimestamp(decoded));
             }
             Err(::ethers::core::abi::Error::InvalidData.into())
@@ -1089,7 +1164,9 @@ pub mod payment_factory {
                 Self::AccountToPaymentAddress(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
-                Self::CommitNewReceiver(element) => ::ethers::core::abi::AbiEncode::encode(element),
+                Self::CommitNewReceiver(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
                 Self::CommitNewSweeperImplementation(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
@@ -1108,13 +1185,21 @@ pub mod payment_factory {
                 Self::FinalizeNewSweeperImplementation(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
-                Self::FutureOwner(element) => ::ethers::core::abi::AbiEncode::encode(element),
-                Self::FutureReceiver(element) => ::ethers::core::abi::AbiEncode::encode(element),
+                Self::FutureOwner(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::FutureReceiver(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
                 Self::FutureSweeperImplementation(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
-                Self::GetApprovedTokens(element) => ::ethers::core::abi::AbiEncode::encode(element),
-                Self::IsApprovedToken(element) => ::ethers::core::abi::AbiEncode::encode(element),
+                Self::GetApprovedTokens(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::IsApprovedToken(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
                 Self::NewReceiverTimestamp(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
@@ -1125,9 +1210,15 @@ pub mod payment_factory {
                 Self::PaymentAddressToAccount(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
-                Self::PaymentReceived(element) => ::ethers::core::abi::AbiEncode::encode(element),
-                Self::Receiver(element) => ::ethers::core::abi::AbiEncode::encode(element),
-                Self::SetTokenApprovals(element) => ::ethers::core::abi::AbiEncode::encode(element),
+                Self::PaymentReceived(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::Receiver(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::SetTokenApprovals(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
                 Self::SweeperImplementation(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
@@ -1140,36 +1231,60 @@ pub mod payment_factory {
     impl ::core::fmt::Display for PaymentFactoryCalls {
         fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
             match self {
-                Self::ProxyImplementation(element) => ::core::fmt::Display::fmt(element, f),
-                Self::AcceptTransferOwnership(element) => ::core::fmt::Display::fmt(element, f),
-                Self::AccountToPaymentAddress(element) => ::core::fmt::Display::fmt(element, f),
+                Self::ProxyImplementation(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::AcceptTransferOwnership(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::AccountToPaymentAddress(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
                 Self::CommitNewReceiver(element) => ::core::fmt::Display::fmt(element, f),
                 Self::CommitNewSweeperImplementation(element) => {
                     ::core::fmt::Display::fmt(element, f)
                 }
-                Self::CommitTransferOwnership(element) => ::core::fmt::Display::fmt(element, f),
-                Self::CreatePaymentAddress(element) => ::core::fmt::Display::fmt(element, f),
+                Self::CommitTransferOwnership(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::CreatePaymentAddress(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
                 Self::CreatePaymentAddressWithAccount(element) => {
                     ::core::fmt::Display::fmt(element, f)
                 }
-                Self::FinalizeNewReceiver(element) => ::core::fmt::Display::fmt(element, f),
+                Self::FinalizeNewReceiver(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
                 Self::FinalizeNewSweeperImplementation(element) => {
                     ::core::fmt::Display::fmt(element, f)
                 }
                 Self::FutureOwner(element) => ::core::fmt::Display::fmt(element, f),
                 Self::FutureReceiver(element) => ::core::fmt::Display::fmt(element, f),
-                Self::FutureSweeperImplementation(element) => ::core::fmt::Display::fmt(element, f),
+                Self::FutureSweeperImplementation(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
                 Self::GetApprovedTokens(element) => ::core::fmt::Display::fmt(element, f),
                 Self::IsApprovedToken(element) => ::core::fmt::Display::fmt(element, f),
-                Self::NewReceiverTimestamp(element) => ::core::fmt::Display::fmt(element, f),
-                Self::NewSweeperTimestamp(element) => ::core::fmt::Display::fmt(element, f),
+                Self::NewReceiverTimestamp(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::NewSweeperTimestamp(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
                 Self::Owner(element) => ::core::fmt::Display::fmt(element, f),
-                Self::PaymentAddressToAccount(element) => ::core::fmt::Display::fmt(element, f),
+                Self::PaymentAddressToAccount(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
                 Self::PaymentReceived(element) => ::core::fmt::Display::fmt(element, f),
                 Self::Receiver(element) => ::core::fmt::Display::fmt(element, f),
                 Self::SetTokenApprovals(element) => ::core::fmt::Display::fmt(element, f),
-                Self::SweeperImplementation(element) => ::core::fmt::Display::fmt(element, f),
-                Self::TransferOwnershipTimestamp(element) => ::core::fmt::Display::fmt(element, f),
+                Self::SweeperImplementation(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::TransferOwnershipTimestamp(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
             }
         }
     }
@@ -1193,7 +1308,8 @@ pub mod payment_factory {
             Self::CommitNewReceiver(value)
         }
     }
-    impl ::core::convert::From<CommitNewSweeperImplementationCall> for PaymentFactoryCalls {
+    impl ::core::convert::From<CommitNewSweeperImplementationCall>
+    for PaymentFactoryCalls {
         fn from(value: CommitNewSweeperImplementationCall) -> Self {
             Self::CommitNewSweeperImplementation(value)
         }
@@ -1208,7 +1324,8 @@ pub mod payment_factory {
             Self::CreatePaymentAddress(value)
         }
     }
-    impl ::core::convert::From<CreatePaymentAddressWithAccountCall> for PaymentFactoryCalls {
+    impl ::core::convert::From<CreatePaymentAddressWithAccountCall>
+    for PaymentFactoryCalls {
         fn from(value: CreatePaymentAddressWithAccountCall) -> Self {
             Self::CreatePaymentAddressWithAccount(value)
         }
@@ -1218,7 +1335,8 @@ pub mod payment_factory {
             Self::FinalizeNewReceiver(value)
         }
     }
-    impl ::core::convert::From<FinalizeNewSweeperImplementationCall> for PaymentFactoryCalls {
+    impl ::core::convert::From<FinalizeNewSweeperImplementationCall>
+    for PaymentFactoryCalls {
         fn from(value: FinalizeNewSweeperImplementationCall) -> Self {
             Self::FinalizeNewSweeperImplementation(value)
         }
@@ -1302,7 +1420,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     pub struct ProxyImplementationReturn(pub ::ethers::core::types::Address);
     ///Container type for all return fields from the `account_to_payment_address` function with signature `account_to_payment_address(address)` and selector `0x0b810230`
@@ -1314,7 +1432,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     pub struct AccountToPaymentAddressReturn(pub ::ethers::core::types::Address);
     ///Container type for all return fields from the `future_owner` function with signature `future_owner()` and selector `0x1ec0cdc1`
@@ -1326,7 +1444,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     pub struct FutureOwnerReturn(pub ::ethers::core::types::Address);
     ///Container type for all return fields from the `future_receiver` function with signature `future_receiver()` and selector `0x3bea9ddd`
@@ -1338,7 +1456,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     pub struct FutureReceiverReturn(pub ::ethers::core::types::Address);
     ///Container type for all return fields from the `future_sweeper_implementation` function with signature `future_sweeper_implementation()` and selector `0x4333d02b`
@@ -1350,7 +1468,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     pub struct FutureSweeperImplementationReturn(pub ::ethers::core::types::Address);
     ///Container type for all return fields from the `get_approved_tokens` function with signature `get_approved_tokens()` and selector `0x79aaf078`
@@ -1362,9 +1480,11 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
-    pub struct GetApprovedTokensReturn(pub ::std::vec::Vec<::ethers::core::types::Address>);
+    pub struct GetApprovedTokensReturn(
+        pub ::std::vec::Vec<::ethers::core::types::Address>,
+    );
     ///Container type for all return fields from the `is_approved_token` function with signature `is_approved_token(address)` and selector `0x363b5b3e`
     #[derive(
         Clone,
@@ -1374,7 +1494,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     pub struct IsApprovedTokenReturn(pub bool);
     ///Container type for all return fields from the `new_receiver_timestamp` function with signature `new_receiver_timestamp()` and selector `0xf85c2e83`
@@ -1386,7 +1506,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     pub struct NewReceiverTimestampReturn(pub ::ethers::core::types::U256);
     ///Container type for all return fields from the `new_sweeper_timestamp` function with signature `new_sweeper_timestamp()` and selector `0x05daefa8`
@@ -1398,7 +1518,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     pub struct NewSweeperTimestampReturn(pub ::ethers::core::types::U256);
     ///Container type for all return fields from the `owner` function with signature `owner()` and selector `0x8da5cb5b`
@@ -1410,7 +1530,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     pub struct OwnerReturn(pub ::ethers::core::types::Address);
     ///Container type for all return fields from the `payment_address_to_account` function with signature `payment_address_to_account(address)` and selector `0xe0934982`
@@ -1422,7 +1542,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     pub struct PaymentAddressToAccountReturn(pub ::ethers::core::types::Address);
     ///Container type for all return fields from the `payment_received` function with signature `payment_received(address,uint256)` and selector `0x7414b098`
@@ -1434,7 +1554,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     pub struct PaymentReceivedReturn(pub bool);
     ///Container type for all return fields from the `receiver` function with signature `receiver()` and selector `0xf7260d3e`
@@ -1446,7 +1566,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     pub struct ReceiverReturn(pub ::ethers::core::types::Address);
     ///Container type for all return fields from the `sweeper_implementation` function with signature `sweeper_implementation()` and selector `0x791cc746`
@@ -1458,7 +1578,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     pub struct SweeperImplementationReturn(pub ::ethers::core::types::Address);
     ///Container type for all return fields from the `transfer_ownership_timestamp` function with signature `transfer_ownership_timestamp()` and selector `0x4598cb25`
@@ -1470,7 +1590,7 @@ pub mod payment_factory {
         Debug,
         PartialEq,
         Eq,
-        Hash,
+        Hash
     )]
     pub struct TransferOwnershipTimestampReturn(pub ::ethers::core::types::U256);
 }
