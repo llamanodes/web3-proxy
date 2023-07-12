@@ -2,8 +2,10 @@ mod common;
 
 use crate::common::admin_deposits::get_admin_deposits;
 use crate::common::admin_increases_balance::admin_increase_balance;
+use crate::common::anvil::TestAnvil;
 use crate::common::create_admin::create_user_as_admin;
 use crate::common::create_user::create_user;
+use crate::common::mysql::TestMysql;
 use crate::common::referral::{
     get_referral_code, get_shared_referral_codes, get_used_referral_codes, UserSharedReferralInfo,
     UserUsedReferralInfo,
@@ -36,7 +38,11 @@ struct LoginPostResponse {
 #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
 #[test_log::test(tokio::test)]
 async fn test_log_in_and_out() {
-    let x = TestApp::spawn(31337, true).await;
+    let a = TestAnvil::spawn(31337).await;
+
+    let db = TestMysql::spawn().await;
+
+    let x = TestApp::spawn(a, Some(db)).await;
 
     let r = reqwest::Client::new();
 
@@ -92,7 +98,13 @@ async fn test_log_in_and_out() {
 #[test_log::test(tokio::test)]
 async fn test_admin_balance_increase() {
     info!("Starting admin can increase balance");
-    let x = TestApp::spawn(31337, true).await;
+
+    let a: TestAnvil = TestAnvil::spawn(31337).await;
+
+    let db = TestMysql::spawn().await;
+
+    let x = TestApp::spawn(a, Some(db)).await;
+
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
@@ -139,7 +151,13 @@ async fn test_admin_balance_increase() {
 #[test_log::test(tokio::test)]
 async fn test_user_balance_decreases() {
     info!("Starting balance decreases with usage test");
-    let x = TestApp::spawn(31337, true).await;
+
+    let a: TestAnvil = TestAnvil::spawn(31337).await;
+
+    let db = TestMysql::spawn().await;
+
+    let x = TestApp::spawn(a, Some(db)).await;
+
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
@@ -241,7 +259,13 @@ async fn test_user_balance_decreases() {
 #[test_log::test(tokio::test)]
 async fn test_referral_bonus_non_concurrent() {
     info!("Starting referral bonus test");
-    let x = TestApp::spawn(31337, true).await;
+
+    let a: TestAnvil = TestAnvil::spawn(31337).await;
+
+    let db = TestMysql::spawn().await;
+
+    let x = TestApp::spawn(a, Some(db)).await;
+
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
@@ -384,7 +408,13 @@ async fn test_referral_bonus_non_concurrent() {
 #[test_log::test(tokio::test)]
 async fn test_referral_bonus_concurrent_referrer_only() {
     info!("Starting referral bonus test");
-    let x = TestApp::spawn(31337, true).await;
+
+    let a = TestAnvil::spawn(31337).await;
+
+    let db = TestMysql::spawn().await;
+
+    let x = TestApp::spawn(a, Some(db)).await;
+
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
@@ -538,7 +568,13 @@ async fn test_referral_bonus_concurrent_referrer_only() {
 #[test_log::test(tokio::test)]
 async fn test_referral_bonus_concurrent_referrer_and_user() {
     info!("Starting referral bonus test");
-    let x = TestApp::spawn(31337, true).await;
+
+    let a = TestAnvil::spawn(31337).await;
+
+    let db = TestMysql::spawn().await;
+
+    let x = TestApp::spawn(a, Some(db)).await;
+
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()

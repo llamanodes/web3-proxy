@@ -4,8 +4,10 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use crate::common::admin_increases_balance::admin_increase_balance;
+use crate::common::anvil::TestAnvil;
 use crate::common::create_admin::create_user_as_admin;
 use crate::common::create_user::create_user;
+use crate::common::mysql::TestMysql;
 use crate::common::user_balance::user_get_balance;
 use crate::common::TestApp;
 use migration::sea_orm::prelude::Decimal;
@@ -15,7 +17,11 @@ use tracing::info;
 #[ignore = "under construction"]
 #[test_log::test(tokio::test)]
 async fn test_admin_imitate_user() {
-    let x = TestApp::spawn(31337, true).await;
+    let a: TestAnvil = TestAnvil::spawn(31337).await;
+
+    let db = TestMysql::spawn().await;
+
+    let x = TestApp::spawn(a, Some(db)).await;
 
     todo!();
 }
@@ -24,7 +30,13 @@ async fn test_admin_imitate_user() {
 #[test_log::test(tokio::test)]
 async fn test_admin_grant_credits() {
     info!("Starting admin grant credits test");
-    let x = TestApp::spawn(31337, true).await;
+
+    let a: TestAnvil = TestAnvil::spawn(31337).await;
+
+    let db = TestMysql::spawn().await;
+
+    let x = TestApp::spawn(a, Some(db)).await;
+
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
         .build()
@@ -63,6 +75,10 @@ async fn test_admin_grant_credits() {
 #[ignore = "under construction"]
 #[test_log::test(tokio::test)]
 async fn test_admin_change_user_tier() {
-    let x = TestApp::spawn(31337, true).await;
+    let anvil = TestAnvil::spawn(31337).await;
+    let db = TestMysql::spawn().await;
+
+    let x = TestApp::spawn(anvil, Some(db)).await;
+
     todo!();
 }

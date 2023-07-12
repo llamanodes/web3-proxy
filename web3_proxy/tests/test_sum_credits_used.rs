@@ -1,8 +1,9 @@
 mod common;
 
 use crate::common::{
-    admin_increases_balance::admin_increase_balance, create_admin::create_user_as_admin,
-    create_user::create_user, rpc_key::user_get_provider, user_balance::user_get_balance, TestApp,
+    admin_increases_balance::admin_increase_balance, anvil::TestAnvil,
+    create_admin::create_user_as_admin, create_user::create_user, mysql::TestMysql,
+    rpc_key::user_get_provider, user_balance::user_get_balance, TestApp,
 };
 use ethers::prelude::U64;
 use migration::sea_orm::prelude::Decimal;
@@ -14,7 +15,11 @@ use web3_proxy::balance::Balance;
 #[test_log::test(tokio::test)]
 async fn test_sum_credits_used() {
     // chain_id 999_001_999 costs $.10/CU
-    let x = TestApp::spawn(999_001_999, true).await;
+    let a = TestAnvil::spawn(999_001_999).await;
+
+    let db = TestMysql::spawn().await;
+
+    let x = TestApp::spawn(a, Some(db)).await;
 
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
