@@ -4,10 +4,11 @@ use crate::common::{
     admin_increases_balance::admin_increase_balance, create_admin::create_user_as_admin,
     create_user::create_user, rpc_key::user_get_provider, user_balance::user_get_balance, TestApp,
 };
+use ethers::prelude::U64;
 use migration::sea_orm::prelude::Decimal;
 use std::time::Duration;
 use tracing::info;
-use web3_proxy::{balance::Balance, rpcs::blockchain::ArcBlock};
+use web3_proxy::balance::Balance;
 
 // TODO: #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
 #[test_log::test(tokio::test)]
@@ -48,7 +49,7 @@ async fn test_sum_credits_used() {
 
     // make one free request against the public RPC of 16 CU
     x.proxy_provider
-        .request::<_, Option<ArcBlock>>("eth_blockNumber", ("latest", false))
+        .request::<_, Option<U64>>("eth_blockNumber", ("latest", false))
         .await
         .unwrap();
 
@@ -59,7 +60,7 @@ async fn test_sum_credits_used() {
 
     // make one free request against the public RPC of 16 CU
     user_proxy_provider
-        .request::<_, Option<ArcBlock>>("eth_blockNumber", ("latest", false))
+        .request::<_, Option<U64>>("eth_blockNumber", ("latest", false))
         .await
         .unwrap();
 
@@ -98,13 +99,13 @@ async fn test_sum_credits_used() {
 
     // make one public rpc request of 16 CU
     x.proxy_provider
-        .request::<_, Option<ArcBlock>>("eth_blockNumber", ("latest", false))
+        .request::<_, Option<U64>>("eth_blockNumber", ("latest", false))
         .await
         .unwrap();
 
     // make one authenticated rpc request of 16 CU
     user_proxy_provider
-        .request::<_, Option<ArcBlock>>("eth_blockNumber", ("latest", false))
+        .request::<_, Option<U64>>("eth_blockNumber", ("latest", false))
         .await
         .unwrap();
 
@@ -139,7 +140,7 @@ async fn test_sum_credits_used() {
     // make ten rpc request of 16 CU
     for _ in 0..10 {
         user_proxy_provider
-            .request::<_, Option<ArcBlock>>("eth_blockNumber", ())
+            .request::<_, Option<U64>>("eth_blockNumber", ())
             .await
             .unwrap();
     }
