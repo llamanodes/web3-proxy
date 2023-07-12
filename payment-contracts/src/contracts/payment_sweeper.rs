@@ -7,14 +7,16 @@ pub use payment_sweeper::*;
     clippy::upper_case_acronyms,
     clippy::type_complexity,
     dead_code,
-    non_camel_case_types,
+    non_camel_case_types
 )]
 pub mod payment_sweeper {
     #[rustfmt::skip]
     const __ABI: &str = "[\n    {\n        \"stateMutability\": \"nonpayable\",\n        \"type\": \"constructor\",\n        \"inputs\": [\n            {\n                \"name\": \"_factory\",\n                \"type\": \"address\"\n            }\n        ],\n        \"outputs\": []\n    },\n    {\n        \"stateMutability\": \"nonpayable\",\n        \"type\": \"function\",\n        \"name\": \"send_token\",\n        \"inputs\": [\n            {\n                \"name\": \"_token\",\n                \"type\": \"address\"\n            },\n            {\n                \"name\": \"_amount\",\n                \"type\": \"uint256\"\n            }\n        ],\n        \"outputs\": []\n    },\n    {\n        \"stateMutability\": \"nonpayable\",\n        \"type\": \"function\",\n        \"name\": \"sweep_token_balance\",\n        \"inputs\": [\n            {\n                \"name\": \"_token\",\n                \"type\": \"address\"\n            }\n        ],\n        \"outputs\": []\n    },\n    {\n        \"stateMutability\": \"nonpayable\",\n        \"type\": \"function\",\n        \"name\": \"recover_token_balance\",\n        \"inputs\": [\n            {\n                \"name\": \"_token\",\n                \"type\": \"address\"\n            }\n        ],\n        \"outputs\": []\n    },\n    {\n        \"stateMutability\": \"view\",\n        \"type\": \"function\",\n        \"name\": \"FACTORY\",\n        \"inputs\": [],\n        \"outputs\": [\n            {\n                \"name\": \"\",\n                \"type\": \"address\"\n            }\n        ]\n    }\n]";
     ///The parsed JSON ABI of the contract.
-    pub static PAYMENTSWEEPER_ABI: ::ethers::contract::Lazy<::ethers::core::abi::Abi> = ::ethers::contract::Lazy::new(||
-    ::ethers::core::utils::__serde_json::from_str(__ABI).expect("ABI is always valid"));
+    pub static PAYMENTSWEEPER_ABI: ::ethers::contract::Lazy<::ethers::core::abi::Abi> =
+        ::ethers::contract::Lazy::new(|| {
+            ::ethers::core::utils::__serde_json::from_str(__ABI).expect("ABI is always valid")
+        });
     pub struct PaymentSweeper<M>(::ethers::contract::Contract<M>);
     impl<M> ::core::clone::Clone for PaymentSweeper<M> {
         fn clone(&self) -> Self {
@@ -34,7 +36,9 @@ pub mod payment_sweeper {
     }
     impl<M> ::core::fmt::Debug for PaymentSweeper<M> {
         fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-            f.debug_tuple(stringify!(PaymentSweeper)).field(&self.address()).finish()
+            f.debug_tuple(stringify!(PaymentSweeper))
+                .field(&self.address())
+                .finish()
         }
     }
     impl<M: ::ethers::providers::Middleware> PaymentSweeper<M> {
@@ -44,21 +48,16 @@ pub mod payment_sweeper {
             address: T,
             client: ::std::sync::Arc<M>,
         ) -> Self {
-            Self(
-                ::ethers::contract::Contract::new(
-                    address.into(),
-                    PAYMENTSWEEPER_ABI.clone(),
-                    client,
-                ),
-            )
+            Self(::ethers::contract::Contract::new(
+                address.into(),
+                PAYMENTSWEEPER_ABI.clone(),
+                client,
+            ))
         }
         ///Calls the contract's `FACTORY` (0x2dd31000) function
         pub fn factory(
             &self,
-        ) -> ::ethers::contract::builders::ContractCall<
-            M,
-            ::ethers::core::types::Address,
-        > {
+        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::Address> {
             self.0
                 .method_hash([45, 211, 16, 0], ())
                 .expect("method not found (this should never happen)")
@@ -93,7 +92,8 @@ pub mod payment_sweeper {
         }
     }
     impl<M: ::ethers::providers::Middleware> From<::ethers::contract::Contract<M>>
-    for PaymentSweeper<M> {
+        for PaymentSweeper<M>
+    {
         fn from(contract: ::ethers::contract::Contract<M>) -> Self {
             Self::new(contract.address(), contract.client())
         }
@@ -107,7 +107,7 @@ pub mod payment_sweeper {
         Debug,
         PartialEq,
         Eq,
-        Hash
+        Hash,
     )]
     #[ethcall(name = "FACTORY", abi = "FACTORY()")]
     pub struct FactoryCall;
@@ -120,7 +120,7 @@ pub mod payment_sweeper {
         Debug,
         PartialEq,
         Eq,
-        Hash
+        Hash,
     )]
     #[ethcall(name = "recover_token_balance", abi = "recover_token_balance(address)")]
     pub struct RecoverTokenBalanceCall {
@@ -135,7 +135,7 @@ pub mod payment_sweeper {
         Debug,
         PartialEq,
         Eq,
-        Hash
+        Hash,
     )]
     #[ethcall(name = "send_token", abi = "send_token(address,uint256)")]
     pub struct SendTokenCall {
@@ -151,7 +151,7 @@ pub mod payment_sweeper {
         Debug,
         PartialEq,
         Eq,
-        Hash
+        Hash,
     )]
     #[ethcall(name = "sweep_token_balance", abi = "sweep_token_balance(address)")]
     pub struct SweepTokenBalanceCall {
@@ -170,24 +170,20 @@ pub mod payment_sweeper {
             data: impl AsRef<[u8]>,
         ) -> ::core::result::Result<Self, ::ethers::core::abi::AbiError> {
             let data = data.as_ref();
-            if let Ok(decoded)
-                = <FactoryCall as ::ethers::core::abi::AbiDecode>::decode(data) {
+            if let Ok(decoded) = <FactoryCall as ::ethers::core::abi::AbiDecode>::decode(data) {
                 return Ok(Self::Factory(decoded));
             }
-            if let Ok(decoded)
-                = <RecoverTokenBalanceCall as ::ethers::core::abi::AbiDecode>::decode(
-                    data,
-                ) {
+            if let Ok(decoded) =
+                <RecoverTokenBalanceCall as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
                 return Ok(Self::RecoverTokenBalance(decoded));
             }
-            if let Ok(decoded)
-                = <SendTokenCall as ::ethers::core::abi::AbiDecode>::decode(data) {
+            if let Ok(decoded) = <SendTokenCall as ::ethers::core::abi::AbiDecode>::decode(data) {
                 return Ok(Self::SendToken(decoded));
             }
-            if let Ok(decoded)
-                = <SweepTokenBalanceCall as ::ethers::core::abi::AbiDecode>::decode(
-                    data,
-                ) {
+            if let Ok(decoded) =
+                <SweepTokenBalanceCall as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
                 return Ok(Self::SweepTokenBalance(decoded));
             }
             Err(::ethers::core::abi::Error::InvalidData.into())
@@ -200,12 +196,8 @@ pub mod payment_sweeper {
                 Self::RecoverTokenBalance(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
-                Self::SendToken(element) => {
-                    ::ethers::core::abi::AbiEncode::encode(element)
-                }
-                Self::SweepTokenBalance(element) => {
-                    ::ethers::core::abi::AbiEncode::encode(element)
-                }
+                Self::SendToken(element) => ::ethers::core::abi::AbiEncode::encode(element),
+                Self::SweepTokenBalance(element) => ::ethers::core::abi::AbiEncode::encode(element),
             }
         }
     }
@@ -213,9 +205,7 @@ pub mod payment_sweeper {
         fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
             match self {
                 Self::Factory(element) => ::core::fmt::Display::fmt(element, f),
-                Self::RecoverTokenBalance(element) => {
-                    ::core::fmt::Display::fmt(element, f)
-                }
+                Self::RecoverTokenBalance(element) => ::core::fmt::Display::fmt(element, f),
                 Self::SendToken(element) => ::core::fmt::Display::fmt(element, f),
                 Self::SweepTokenBalance(element) => ::core::fmt::Display::fmt(element, f),
             }
@@ -250,7 +240,7 @@ pub mod payment_sweeper {
         Debug,
         PartialEq,
         Eq,
-        Hash
+        Hash,
     )]
     pub struct FactoryReturn(pub ::ethers::core::types::Address);
 }

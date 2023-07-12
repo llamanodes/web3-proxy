@@ -22,7 +22,7 @@ use crate::rpcs::many::Web3Rpcs;
 use crate::rpcs::one::Web3Rpc;
 use crate::rpcs::provider::{connect_http, EthersHttpProvider};
 use crate::rpcs::transactions::TxStatus;
-use crate::stats::{AppStat, StatBuffer, FlushedStats};
+use crate::stats::{AppStat, FlushedStats, StatBuffer};
 use anyhow::Context;
 use axum::http::StatusCode;
 use chrono::Utc;
@@ -50,7 +50,7 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{atomic, Arc};
 use std::time::Duration;
-use tokio::sync::{broadcast, mpsc, watch, Semaphore, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot, watch, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tracing::{error, info, trace, warn, Level};
@@ -99,7 +99,8 @@ pub struct Web3ProxyApp {
     /// rate limit anonymous users
     pub frontend_ip_rate_limiter: Option<DeferredRateLimiter<IpAddr>>,
     /// rate limit authenticated users
-    pub frontend_registered_user_rate_limiter: Option<DeferredRateLimiter<RegisteredUserRateLimitKey>>,
+    pub frontend_registered_user_rate_limiter:
+        Option<DeferredRateLimiter<RegisteredUserRateLimitKey>>,
     /// concurrent/parallel request limits for anonymous users
     pub ip_semaphores: Cache<IpAddr, Arc<Semaphore>>,
     pub kafka_producer: Option<rdkafka::producer::FutureProducer>,
@@ -434,9 +435,8 @@ impl Web3ProxyApp {
                 // these two rate limiters can share the base limiter
                 // these are deferred rate limiters because we don't want redis network requests on the hot path
                 // TODO: take cache_size from config
-                frontend_ip_rate_limiter = Some(
-                    DeferredRateLimiter::new(20_000, "ip", rpc_rrl.clone(), None).await,
-                );
+                frontend_ip_rate_limiter =
+                    Some(DeferredRateLimiter::new(20_000, "ip", rpc_rrl.clone(), None).await);
                 frontend_registered_user_rate_limiter =
                     Some(DeferredRateLimiter::new(20_000, "key", rpc_rrl, None).await);
             }
@@ -698,7 +698,9 @@ impl Web3ProxyApp {
     }
 
     pub fn influxdb_client(&self) -> Web3ProxyResult<&influxdb2::Client> {
-        self.influxdb_client.as_ref().ok_or(Web3ProxyError::NoDatabase)
+        self.influxdb_client
+            .as_ref()
+            .ok_or(Web3ProxyError::NoDatabase)
     }
 
     /// an ethers provider that you can use with ether's abigen.
@@ -1140,15 +1142,19 @@ impl Web3ProxyApp {
             .await
         {
             Ok(response_data) => {
-                request_metadata.error_response.store(false, Ordering::Release);
+                request_metadata
+                    .error_response
+                    .store(false, Ordering::Release);
 
                 (StatusCode::OK, response_data)
-            },
+            }
             Err(err) => {
-                request_metadata.error_response.store(true, Ordering::Release);
+                request_metadata
+                    .error_response
+                    .store(true, Ordering::Release);
 
                 err.as_response_parts()
-            },
+            }
         };
 
         let response = JsonRpcForwardedResponse::from_response_data(response_data, response_id);
@@ -1489,7 +1495,7 @@ impl Web3ProxyApp {
                                 Err(Web3ProxyError::NoDatabase) => {},
                                 Err(err) => {
                                     warn!(
-                                        ?err, 
+                                        ?err,
                                         "unable to save stats for eth_sendRawTransaction",
                                     )
                                 }
