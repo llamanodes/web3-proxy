@@ -199,7 +199,7 @@ async fn _status(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, Bytes) {
             MokaCacheSerializer(&app.ip_semaphores),
             MokaCacheSerializer(&app.jsonrpc_response_cache),
             MokaCacheSerializer(&app.rpc_secret_key_cache),
-            MokaCacheSerializer(&app.user_balance_cache),
+            MokaCacheSerializer(&app.user_balance_cache.0),
             MokaCacheSerializer(&app.user_semaphores),
         ],
         "chain_id": app.config.chain_id,

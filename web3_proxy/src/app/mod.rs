@@ -373,10 +373,11 @@ impl Web3ProxyApp {
             .build();
 
         // TODO: TTL left low, this could also be a solution instead of modifiying the cache, that may be disgusting across threads / slow anyways
-        let user_balance_cache = CacheBuilder::new(10_000)
+        let user_balance_cache: UserBalanceCache = CacheBuilder::new(10_000)
             .name("user_balance")
             .time_to_live(Duration::from_secs(600))
-            .build();
+            .build()
+            .into();
 
         // create a channel for receiving stats
         // we do this in a channel so we don't slow down our response to the users

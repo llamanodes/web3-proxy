@@ -1125,40 +1125,6 @@ impl Web3ProxyApp {
         }
     }
 
-    /// Get the balance for the user.
-    ///
-    /// If a subuser calls this function, the subuser needs to have first attained the user_id that the rpc key belongs to.
-    /// This function should be called anywhere where balance is required (i.e. only rpc calls, I believe ... non-rpc calls don't really require balance)
-    pub(crate) async fn balance_checks(
-        &self,
-        user_id: u64,
-    ) -> Web3ProxyResult<Arc<AsyncRwLock<Balance>>> {
-        // self.user_balance_cache
-        //     .try_get_with(user_id, async move {
-        //         let db_replica = self.db_replica()?;
-        //         let x = match Balance::try_from_db(db_replica.as_ref(), user_id).await? {
-        //             None => Err(Web3ProxyError::InvalidUserKey),
-        //             Some(x) => Ok(x),
-        //         }?;
-        //         trace!(?x, "from database");
-        //         Ok(Arc::new(AsyncRwLock::new(x)))
-        //     })
-        //     .await
-        //     .map_err(Into::into)
-
-        let db_replica = self.db_replica()?;
-
-        // TODO: get this from the cache
-        let balance = match Balance::try_from_db(db_replica.as_ref(), user_id).await? {
-            None => Err(Web3ProxyError::InvalidUserKey),
-            Some(x) => Ok(x),
-        }?;
-
-        trace!(?balance);
-
-        Ok(Arc::new(AsyncRwLock::new(balance)))
-    }
-
     // check the local cache for user data, or query the database
     pub(crate) async fn authorization_checks(
         &self,
@@ -1257,13 +1223,15 @@ impl Web3ProxyApp {
                         "related user tier not found, but every user should have a tier",
                     )?;
 
-                let latest_balance = self.balance_checks(rpc_key_model.user_id).await?;
+                let latest_balance = self
+                    .user_balance_cache
+                    .get_or_insert(db_replica.as_ref(), rpc_key_model.user_id)
+                    .await?;
 
-                // TODO: Do the logic here, as to how to treat the user, based on balance and initial check
-                // Clear the cache (not the login!) in the stats if a tier-change happens (clear, but don't modify roles)
                 let paid_credits_used: bool;
                 if let Some(downgrade_user_tier) = user_tier_model.downgrade_tier_id {
                     trace!("user belongs to a premium tier. checking balance");
+
                     let active_premium = latest_balance.read().await.active_premium();
 
                     // only consider the user premium if they have paid at least $10 and have a balance > $.01

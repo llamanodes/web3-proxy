@@ -390,13 +390,13 @@ pub async fn user_balance_post(
 
             receipt.save(&txn).await?;
 
+            app.user_balance_cache.0.invalidate(&recipient.id).await;
+
             // Remove all RPC-keys owned by this user from the cache, s.t. rate limits are re-calculated
             let rpc_keys = rpc_key::Entity::find()
                 .filter(rpc_key::Column::UserId.eq(recipient.id))
                 .all(&txn)
                 .await?;
-
-            app.user_balance_cache.invalidate(&recipient.id).await;
 
             for rpc_key_entity in rpc_keys {
                 app.rpc_secret_key_cache

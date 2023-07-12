@@ -167,7 +167,7 @@ impl StatBuffer {
                                         } else {
                                             // was premium, but isn't anymore due to paying for this query. clear the cache
                                             // TODO: stop at <$0.000001 instead of negative?
-                                            self.user_balance_cache.invalidate(&user_balance.user_id).await;
+                                            self.user_balance_cache.0.invalidate(&user_balance.user_id).await;
 
                                             let rpc_keys = rpc_key::Entity::find()
                                                 .filter(rpc_key::Column::UserId.eq(user_id))

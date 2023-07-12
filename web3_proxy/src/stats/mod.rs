@@ -19,22 +19,19 @@ use entities::{referee, referrer, rpc_accounting_v2};
 use influxdb2::models::DataPoint;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
-    self, ActiveModelTrait, ColumnTrait, DatabaseConnection, DbConn, EntityTrait, IntoActiveModel,
+    self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
     QueryFilter, QuerySelect, TransactionTrait,
 };
 use migration::{Expr, LockType, OnConflict};
 use num_traits::ToPrimitive;
 use parking_lot::Mutex;
 use std::borrow::Cow;
-use std::default::Default;
 use std::mem;
 use std::num::NonZeroU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use tokio::sync::RwLock as AsyncRwLock;
 use tracing::{error, instrument, trace};
 
-use crate::balance::Balance;
 pub use stat_buffer::{SpawnedStatBuffer, StatBuffer};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -331,30 +328,6 @@ impl BufferedRpcQueryStats {
         Ok(())
     }
 
-    // TODO: This is basically a duplicate with the balance_checks, except the database
-    // TODO: Please refactor this. Also there are small differences, like the Error is 0
-    async fn _get_user_balance(
-        &self,
-        user_id: u64,
-        user_balance_cache: &UserBalanceCache,
-        db_conn: &DbConn,
-    ) -> Web3ProxyResult<Arc<AsyncRwLock<Balance>>> {
-        if user_id == 0 {
-            return Ok(Arc::new(AsyncRwLock::new(Balance::default())));
-        }
-
-        // TODO: get this from the cache
-
-        let x = match Balance::try_from_db(db_conn, user_id).await? {
-            Some(x) => x,
-            None => return Err(Web3ProxyError::InvalidUserKey),
-        };
-
-        let x = Arc::new(AsyncRwLock::new(x));
-
-        Ok(x)
-    }
-
     // TODO: take a db transaction instead so that we can batch?
     async fn save_db(
         self,
@@ -398,8 +371,8 @@ impl BufferedRpcQueryStats {
             {
                 Some((referral_entity, Some(referrer))) => {
                     // Get the balance for the referrer, see if they're premium or not
-                    let referrer_balance = self
-                        ._get_user_balance(referrer.user_id, user_balance_cache, db_conn)
+                    let referrer_balance = user_balance_cache
+                        .get_or_insert(db_conn, referrer.user_id)
                         .await?;
 
                     // Just to keep locking simple, read and clone. if the value is slightly delayed, that is okay
@@ -467,7 +440,7 @@ impl BufferedRpcQueryStats {
                         referral_entity.save(&txn).await?;
 
                         if invalidate_sender_balance_cache {
-                            user_balance_cache.invalidate(&sender_user_id).await;
+                            user_balance_cache.0.invalidate(&sender_user_id).await;
                         }
                     }
                 }
