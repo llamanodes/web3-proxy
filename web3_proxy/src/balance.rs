@@ -9,6 +9,8 @@ use migration::sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use migration::{Func, SimpleExpr};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
+use tracing::info;
 
 /// Implements the balance getter which combines data from several tables
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -215,6 +217,9 @@ impl Balance {
             total_spent_paid_credits,
             user_id,
         };
+
+        // TODO: lower log level
+        info!("balance: {:#}", json!(&balance));
 
         // Return None if there is no entry
         Ok(Some(balance))

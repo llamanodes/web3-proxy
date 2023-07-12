@@ -1165,158 +1165,155 @@ impl Web3ProxyApp {
         proxy_mode: ProxyMode,
         rpc_secret_key: &RpcSecretKey,
     ) -> Web3ProxyResult<AuthorizationChecks> {
-        self.rpc_secret_key_cache
-            .try_get_with_by_ref(rpc_secret_key, async move {
-                // trace!(?rpc_secret_key, "user cache miss");
+        // self.rpc_secret_key_cache
+        //     .try_get_with_by_ref(rpc_secret_key, async move {
+        //         // trace!(?rpc_secret_key, "user cache miss");
 
-                let db_replica = self.db_replica()?;
+        let db_replica = self.db_replica()?;
 
-                // TODO: join the user table to this to return the User? we don't always need it
-                // TODO: join on secondary users
-                // TODO: join on user tier
-                match rpc_key::Entity::find()
-                    .filter(rpc_key::Column::SecretKey.eq(<Uuid>::from(*rpc_secret_key)))
-                    .filter(rpc_key::Column::Active.eq(true))
+        // TODO: join the user table to this to return the User? we don't always need it
+        // TODO: join on secondary users
+        // TODO: join on user tier
+        let x = match rpc_key::Entity::find()
+            .filter(rpc_key::Column::SecretKey.eq(<Uuid>::from(*rpc_secret_key)))
+            .filter(rpc_key::Column::Active.eq(true))
+            .one(db_replica.as_ref())
+            .await?
+        {
+            Some(rpc_key_model) => {
+                // TODO: move these splits into helper functions
+                // TODO: can we have sea orm handle this for us?
+                let allowed_ips: Option<Vec<IpNet>> =
+                    if let Some(allowed_ips) = rpc_key_model.allowed_ips {
+                        let x = allowed_ips
+                            .split(',')
+                            .map(|x| x.trim().parse::<IpNet>())
+                            .collect::<Result<Vec<_>, _>>()?;
+                        Some(x)
+                    } else {
+                        None
+                    };
+
+                let allowed_origins: Option<Vec<Origin>> =
+                    if let Some(allowed_origins) = rpc_key_model.allowed_origins {
+                        // TODO: do this without collecting twice?
+                        let x = allowed_origins
+                            .split(',')
+                            .map(|x| HeaderValue::from_str(x.trim()))
+                            .collect::<Result<Vec<_>, _>>()?
+                            .into_iter()
+                            .map(|x| Origin::decode(&mut [x].iter()))
+                            .collect::<Result<Vec<_>, _>>()?;
+
+                        Some(x)
+                    } else {
+                        None
+                    };
+
+                let allowed_referers: Option<Vec<Referer>> =
+                    if let Some(allowed_referers) = rpc_key_model.allowed_referers {
+                        let x = allowed_referers
+                            .split(',')
+                            .map(|x| {
+                                x.trim()
+                                    .parse::<Referer>()
+                                    .or(Err(Web3ProxyError::InvalidReferer))
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+
+                        Some(x)
+                    } else {
+                        None
+                    };
+
+                let allowed_user_agents: Option<Vec<UserAgent>> =
+                    if let Some(allowed_user_agents) = rpc_key_model.allowed_user_agents {
+                        let x: Result<Vec<_>, _> = allowed_user_agents
+                            .split(',')
+                            .map(|x| {
+                                x.trim()
+                                    .parse::<UserAgent>()
+                                    .or(Err(Web3ProxyError::InvalidUserAgent))
+                            })
+                            .collect();
+
+                        Some(x?)
+                    } else {
+                        None
+                    };
+
+                // Get the user_tier
+                let user_model = user::Entity::find_by_id(rpc_key_model.user_id)
                     .one(db_replica.as_ref())
                     .await?
-                {
-                    Some(rpc_key_model) => {
-                        // TODO: move these splits into helper functions
-                        // TODO: can we have sea orm handle this for us?
-                        let allowed_ips: Option<Vec<IpNet>> =
-                            if let Some(allowed_ips) = rpc_key_model.allowed_ips {
-                                let x = allowed_ips
-                                    .split(',')
-                                    .map(|x| x.trim().parse::<IpNet>())
-                                    .collect::<Result<Vec<_>, _>>()?;
-                                Some(x)
-                            } else {
-                                None
-                            };
+                    .web3_context(
+                        "user model was not found, but every rpc_key should have a user",
+                    )?;
 
-                        let allowed_origins: Option<Vec<Origin>> =
-                            if let Some(allowed_origins) = rpc_key_model.allowed_origins {
-                                // TODO: do this without collecting twice?
-                                let x = allowed_origins
-                                    .split(',')
-                                    .map(|x| HeaderValue::from_str(x.trim()))
-                                    .collect::<Result<Vec<_>, _>>()?
-                                    .into_iter()
-                                    .map(|x| Origin::decode(&mut [x].iter()))
-                                    .collect::<Result<Vec<_>, _>>()?;
+                let mut user_tier_model = user_tier::Entity::find_by_id(user_model.user_tier_id)
+                    .one(db_replica.as_ref())
+                    .await?
+                    .web3_context(
+                        "related user tier not found, but every user should have a tier",
+                    )?;
 
-                                Some(x)
-                            } else {
-                                None
-                            };
+                let latest_balance = self.balance_checks(rpc_key_model.user_id).await?;
 
-                        let allowed_referers: Option<Vec<Referer>> =
-                            if let Some(allowed_referers) = rpc_key_model.allowed_referers {
-                                let x = allowed_referers
-                                    .split(',')
-                                    .map(|x| {
-                                        x.trim()
-                                            .parse::<Referer>()
-                                            .or(Err(Web3ProxyError::InvalidReferer))
-                                    })
-                                    .collect::<Result<Vec<_>, _>>()?;
+                // TODO: Do the logic here, as to how to treat the user, based on balance and initial check
+                // Clear the cache (not the login!) in the stats if a tier-change happens (clear, but don't modify roles)
+                let paid_credits_used: bool;
+                if let Some(downgrade_user_tier) = user_tier_model.downgrade_tier_id {
+                    trace!("user belongs to a premium tier. checking balance");
+                    let active_premium = latest_balance.read().await.active_premium();
 
-                                Some(x)
-                            } else {
-                                None
-                            };
+                    // only consider the user premium if they have paid at least $10 and have a balance > $.01
+                    // otherwise, set user_tier_model to the downograded tier
+                    if active_premium {
+                        paid_credits_used = true;
+                    } else {
+                        paid_credits_used = false;
 
-                        let allowed_user_agents: Option<Vec<UserAgent>> =
-                            if let Some(allowed_user_agents) = rpc_key_model.allowed_user_agents {
-                                let x: Result<Vec<_>, _> = allowed_user_agents
-                                    .split(',')
-                                    .map(|x| {
-                                        x.trim()
-                                            .parse::<UserAgent>()
-                                            .or(Err(Web3ProxyError::InvalidUserAgent))
-                                    })
-                                    .collect();
-
-                                Some(x?)
-                            } else {
-                                None
-                            };
-
-                        // Get the user_tier
-                        let user_model = user::Entity::find_by_id(rpc_key_model.user_id)
+                        // TODO: include boolean to mark that the user is downgraded
+                        user_tier_model = user_tier::Entity::find_by_id(downgrade_user_tier)
                             .one(db_replica.as_ref())
                             .await?
-                            .web3_context(
-                                "user model was not found, but every rpc_key should have a user",
-                            )?;
-
-                        let mut user_tier_model = user_tier::Entity::find_by_id(
-                            user_model.user_tier_id,
-                        )
-                        .one(db_replica.as_ref())
-                        .await?
-                        .web3_context(
-                            "related user tier not found, but every user should have a tier",
-                        )?;
-
-                        let latest_balance = self.balance_checks(rpc_key_model.user_id).await?;
-
-                        // TODO: Do the logic here, as to how to treat the user, based on balance and initial check
-                        // Clear the cache (not the login!) in the stats if a tier-change happens (clear, but don't modify roles)
-                        let paid_credits_used: bool;
-                        if let Some(downgrade_user_tier) = user_tier_model.downgrade_tier_id {
-                            let active_premium = latest_balance.read().await.active_premium();
-
-                            // only consider the user premium if they have paid at least $10 and have a balance > $.01
-                            // otherwise, set user_tier_model to the downograded tier
-                            if active_premium {
-                                paid_credits_used = true;
-                            } else {
-                                paid_credits_used = false;
-
-                                // TODO: include boolean to mark that the user is downgraded
-                                user_tier_model =
-                                    user_tier::Entity::find_by_id(downgrade_user_tier)
-                                        .one(db_replica.as_ref())
-                                        .await?
-                                        .web3_context(format!(
-                                            "downgrade user tier ({}) is missing!",
-                                            downgrade_user_tier
-                                        ))?;
-                            }
-                        } else {
-                            paid_credits_used = false;
-                        }
-
-                        let rpc_key_id =
-                            Some(rpc_key_model.id.try_into().context("db ids are never 0")?);
-
-                        // TODO:
-
-                        Ok(AuthorizationChecks {
-                            allowed_ips,
-                            allowed_origins,
-                            allowed_referers,
-                            allowed_user_agents,
-                            latest_balance,
-                            // TODO: is floating point math going to scale this correctly?
-                            log_revert_chance: (rpc_key_model.log_revert_chance * u16::MAX as f64)
-                                as u16,
-                            max_concurrent_requests: user_tier_model.max_concurrent_requests,
-                            max_requests_per_period: user_tier_model.max_requests_per_period,
-                            private_txs: rpc_key_model.private_txs,
-                            proxy_mode,
-                            rpc_secret_key: Some(*rpc_secret_key),
-                            rpc_secret_key_id: rpc_key_id,
-                            user_id: rpc_key_model.user_id,
-                            paid_credits_used,
-                        })
+                            .web3_context(format!(
+                                "downgrade user tier ({}) is missing!",
+                                downgrade_user_tier
+                            ))?;
                     }
-                    None => Ok(AuthorizationChecks::default()),
+                } else {
+                    paid_credits_used = false;
                 }
-            })
-            .await
-            .map_err(Into::into)
+
+                let rpc_key_id = Some(rpc_key_model.id.try_into().context("db ids are never 0")?);
+
+                Ok::<_, Web3ProxyError>(AuthorizationChecks {
+                    allowed_ips,
+                    allowed_origins,
+                    allowed_referers,
+                    allowed_user_agents,
+                    latest_balance,
+                    // TODO: is floating point math going to scale this correctly?
+                    log_revert_chance: (rpc_key_model.log_revert_chance * u16::MAX as f64) as u16,
+                    max_concurrent_requests: user_tier_model.max_concurrent_requests,
+                    max_requests_per_period: user_tier_model.max_requests_per_period,
+                    private_txs: rpc_key_model.private_txs,
+                    proxy_mode,
+                    rpc_secret_key: Some(*rpc_secret_key),
+                    rpc_secret_key_id: rpc_key_id,
+                    user_id: rpc_key_model.user_id,
+                    paid_credits_used,
+                })
+            }
+            None => Ok(AuthorizationChecks::default()),
+        }?;
+
+        Ok(x)
+
+        // })
+        // .await
+        // .map_err(Into::into)
     }
 
     /// Authorized the ip/origin/referer/useragent and rate limit and concurrency

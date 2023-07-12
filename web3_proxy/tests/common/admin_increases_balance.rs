@@ -36,6 +36,7 @@ pub async fn admin_increase_balance(
         .unwrap();
     info!(?increase_balance_response, "http response");
 
+    // TODO: use a struct here
     let increase_balance_response = increase_balance_response
         .json::<serde_json::Value>()
         .await

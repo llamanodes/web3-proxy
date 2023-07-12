@@ -3,7 +3,7 @@ mod common;
 use crate::common::admin_deposits::get_admin_deposits;
 use crate::common::admin_increases_balance::admin_increase_balance;
 use crate::common::create_admin::create_user_as_admin;
-use crate::common::create_user::create_user;
+use crate::common::create_user::{create_user, set_user_tier};
 use crate::common::referral::{
     get_referral_code, get_shared_referral_codes, get_used_referral_codes, UserSharedReferralInfo,
     UserUsedReferralInfo,
@@ -105,6 +105,10 @@ async fn test_admin_balance_increase() {
     let admin_login_response = create_user_as_admin(&x, &r, &admin_wallet).await;
     let user_login_response = create_user(&x, &r, &user_wallet, None).await;
 
+    set_user_tier(&x, user_login_response.user.clone(), "Premium")
+        .await
+        .unwrap();
+
     // Bump both user's wallet to $20
     admin_increase_balance(
         &x,
@@ -151,6 +155,10 @@ async fn test_user_balance_decreases() {
     // Create three users, one referrer, one admin who bumps both their balances
     let admin_login_response = create_user_as_admin(&x, &r, &admin_wallet).await;
     let user_login_response = create_user(&x, &r, &user_wallet, None).await;
+
+    set_user_tier(&x, user_login_response.user.clone(), "Premium")
+        .await
+        .unwrap();
 
     // Get the rpc keys for this user
     let rpc_keys: RpcKey = user_get_first_rpc_key(&x, &r, &user_login_response).await;
@@ -258,6 +266,13 @@ async fn test_referral_bonus_non_concurrent() {
     let referral_link = get_referral_code(&x, &r, &referrer_login_response).await;
 
     let user_login_response = create_user(&x, &r, &user_wallet, Some(referral_link.clone())).await;
+
+    set_user_tier(&x, referrer_login_response.user.clone(), "Premium")
+        .await
+        .unwrap();
+    set_user_tier(&x, user_login_response.user.clone(), "Premium")
+        .await
+        .unwrap();
 
     // Bump both user's wallet to $20
     admin_increase_balance(
@@ -401,6 +416,13 @@ async fn test_referral_bonus_concurrent_referrer_only() {
     let referral_link = get_referral_code(&x, &r, &referrer_login_response).await;
 
     let user_login_response = create_user(&x, &r, &user_wallet, Some(referral_link.clone())).await;
+
+    set_user_tier(&x, referrer_login_response.user.clone(), "Premium")
+        .await
+        .unwrap();
+    set_user_tier(&x, user_login_response.user.clone(), "Premium")
+        .await
+        .unwrap();
 
     // Bump both user's wallet to $20
     admin_increase_balance(
@@ -555,6 +577,13 @@ async fn test_referral_bonus_concurrent_referrer_and_user() {
     let referral_link = get_referral_code(&x, &r, &referrer_login_response).await;
 
     let user_login_response = create_user(&x, &r, &user_wallet, Some(referral_link.clone())).await;
+
+    set_user_tier(&x, referrer_login_response.user.clone(), "Premium")
+        .await
+        .unwrap();
+    set_user_tier(&x, user_login_response.user.clone(), "Premium")
+        .await
+        .unwrap();
 
     // Bump both user's wallet to $20
     admin_increase_balance(

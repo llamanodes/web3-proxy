@@ -71,6 +71,8 @@ pub struct RpcQueryStats {
     pub compute_unit_cost: Decimal,
     /// If the request is invalid or received a jsonrpc error response (excluding reverts)
     pub user_error_response: bool,
+    /// If premium was active at the start of the request
+    pub paid_credits_used: bool,
 }
 
 #[derive(Clone, Debug, From, Hash, PartialEq, Eq)]
@@ -108,6 +110,7 @@ impl RpcQueryStats {
     fn accounting_key(&self, period_seconds: i64) -> RpcQueryKey {
         let response_timestamp = round_timestamp(self.response_timestamp, period_seconds);
 
+        // TODO: change this to use 0 for anonymous queries
         let rpc_secret_key_id = self.authorization.checks.rpc_secret_key_id;
 
         let method = self.method.clone();
@@ -156,7 +159,7 @@ impl RpcQueryStats {
 
     /// stats for a single key
     fn owned_timeseries_key(&self) -> Option<RpcQueryKey> {
-        if !self.authorization.checks.paid_credits_used {
+        if !self.paid_credits_used {
             return None;
         }
 
@@ -199,7 +202,7 @@ pub enum AppStat {
 // TODO: move to stat_buffer.rs?
 impl BufferedRpcQueryStats {
     #[instrument(level = "trace")]
-    async fn add(&mut self, stat: RpcQueryStats, approximate_latest_balance_for_influx: Balance) {
+    async fn add(&mut self, stat: RpcQueryStats, approximate_balance_remaining: Decimal) {
         // a stat always come from just 1 frontend request
         self.frontend_requests += 1;
 
@@ -226,7 +229,7 @@ impl BufferedRpcQueryStats {
             self.paid_credits_used += stat.compute_unit_cost;
         }
 
-        self.approximate_latest_balance_for_influx = approximate_latest_balance_for_influx;
+        self.approximate_balance_remaining = approximate_balance_remaining;
 
         trace!("added");
     }
@@ -502,10 +505,6 @@ impl BufferedRpcQueryStats {
 
         builder = builder.tag("method", key.method);
 
-        // Read the latest balance ...
-        let remaining = self.approximate_latest_balance_for_influx.remaining();
-        trace!("Remaining balance for influx is {:?}", remaining);
-
         builder = builder
             .tag("archive_needed", key.archive_needed.to_string())
             .tag("error_response", key.error_response.to_string())
@@ -526,7 +525,7 @@ impl BufferedRpcQueryStats {
             )
             .field(
                 "balance",
-                remaining
+                self.approximate_balance_remaining
                     .to_f64()
                     .context("balance is really (too) large")?,
             );
@@ -604,6 +603,8 @@ impl RpcQueryStats {
 
         let method = mem::take(&mut metadata.method);
 
+        let paid_credits_used = authorization.checks.paid_credits_used;
+
         let x = Self {
             archive_request,
             authorization,
@@ -612,6 +613,7 @@ impl RpcQueryStats {
             compute_unit_cost,
             error_response,
             method,
+            paid_credits_used,
             request_bytes,
             response_bytes,
             response_millis,

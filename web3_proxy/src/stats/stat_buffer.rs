@@ -1,6 +1,5 @@
 use super::{AppStat, FlushedStats, RpcQueryKey};
 use crate::app::Web3ProxyJoinHandle;
-use crate::balance::Balance;
 use crate::caches::{RpcSecretKeyCache, UserBalanceCache};
 use crate::errors::Web3ProxyResult;
 use crate::stats::RpcQueryStats;
@@ -32,7 +31,8 @@ pub struct BufferedRpcQueryStats {
     pub paid_credits_used: Decimal,
     /// The user's balance at this point in time.
     /// Multiple queries might be modifying it at once, so this is a copy of it when received
-    pub approximate_latest_balance_for_influx: Balance,
+    /// None if this is an unauthenticated request
+    pub approximate_balance_remaining: Decimal,
 }
 
 #[derive(From)]
@@ -140,14 +140,12 @@ impl StatBuffer {
 
                             // update the latest balance
                             // do this BEFORE emitting any stats
-                            let latest_balance: Balance;
+                            let mut approximate_balance_remaining = 0.into();
                             if let Some(db_conn) = self.db_conn.as_ref() {
                                 let user_id = stat.authorization.checks.user_id;
 
                                 // update the user's balance
-                                if user_id == 0 {
-                                    latest_balance = Balance::default();
-                                } else {
+                                if user_id != 0 {
                                     // update the user's cached balance
                                     let mut user_balance = stat.authorization.checks.latest_balance.write().await;
 
@@ -183,26 +181,26 @@ impl StatBuffer {
                                                     .await;
                                             }
                                         }
+                                    } else if user_balance.active_premium() {
+                                        panic!("wtf");
                                     }
 
-                                    latest_balance = user_balance.clone();
+                                    approximate_balance_remaining = user_balance.remaining();
                                 }
 
-                                self.accounting_db_buffer.entry(stat.accounting_key(self.billing_period_seconds)).or_default().add(stat.clone(), latest_balance.clone()).await;
-                            } else {
-                                latest_balance = Balance::default();
+                                self.accounting_db_buffer.entry(stat.accounting_key(self.billing_period_seconds)).or_default().add(stat.clone(), approximate_balance_remaining).await;
                             }
 
                             if self.influxdb_client.is_some() {
                                 // TODO: round the timestamp at all?
 
                                 if let Some(opt_in_timeseries_key) = stat.owned_timeseries_key() {
-                                    self.opt_in_timeseries_buffer.entry(opt_in_timeseries_key).or_default().add(stat.clone(), latest_balance.clone()).await;
+                                    self.opt_in_timeseries_buffer.entry(opt_in_timeseries_key).or_default().add(stat.clone(), approximate_balance_remaining).await;
                                 }
 
                                 let global_timeseries_key = stat.global_timeseries_key();
 
-                                self.global_timeseries_buffer.entry(global_timeseries_key).or_default().add(stat, latest_balance).await;
+                                self.global_timeseries_buffer.entry(global_timeseries_key).or_default().add(stat, approximate_balance_remaining).await;
                             }
                         }
                         None => {

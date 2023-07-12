@@ -1,8 +1,12 @@
 mod common;
 
 use crate::common::{
-    admin_increases_balance::admin_increase_balance, create_admin::create_user_as_admin,
-    create_user::create_user, rpc_key::user_get_provider, user_balance::user_get_balance, TestApp,
+    admin_increases_balance::admin_increase_balance,
+    create_admin::create_user_as_admin,
+    create_user::{create_user, set_user_tier},
+    rpc_key::user_get_provider,
+    user_balance::user_get_balance,
+    TestApp,
 };
 use ethers::prelude::U64;
 use migration::sea_orm::prelude::Decimal;
@@ -29,8 +33,13 @@ async fn test_sum_credits_used() {
     let admin_login_response = create_user_as_admin(&x, &r, &admin_wallet).await;
     let user_login_response = create_user(&x, &r, &user_wallet, None).await;
 
+    set_user_tier(&x, user_login_response.user.clone(), "Premium")
+        .await
+        .unwrap();
+
     // TODO: set the user's user_id to the "Premium" tier
 
+    info!("starting balance");
     let balance: Balance = user_get_balance(&x, &r, &user_login_response).await;
     assert_eq!(
         balance.total_frontend_requests, 0,
@@ -58,7 +67,7 @@ async fn test_sum_credits_used() {
         .await
         .unwrap();
 
-    info!("make one free request against the user RPC of 16 CU");
+    info!("make one cached authenticated (but out of funds) rpc request of 16 CU");
     user_proxy_provider
         .request::<_, Option<U64>>("eth_blockNumber", ())
         .await
@@ -97,13 +106,13 @@ async fn test_sum_credits_used() {
     assert!(balance.active_premium(), "active_premium");
     assert!(balance.was_ever_premium(), "was_ever_premium");
 
-    // make one public rpc request of 16 CU
+    info!("make one public rpc request of 16 CU");
     x.proxy_provider
         .request::<_, Option<U64>>("eth_blockNumber", ())
         .await
         .unwrap();
 
-    // make one cached authenticated rpc request of 16 CU
+    info!("make one cached authenticated rpc request of 16 CU");
     user_proxy_provider
         .request::<_, Option<U64>>("eth_blockNumber", ())
         .await
@@ -121,23 +130,23 @@ async fn test_sum_credits_used() {
     );
     assert_eq!(balance.total_cache_misses, 0, "total_cache_misses");
     assert_eq!(
-        balance.total_spent_paid_credits, query_cost,
+        balance.total_spent_paid_credits, cached_query_cost,
         "total_spent_paid_credits"
     );
     assert_eq!(
         balance.total_spent,
-        query_cost + cached_query_cost,
+        cached_query_cost * Decimal::from(2),
         "total_spent"
     );
     assert_eq!(
         balance.remaining(),
-        Decimal::from(1000) - query_cost - cached_query_cost,
+        Decimal::from(1000) - cached_query_cost,
         "remaining"
     );
     assert!(balance.active_premium(), "active_premium");
     assert!(balance.was_ever_premium(), "was_ever_premium");
 
-    // make ten cached rpc request of 16 CU
+    info!("make ten cached authenticated requests of 16 CU");
     for _ in 0..10 {
         user_proxy_provider
             .request::<_, Option<U64>>("eth_blockNumber", ())

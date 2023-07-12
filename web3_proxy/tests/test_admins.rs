@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use crate::common::admin_increases_balance::admin_increase_balance;
 use crate::common::create_admin::create_user_as_admin;
-use crate::common::create_user::create_user;
+use crate::common::create_user::{create_user, set_user_tier};
 use crate::common::user_balance::user_get_balance;
 use crate::common::TestApp;
 use migration::sea_orm::prelude::Decimal;
@@ -38,6 +38,8 @@ async fn test_admin_grant_credits() {
     let user_login_response = create_user(&x, &r, &user_wallet, None).await;
     let admin_login_response = create_user_as_admin(&x, &r, &admin_wallet).await;
     info!(?admin_login_response);
+
+    set_user_tier(&x, user_login_response.user.clone(), "Premium").await.unwrap();
 
     let increase_balance_response = admin_increase_balance(
         &x,
