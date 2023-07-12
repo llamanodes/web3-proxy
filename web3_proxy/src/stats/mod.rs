@@ -6,7 +6,7 @@ pub mod db_queries;
 pub mod influxdb_queries;
 
 use self::stat_buffer::BufferedRpcQueryStats;
-use crate::caches::UserBalanceCache;
+use crate::caches::{RpcSecretKeyCache, UserBalanceCache};
 use crate::compute_units::ComputeUnit;
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
@@ -30,7 +30,7 @@ use std::mem;
 use std::num::NonZeroU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use tracing::{error, instrument, trace};
+use tracing::{error, instrument, trace, warn};
 
 pub use stat_buffer::{SpawnedStatBuffer, StatBuffer};
 
@@ -335,6 +335,7 @@ impl BufferedRpcQueryStats {
         db_conn: &DatabaseConnection,
         key: RpcQueryKey,
         user_balance_cache: &UserBalanceCache,
+        rpc_secret_key_cache: &RpcSecretKeyCache,
     ) -> Web3ProxyResult<()> {
         // Sanity check, if we need to save stats
         if key.response_timestamp == 0 {
@@ -355,6 +356,8 @@ impl BufferedRpcQueryStats {
         if self.paid_credits_used > 0.into() {
             // Start a transaction
             let txn = db_conn.begin().await?;
+
+            let mut invalidate_caches = false;
 
             // Calculate if we are above the usage threshold, and apply a bonus
             // Optimally we would read this from the balance, but if we do it like this, we only have to lock a single table (much safer w.r.t. deadlocks)
@@ -389,8 +392,6 @@ impl BufferedRpcQueryStats {
 
                         let mut referral_entity = referral_entity.into_active_model();
 
-                        let mut invalidate_sender_balance_cache = false;
-
                         // Provide one-time bonus to user, if more than 100$ was spent,
                         // and if the one-time bonus was not already provided
                         // TODO: make sure that if we change the bonus from 10%, we also change this multiplication of 10!
@@ -410,7 +411,7 @@ impl BufferedRpcQueryStats {
 
                             // writing here with `+= 10` has a race unless we lock outside of the mysql query (and thats just too slow)
                             // so instead we just invalidate the cache (after writing to mysql)
-                            invalidate_sender_balance_cache = true;
+                            invalidate_caches = true;
                         }
 
                         let now = Utc::now();
@@ -438,10 +439,6 @@ impl BufferedRpcQueryStats {
 
                         // The resulting field will not be read again, so I will not try to turn the ActiveModel into a Model one
                         referral_entity.save(&txn).await?;
-
-                        if invalidate_sender_balance_cache {
-                            user_balance_cache.0.invalidate(&sender_user_id).await;
-                        }
                     }
                 }
                 Some((referee, None)) => {
@@ -457,6 +454,15 @@ impl BufferedRpcQueryStats {
             txn.commit()
                 .await
                 .context("Failed to update referral and balance updates")?;
+
+            if invalidate_caches {
+                if let Err(err) = user_balance_cache
+                    .invalidate(&sender_user_id, db_conn, rpc_secret_key_cache)
+                    .await
+                {
+                    warn!(?err, "unable to invalidate caches");
+                };
+            }
         }
 
         Ok(())

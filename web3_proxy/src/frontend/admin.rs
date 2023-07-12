@@ -84,7 +84,13 @@ pub async fn admin_increase_balance(
     txn.commit().await?;
 
     // Invalidate the user_balance_cache for this user:
-    app.user_balance_cache.0.invalidate(&user_entry.id).await;
+    if let Err(err) = app
+        .user_balance_cache
+        .invalidate(&user_entry.id, app.db_conn()?, &app.rpc_secret_key_cache)
+        .await
+    {
+        warn!(?err, "unable to invalidate caches");
+    };
 
     let out = json!({
         "user": payload.user_address,

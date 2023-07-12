@@ -2,7 +2,8 @@ use crate::balance::Balance;
 use crate::errors::Web3ProxyResult;
 use crate::frontend::authorization::{AuthorizationChecks, RpcSecretKey};
 use derive_more::From;
-use migration::sea_orm::DatabaseConnection;
+use entities::rpc_key;
+use migration::sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use moka::future::Cache;
 use std::fmt;
 use std::net::IpAddr;
@@ -53,5 +54,33 @@ impl UserBalanceCache {
             .await?;
 
         Ok(x)
+    }
+
+    pub async fn invalidate(
+        &self,
+        user_id: &u64,
+        db_conn: &DatabaseConnection,
+        rpc_secret_key_cache: &RpcSecretKeyCache,
+    ) -> Web3ProxyResult<()> {
+        self.0.invalidate(user_id).await;
+
+        trace!(%user_id, "invalidating");
+
+        // Remove all RPC-keys owned by this user from the cache, s.t. rate limits are re-calculated
+        let rpc_keys = rpc_key::Entity::find()
+            .filter(rpc_key::Column::UserId.eq(*user_id))
+            .all(db_conn)
+            .await?;
+
+        for rpc_key_entity in rpc_keys {
+            let rpc_key_id = rpc_key_entity.id;
+            let secret_key = rpc_key_entity.secret_key.into();
+
+            trace!(%rpc_key_id, "invalidating");
+
+            rpc_secret_key_cache.invalidate(&secret_key).await;
+        }
+
+        Ok(())
     }
 }

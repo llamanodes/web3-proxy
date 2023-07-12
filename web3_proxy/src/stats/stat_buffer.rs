@@ -4,16 +4,15 @@ use crate::caches::{RpcSecretKeyCache, UserBalanceCache};
 use crate::errors::Web3ProxyResult;
 use crate::stats::RpcQueryStats;
 use derive_more::From;
-use entities::rpc_key;
 use futures::stream;
 use hashbrown::HashMap;
 use influxdb2::api::write::TimestampPrecision;
 use migration::sea_orm::prelude::Decimal;
-use migration::sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use migration::sea_orm::DatabaseConnection;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::time::{interval, sleep};
-use tracing::{error, info, trace};
+use tracing::{error, info, trace, warn};
 
 #[derive(Debug, Default)]
 pub struct BufferedRpcQueryStats {
@@ -157,6 +156,7 @@ impl StatBuffer {
                                         user_balance.total_cache_misses += 1;
                                     }
 
+                                    // if paid_credits_used is true, then they were premium at the start of the request
                                     if stat.authorization.checks.paid_credits_used {
                                         // TODO: this lets them get a negative remaining balance. we should clear if close to 0
                                         user_balance.total_spent_paid_credits += stat.compute_unit_cost;
@@ -164,22 +164,10 @@ impl StatBuffer {
                                         // check if they still have premium
                                         if user_balance.active_premium() {
                                             // TODO: referall credits here? i think in the save_db section still makes sense for those
-                                        } else {
+                                        } else if let Err(err) = self.user_balance_cache.invalidate(&user_balance.user_id, db_conn, &self.rpc_secret_key_cache).await {
                                             // was premium, but isn't anymore due to paying for this query. clear the cache
                                             // TODO: stop at <$0.000001 instead of negative?
-                                            self.user_balance_cache.0.invalidate(&user_balance.user_id).await;
-
-                                            let rpc_keys = rpc_key::Entity::find()
-                                                .filter(rpc_key::Column::UserId.eq(user_id))
-                                                .all(db_conn)
-                                                .await?;
-
-                                            // clear all keys owned by this user from the cache
-                                            for rpc_key_entity in rpc_keys {
-                                                self.rpc_secret_key_cache
-                                                    .invalidate(&rpc_key_entity.secret_key.into())
-                                                    .await;
-                                            }
+                                            warn!(?err, "unable to clear caches");
                                         }
                                     } else if user_balance.active_premium() {
                                         panic!("wtf");
@@ -297,7 +285,13 @@ impl StatBuffer {
                 // TODO: batch saves
                 // TODO: i don't like passing key (which came from the stat) to the function on the stat. but it works for now
                 if let Err(err) = stat
-                    .save_db(self.chain_id, db_conn, key, &self.user_balance_cache)
+                    .save_db(
+                        self.chain_id,
+                        db_conn,
+                        key,
+                        &self.user_balance_cache,
+                        &self.rpc_secret_key_cache,
+                    )
                     .await
                 {
                     error!(?err, "unable to save accounting entry!");
