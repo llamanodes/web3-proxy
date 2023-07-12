@@ -319,7 +319,7 @@ impl BufferedRpcQueryStats {
                         (
                             rpc_accounting_v2::Column::SumCreditsUsed,
                             Expr::col(rpc_accounting_v2::Column::SumCreditsUsed)
-                                .add(*paid_credits_used),
+                                .add(self.paid_credits_used),
                         ),
                     ])
                     .to_owned(),
