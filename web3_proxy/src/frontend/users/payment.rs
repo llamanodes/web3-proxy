@@ -5,7 +5,7 @@ use crate::frontend::authorization::{
     login_is_authorized, Authorization as Web3ProxyAuthorization,
 };
 use crate::frontend::users::authentication::register_new_user;
-use crate::premium::{get_user_and_tier_from_id, grant_premium_tier};
+use crate::premium::grant_premium_tier;
 use anyhow::Context;
 use axum::{
     extract::Path,
@@ -17,7 +17,7 @@ use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use entities::{
     admin_increase_balance_receipt, increase_on_chain_balance_receipt,
-    stripe_increase_balance_receipt, user,
+    stripe_increase_balance_receipt, user, user_tier,
 };
 use ethers::abi::AbiEncode;
 use ethers::types::{Address, Block, TransactionReceipt, TxHash, H256};
@@ -368,8 +368,6 @@ pub async fn user_balance_post(
                 }
             };
 
-            user_ids_need_premium.insert(recipient.id);
-
             // For now we only accept stablecoins. This will need conversions if we accept other tokens.
             // 1$ = Decimal(1) for any stablecoin
             // TODO: Let's assume that people don't buy too much at _once_, we do support >$1M which should be fine for now
@@ -410,19 +408,17 @@ pub async fn user_balance_post(
             debug!("deposit data: {:#?}", x);
 
             response_data.push(x);
+
+            user_ids_need_premium.insert(recipient);
         }
     }
 
-    for user_id in user_ids_need_premium.into_iter() {
-        // TODO: we query user twice because that is easiest. make this more efficient
-        let (user_entry, user_tier_entry) =
-            get_user_and_tier_from_id(user_id, &txn)
-                .await?
-                .ok_or(Web3ProxyError::BadRequest(
-                    format!("No user found with id {}", user_id).into(),
-                ))?;
+    for user in user_ids_need_premium.into_iter() {
+        let user_tier = user_tier::Entity::find_by_id(user.user_tier_id)
+            .one(&txn)
+            .await?;
 
-        grant_premium_tier(&user_entry, user_tier_entry.as_ref(), &txn)
+        grant_premium_tier(&user, user_tier.as_ref(), &txn)
             .await
             .web3_context("granting premium tier")?;
     }
