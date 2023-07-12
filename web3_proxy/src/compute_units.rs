@@ -170,13 +170,13 @@ impl ComputeUnit {
 
         let mut cost = self.0 * usd_per_cu;
 
-        trace!(x=%cost, "base cost");
+        trace!(%cost, "base");
 
         if archive_request {
             // TODO: get from config
             cost *= Decimal::from_str("2.5").unwrap();
 
-            trace!(x=%cost, "archive_request cost");
+            trace!(%cost, "archive_request");
         }
 
         if cache_hit {
@@ -184,10 +184,10 @@ impl ComputeUnit {
             // TODO: get from config
             cost *= Decimal::from_str("0.75").unwrap();
 
-            trace!(x=%cost, "cache_hit cost");
+            trace!(%cost, "cache_hit");
         }
 
-        trace!(x=%cost, "final cost");
+        trace!(%cost, "final");
 
         cost
     }

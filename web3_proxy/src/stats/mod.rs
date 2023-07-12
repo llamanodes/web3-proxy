@@ -32,7 +32,7 @@ use std::num::NonZeroU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::sync::RwLock as AsyncRwLock;
-use tracing::{error, trace};
+use tracing::{error, instrument, trace};
 
 use crate::balance::Balance;
 pub use stat_buffer::{SpawnedStatBuffer, StatBuffer};
@@ -196,6 +196,7 @@ pub enum AppStat {
 
 // TODO: move to stat_buffer.rs?
 impl BufferedRpcQueryStats {
+    #[instrument(level = "trace")]
     async fn add(
         &mut self,
         stat: RpcQueryStats,
@@ -230,7 +231,7 @@ impl BufferedRpcQueryStats {
 
         self.approximate_latest_balance_for_influx = approximate_latest_balance_for_influx;
 
-        trace!(?stat, ?self, "added");
+        trace!("added");
     }
 
     async fn _save_db_stats(

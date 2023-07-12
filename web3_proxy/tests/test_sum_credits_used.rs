@@ -49,7 +49,7 @@ async fn test_sum_credits_used() {
 
     // make one free request against the public RPC of 16 CU
     x.proxy_provider
-        .request::<_, Option<U64>>("eth_blockNumber", ("latest", false))
+        .request::<_, Option<U64>>("eth_blockNumber", ())
         .await
         .unwrap();
 
@@ -60,7 +60,7 @@ async fn test_sum_credits_used() {
 
     // make one free request against the public RPC of 16 CU
     user_proxy_provider
-        .request::<_, Option<U64>>("eth_blockNumber", ("latest", false))
+        .request::<_, Option<U64>>("eth_blockNumber", ())
         .await
         .unwrap();
 
@@ -99,13 +99,13 @@ async fn test_sum_credits_used() {
 
     // make one public rpc request of 16 CU
     x.proxy_provider
-        .request::<_, Option<U64>>("eth_blockNumber", ("latest", false))
+        .request::<_, Option<U64>>("eth_blockNumber", ())
         .await
         .unwrap();
 
-    // make one authenticated rpc request of 16 CU
+    // make one cached authenticated rpc request of 16 CU
     user_proxy_provider
-        .request::<_, Option<U64>>("eth_blockNumber", ("latest", false))
+        .request::<_, Option<U64>>("eth_blockNumber", ())
         .await
         .unwrap();
 
@@ -137,7 +137,7 @@ async fn test_sum_credits_used() {
     assert!(balance.active_premium(), "active_premium");
     assert!(balance.was_ever_premium(), "was_ever_premium");
 
-    // make ten rpc request of 16 CU
+    // make ten cached rpc request of 16 CU
     for _ in 0..10 {
         user_proxy_provider
             .request::<_, Option<U64>>("eth_blockNumber", ())
@@ -153,7 +153,7 @@ async fn test_sum_credits_used() {
     info!("checking the final balance");
     let balance: Balance = user_get_balance(&x, &r, &user_login_response).await;
 
-    // the first of our 12 total requests request was on the free tier
+    // the first of our 12 total requests request was on the free tier, so paid_credits should only count 11
     let expected_total_spent_paid_credits = Decimal::from(11) * cached_query_cost;
 
     assert_eq!(
