@@ -415,9 +415,12 @@ pub async fn user_balance_post(
 
     for user_id in user_ids_need_premium.into_iter() {
         // TODO: we query user twice because that is easiest. make this more efficient
-        let (user_entry, user_tier_entry) = get_user_and_tier_from_id(user_id, &txn)
-            .await?
-            .context("no user found")?;
+        let (user_entry, user_tier_entry) =
+            get_user_and_tier_from_id(user_id, &txn)
+                .await?
+                .ok_or(Web3ProxyError::BadRequest(
+                    format!("No user found with id {}", user_id).into(),
+                ))?;
 
         grant_premium_tier(&user_entry, user_tier_entry.as_ref(), &txn)
             .await

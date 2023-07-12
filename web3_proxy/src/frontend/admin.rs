@@ -8,7 +8,6 @@ use crate::errors::{Web3ProxyError, Web3ProxyErrorContext};
 use crate::frontend::users::authentication::PostLogin;
 use crate::premium::{get_user_and_tier_from_address, grant_premium_tier};
 use crate::user_token::UserBearerToken;
-use anyhow::Context;
 use axum::{
     extract::{Path, Query},
     headers::{authorization::Bearer, Authorization},
@@ -69,7 +68,9 @@ pub async fn admin_increase_balance(
 
     let (user_entry, user_tier_entry) = get_user_and_tier_from_address(&payload.user_address, &txn)
         .await?
-        .context("no user found")?;
+        .ok_or(Web3ProxyError::BadRequest(
+            format!("No user found with {:?}", payload.user_address).into(),
+        ))?;
 
     grant_premium_tier(&user_entry, user_tier_entry.as_ref(), &txn)
         .await
