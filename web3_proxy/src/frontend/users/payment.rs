@@ -1,9 +1,7 @@
 use crate::app::Web3ProxyApp;
 use crate::balance::Balance;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse, Web3ProxyResult};
-use crate::frontend::authorization::{
-    login_is_authorized, Authorization as Web3ProxyAuthorization,
-};
+use crate::frontend::authorization::login_is_authorized;
 use crate::frontend::users::authentication::register_new_user;
 use crate::premium::{get_user_and_tier_from_address, grant_premium_tier};
 use anyhow::Context;
@@ -185,14 +183,12 @@ pub async fn user_balance_post(
     Path(mut params): Path<HashMap<String, String>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
 ) -> Web3ProxyResponse {
+    // TODO: think more about rate limits here. internal scripts should have no limits, but public entry should
     // rate limit by bearer token **OR** IP address
-    let authorization = if let Some(TypedHeader(Authorization(bearer))) = bearer {
+    if let Some(TypedHeader(Authorization(bearer))) = bearer {
         app.bearer_is_authorized(bearer).await?;
-
-        // TODO: is handling this as internal fine?
-        Web3ProxyAuthorization::internal(app.db_conn().ok().cloned())?
     } else if let Some(InsecureClientIp(ip)) = ip {
-        login_is_authorized(&app, ip).await?
+        login_is_authorized(&app, ip).await?;
     } else {
         return Err(Web3ProxyError::AccessDenied("no bearer token or ip".into()));
     };
@@ -210,15 +206,9 @@ pub async fn user_balance_post(
 
     let db_conn = app.db_conn()?;
 
-    let authorization = Arc::new(authorization);
-
     // get the transaction receipt
     let transaction_receipt = app
-        .authorized_request::<_, Option<TransactionReceipt>>(
-            "eth_getTransactionReceipt",
-            (tx_hash,),
-            authorization.clone(),
-        )
+        .internal_request::<_, Option<TransactionReceipt>>("eth_getTransactionReceipt", (tx_hash,))
         .await?;
 
     // check for uncles
@@ -254,12 +244,12 @@ pub async fn user_balance_post(
         let app = app.clone();
         tokio::spawn(async move {
             for uncle_hash in uncle_hashes.into_iter() {
-                match handle_uncle_block(&app, &authorization, uncle_hash).await {
+                match handle_uncle_block(&app, uncle_hash).await {
                     Ok(x) => {
                         info!(?x, "balance changes from uncle");
                     }
                     Err(err) => {
-                        error!(?err, "handling uncle block");
+                        error!(%uncle_hash, ?err, "handling uncle block");
                     }
                 }
             }
@@ -437,10 +427,19 @@ pub async fn user_balance_post(
 #[debug_handler]
 pub async fn user_balance_uncle_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    InsecureClientIp(ip): InsecureClientIp,
+    ip: Option<InsecureClientIp>,
     Path(mut params): Path<HashMap<String, String>>,
+    bearer: Option<TypedHeader<Authorization<Bearer>>>,
 ) -> Web3ProxyResponse {
-    let authorization = login_is_authorized(&app, ip).await?;
+    // TODO: think more about rate limits here. internal scripts should have no limits, but public entry should
+    // rate limit by bearer token **OR** IP address
+    if let Some(TypedHeader(Authorization(bearer))) = bearer {
+        app.bearer_is_authorized(bearer).await?;
+    } else if let Some(InsecureClientIp(ip)) = ip {
+        login_is_authorized(&app, ip).await?;
+    } else {
+        return Err(Web3ProxyError::AccessDenied("no bearer token or ip".into()));
+    };
 
     // Get the transaction hash, and the amount that the user wants to top up by.
     // Let's say that for now, 1 credit is equivalent to 1 dollar (assuming any stablecoin has a 1:1 peg)
@@ -454,9 +453,7 @@ pub async fn user_balance_uncle_post(
             Web3ProxyError::BadRequest(format!("unable to parse uncle_hash: {}", err).into())
         })?;
 
-    let authorization = Arc::new(authorization);
-
-    if let Some(x) = handle_uncle_block(&app, &authorization, uncle_hash).await? {
+    if let Some(x) = handle_uncle_block(&app, uncle_hash).await? {
         Ok(Json(x).into_response())
     } else {
         // TODO: is BadRequest the right error to use?
@@ -466,49 +463,51 @@ pub async fn user_balance_uncle_post(
 
 pub async fn handle_uncle_block(
     app: &Arc<Web3ProxyApp>,
-    authorization: &Arc<Web3ProxyAuthorization>,
     uncle_hash: H256,
 ) -> Web3ProxyResult<Option<HashMap<u64, Decimal>>> {
-    info!("handling uncle: {:?}", uncle_hash);
-
     // cancel if uncle_hash is actually a confirmed block
     if app
-        .authorized_request::<_, Option<Block<TxHash>>>(
-            "eth_getBlockByHash",
-            (uncle_hash, false),
-            authorization.clone(),
-        )
+        .internal_request::<_, Option<Block<TxHash>>>("eth_getBlockByHash", (uncle_hash, false))
         .await
         .context("eth_getBlockByHash failed")?
         .is_some()
     {
+        debug!(?uncle_hash, "not an uncle");
         return Ok(None);
     }
+
+    debug!(?uncle_hash, "handling uncle");
 
     // user_id -> balance that we need to subtract
     let mut reversed_balances: HashMap<u64, Decimal> = HashMap::new();
 
-    let txn = app.db_transaction().await?;
+    let db_conn = app.db_conn()?;
 
     // delete any deposit txids with uncle_hash
     for reversed_deposit in increase_on_chain_balance_receipt::Entity::find()
         .filter(increase_on_chain_balance_receipt::Column::BlockHash.eq(uncle_hash.encode_hex()))
-        .all(&txn)
+        .all(db_conn)
         .await?
     {
-        let reversed_balance = reversed_balances
-            .entry(reversed_deposit.deposit_to_user_id)
-            .or_default();
+        let user_id = reversed_deposit.deposit_to_user_id;
+
+        let reversed_balance = reversed_balances.entry(user_id).or_default();
 
         *reversed_balance += reversed_deposit.amount;
 
         // TODO: instead of delete, mark as uncled? seems like it would bloat the db unnecessarily. a stat should be enough
-        reversed_deposit.delete(&txn).await?;
+        reversed_deposit.delete(db_conn).await?;
+
+        if let Err(err) = app
+            .user_balance_cache
+            .invalidate(&user_id, db_conn, &app.rpc_secret_key_cache)
+            .await
+        {
+            warn!(%user_id, ?err, "unable to invalidate caches");
+        };
     }
 
-    debug!("removing balances: {:#?}", reversed_balances);
-
-    txn.commit().await?;
+    debug!(?reversed_balances, "removing balances");
 
     Ok(Some(reversed_balances))
 }
