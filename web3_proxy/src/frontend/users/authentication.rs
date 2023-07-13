@@ -49,7 +49,7 @@ pub struct PostLogin {
     pub referral_code: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct LoginPostResponse {
     pub bearer_token: UserBearerToken,
     pub rpc_keys: BTreeMap<u64, rpc_key::Model>,

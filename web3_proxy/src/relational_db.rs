@@ -39,7 +39,7 @@ pub async fn get_db(
         .connect_timeout(Duration::from_secs(5))
         .min_connections(min_connections)
         .max_connections(max_connections)
-        .sqlx_logging_level(tracing::log::LevelFilter::Trace)
+        .sqlx_logging_level(tracing::log::LevelFilter::Info)
         .sqlx_logging(true);
 
     Database::connect(db_opt).await
