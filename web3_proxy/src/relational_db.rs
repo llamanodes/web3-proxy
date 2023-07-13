@@ -22,7 +22,7 @@ impl AsRef<DatabaseConnection> for DatabaseReplica {
     }
 }
 
-pub async fn get_db(
+pub async fn connect_db(
     db_url: String,
     min_connections: u32,
     max_connections: u32,
@@ -33,10 +33,12 @@ pub async fn get_db(
     let mut db_opt = sea_orm::ConnectOptions::new(db_url);
 
     // TODO: load all these options from the config file. i think docker mysql default max is 100
+    // Amazon RDS Proxy default idle timeout is 1800 seconds
     // TODO: sqlx info logging is way too verbose for production.
     db_opt
         .acquire_timeout(Duration::from_secs(5))
         .connect_timeout(Duration::from_secs(5))
+        .idle_timeout(Duration::from_secs(1795))
         .min_connections(min_connections)
         .max_connections(max_connections)
         .sqlx_logging_level(tracing::log::LevelFilter::Trace)
@@ -121,7 +123,7 @@ pub async fn get_migrated_db(
     max_connections: u32,
 ) -> anyhow::Result<DatabaseConnection> {
     // TODO: this seems to fail silently
-    let db_conn = get_db(db_url, min_connections, max_connections)
+    let db_conn = connect_db(db_url, min_connections, max_connections)
         .await
         .context("getting db")?;
 

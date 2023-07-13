@@ -12,7 +12,7 @@ use crate::jsonrpc::{
     JsonRpcErrorData, JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcId,
     JsonRpcParams, JsonRpcRequest, JsonRpcRequestEnum, JsonRpcResultData,
 };
-use crate::relational_db::{get_db, get_migrated_db, DatabaseConnection, DatabaseReplica};
+use crate::relational_db::{connect_db, get_migrated_db, DatabaseConnection, DatabaseReplica};
 use crate::response_cache::{
     JsonRpcQueryCacheKey, JsonRpcResponseCache, JsonRpcResponseEnum, JsonRpcResponseWeigher,
 };
@@ -245,7 +245,7 @@ impl Web3ProxyApp {
                         .db_replica_max_connections
                         .unwrap_or(db_max_connections);
 
-                    let db_replica = get_db(
+                    let db_replica = connect_db(
                         db_replica_url,
                         db_replica_min_connections,
                         db_replica_max_connections,
