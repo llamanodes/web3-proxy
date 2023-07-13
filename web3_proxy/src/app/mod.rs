@@ -49,6 +49,7 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{atomic, Arc};
 use std::time::Duration;
+use tokio::runtime::Runtime;
 use tokio::sync::{broadcast, mpsc, oneshot, watch, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
@@ -160,9 +161,29 @@ pub struct Web3ProxyAppSpawn {
     /// these are important and must be allowed to finish
     pub background_handles: FuturesUnordered<Web3ProxyJoinHandle<()>>,
     /// config changes are sent here
-    pub new_top_config: watch::Sender<TopConfig>,
+    pub new_top_config: Arc<watch::Sender<TopConfig>>,
     /// watch this to know when the app is ready to serve requests
     pub ranked_rpcs: watch::Receiver<Option<Arc<RankedRpcs>>>,
+}
+
+impl Drop for Web3ProxyApp {
+    fn drop(&mut self) {
+        if let Ok(db_conn) = self.db_conn().cloned() {
+            /*
+            From the sqlx docs:
+
+            We recommend calling .close().await to gracefully close the pool and its connections when you are done using it.
+            This will also wake any tasks that are waiting on an .acquire() call,
+            so for long-lived applications it’s a good idea to call .close() during shutdown.
+            */
+
+            let rt = Runtime::new().unwrap();
+
+            if let Err(err) = rt.block_on(db_conn.close()) {
+                error!(?err, "Unable to close db!");
+            };
+        }
+    }
 }
 
 impl Web3ProxyApp {
@@ -610,7 +631,7 @@ impl Web3ProxyApp {
             app,
             app_handles,
             background_handles: important_background_handles,
-            new_top_config: new_top_config_sender,
+            new_top_config: Arc::new(new_top_config_sender),
             ranked_rpcs: consensus_connections_watcher,
         })
     }

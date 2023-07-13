@@ -3,13 +3,12 @@ use entities::{user, user_tier};
 use ethers::prelude::{LocalWallet, Signer};
 use ethers::types::Signature;
 use migration::sea_orm::{
-    self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
+    self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
+    QueryFilter,
 };
 use tracing::info;
 use web3_proxy::errors::Web3ProxyResult;
 use web3_proxy::frontend::users::authentication::{LoginPostResponse, PostLogin};
-
-use super::mysql::TestMysql;
 
 /// Helper function to create an "ordinary" user
 #[allow(unused)]
@@ -57,12 +56,10 @@ pub async fn create_user(
 #[allow(unused)]
 pub async fn set_user_tier(
     x: &TestApp,
-    db: &TestMysql,
+    db_conn: &DatabaseConnection,
     user: user::Model,
     tier_name: &str,
 ) -> Web3ProxyResult<user_tier::Model> {
-    let db_conn = db.conn();
-
     let ut = user_tier::Entity::find()
         .filter(user_tier::Column::Title.like(tier_name))
         .one(db_conn)

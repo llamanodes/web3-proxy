@@ -10,10 +10,11 @@ use tokio::{
 use tracing::{info, trace, warn};
 use web3_proxy::relational_db::get_migrated_db;
 
+use migration::sea_orm::prelude;
+
 /// on drop, the mysql docker container will be shut down
 pub struct TestMysql {
     pub url: Option<String>,
-    pub conn: Option<DatabaseConnection>,
     pub container_name: String,
 }
 
@@ -40,7 +41,6 @@ impl TestMysql {
         // create the db_data as soon as the url is known
         // when this is dropped, the db will be stopped
         let mut test_mysql = Self {
-            conn: None,
             container_name: db_container_name.clone(),
             url: None,
         };
@@ -150,9 +150,8 @@ impl TestMysql {
             }
 
             match get_migrated_db(db_url.clone(), 1, 1).await {
-                Ok(x) => {
+                Ok(_) => {
                     // it worked! yey!
-                    test_mysql.conn = Some(x);
                     break;
                 }
                 Err(err) => {
@@ -168,8 +167,10 @@ impl TestMysql {
         test_mysql
     }
 
-    pub fn conn(&self) -> &DatabaseConnection {
-        self.conn.as_ref().unwrap()
+    pub async fn conn(&self) -> DatabaseConnection {
+        get_migrated_db(self.url.clone().unwrap(), 1, 5)
+            .await
+            .unwrap()
     }
 }
 
