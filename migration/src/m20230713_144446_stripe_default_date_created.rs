@@ -1,3 +1,4 @@
+// TODO: Try to re-export timestamp from within sea-orm
 use chrono;
 use sea_orm_migration::prelude::*;
 
@@ -7,16 +8,6 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        let now = chrono::offset::Utc::now();
-
-        // Then change all columns to "now"
-        let update_to_current_timestamp = Query::update()
-            .table(StripeIncreaseBalanceReceipt::Table)
-            .values([(StripeIncreaseBalanceReceipt::DateCreated, Some(now).into())])
-            .to_owned();
-
-        manager.exec_stmt(update_to_current_timestamp).await?;
-
         manager
             .alter_table(
                 Table::alter()
@@ -29,7 +20,17 @@ impl MigrationTrait for Migration {
                     )
                     .to_owned(),
             )
-            .await
+            .await?;
+
+        let now = chrono::offset::Utc::now();
+
+        // Then change all columns to "now"
+        let update_to_current_timestamp = Query::update()
+            .table(StripeIncreaseBalanceReceipt::Table)
+            .values([(StripeIncreaseBalanceReceipt::DateCreated, Some(now).into())])
+            .to_owned();
+
+        manager.exec_stmt(update_to_current_timestamp).await
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
