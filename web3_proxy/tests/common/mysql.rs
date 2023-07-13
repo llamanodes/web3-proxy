@@ -10,8 +10,6 @@ use tokio::{
 use tracing::{info, trace, warn};
 use web3_proxy::relational_db::get_migrated_db;
 
-use migration::sea_orm::prelude;
-
 /// on drop, the mysql docker container will be shut down
 pub struct TestMysql {
     pub url: Option<String>,

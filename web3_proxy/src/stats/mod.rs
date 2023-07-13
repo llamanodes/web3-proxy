@@ -354,10 +354,10 @@ impl BufferedRpcQueryStats {
 
         // Apply all the referral logic; let's keep it simple and flat for now
         if self.paid_credits_used > 0.into() {
+            let mut invalidate_caches = false;
+
             // Start a transaction
             let txn = db_conn.begin().await?;
-
-            let mut invalidate_caches = false;
 
             // Calculate if we are above the usage threshold, and apply a bonus
             // Optimally we would read this from the balance, but if we do it like this, we only have to lock a single table (much safer w.r.t. deadlocks)

@@ -316,11 +316,11 @@ pub async fn user_login_post(
 
             txn.commit().await?;
 
-            let txn = db_conn.begin().await?;
-
             // First, optionally catch a referral code from the parameters if there is any
             trace!(?payload.referral_code);
             if let Some(referral_code) = payload.referral_code.as_ref() {
+                let txn = db_conn.begin().await?;
+
                 // If it is not inside, also check in the database
                 trace!("Using register referral code: {:?}", referral_code);
                 let user_referrer = referrer::Entity::find()
@@ -340,20 +340,23 @@ pub async fn user_login_post(
                     credits_applied_for_referrer: sea_orm::Set(Decimal::new(0, 10)),
                     ..Default::default()
                 };
+
                 used_referral.insert(&txn).await?;
+
+                txn.commit().await?;
             }
-            txn.commit().await?;
 
             (caller, vec![caller_key], StatusCode::CREATED)
         }
         Some(caller) => {
             // Let's say that a user that exists can actually also redeem a key in retrospect...
-            let txn = db_conn.begin().await?;
             // TODO: Move this into a common variable outside ...
             // First, optionally catch a referral code from the parameters if there is any
             if let Some(referral_code) = payload.referral_code.as_ref() {
                 // If it is not inside, also check in the database
-                trace!("Using referral code: {:?}", referral_code);
+                let txn = db_conn.begin().await?;
+
+                trace!(?referral_code, "Using");
                 let user_referrer = referrer::Entity::find()
                     .filter(referrer::Column::ReferralCode.eq(referral_code))
                     .one(&txn)
@@ -374,8 +377,9 @@ pub async fn user_login_post(
                     ..Default::default()
                 };
                 used_referral.insert(&txn).await?;
+
+                txn.commit().await?;
             }
-            txn.commit().await?;
 
             // the user is already registered
             let user_rpc_keys = rpc_key::Entity::find()

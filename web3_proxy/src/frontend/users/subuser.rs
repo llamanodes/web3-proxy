@@ -259,13 +259,14 @@ pub async fn modify_subuser(
     let db_conn = app.db_conn()?;
     let (subuser, _subuser_rpc_keys, _status_code) = match subuser {
         None => {
-            let txn = db_conn.begin().await?;
             // First add a user; the only thing we need from them is an address
             // everything else is optional
             let subuser = user::ActiveModel {
                 address: sea_orm::Set(subuser_address.to_fixed_bytes().into()), // Address::from_slice(
                 ..Default::default()
             };
+
+            let txn = db_conn.begin().await?;
 
             let subuser = subuser.insert(&txn).await?;
 
@@ -323,7 +324,6 @@ pub async fn modify_subuser(
         .await
         .web3_context("failed using the db to check for a subuser")?;
 
-    let txn = db_conn.begin().await?;
     let mut action = "no action";
 
     match subuser_entry_secondary_user {
@@ -348,7 +348,7 @@ pub async fn modify_subuser(
                 role: sea_orm::Set(new_role.clone()),
                 ..Default::default()
             };
-            active_subuser_entry_secondary_user.insert(&txn).await?;
+            active_subuser_entry_secondary_user.insert(db_conn).await?;
             action = "added";
         }
         _ => {
@@ -360,7 +360,6 @@ pub async fn modify_subuser(
             // Do nothing in this case
         }
     };
-    txn.commit().await?;
 
     let response = (
         StatusCode::OK,
