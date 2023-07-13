@@ -3,19 +3,16 @@ use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
 use crate::premium::grant_premium_tier;
 use anyhow::Context;
 use axum::{
-    headers::{authorization::Bearer, Authorization},
     response::IntoResponse,
-    Extension, Json, TypedHeader,
+    Extension,
 };
 use axum_macros::debug_handler;
 use entities::{stripe_increase_balance_receipt, user, user_tier};
-use ethers::types::Address;
 use http::HeaderMap;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
 };
-use serde_json::json;
 use std::sync::Arc;
 use stripe::Webhook;
 use tracing::{debug, error, warn};
