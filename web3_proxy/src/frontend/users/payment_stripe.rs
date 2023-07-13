@@ -20,33 +20,6 @@ use std::sync::Arc;
 use stripe::Webhook;
 use tracing::{debug, error, warn};
 
-/// `GET /user/balance/stripe` -- Use a bearer token to get the user's balance and spend.
-///
-/// - shows a list of all stripe deposits, all fields from entity
-#[debug_handler]
-pub async fn user_stripe_deposits_get(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
-    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-) -> Web3ProxyResponse {
-    let user = app.bearer_is_authorized(bearer).await?;
-
-    let db_replica = app.db_replica().context("Getting database connection")?;
-
-    // Filter by user ...
-    let receipts = stripe_increase_balance_receipt::Entity::find()
-        .filter(stripe_increase_balance_receipt::Column::DepositToUserId.eq(user.id))
-        .all(db_replica.as_ref())
-        .await?;
-
-    // Return the response, all except the user ...
-    let response = json!({
-        "user": Address::from_slice(&user.address),
-        "deposits": receipts,
-    });
-
-    Ok(Json(response).into_response())
-}
-
 /// `POST /user/balance/stripe` -- Process a stripe transaction;
 /// this endpoint is called from the webhook with the user_id parameter in the request
 #[debug_handler]
