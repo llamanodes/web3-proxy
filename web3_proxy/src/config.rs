@@ -284,7 +284,6 @@ impl Web3RpcConfig {
         blocks_by_hash_cache: BlocksByHashCache,
         block_sender: Option<mpsc::UnboundedSender<BlockAndRpc>>,
         max_head_block_age: Duration,
-        tx_id_sender: Option<mpsc::UnboundedSender<TxHashAndRpc>>,
     ) -> anyhow::Result<(Arc<Web3Rpc>, Web3ProxyJoinHandle<()>)> {
         if !self.extra.is_empty() {
             warn!(extra=?self.extra.keys(), "unknown Web3RpcConfig fields!");
@@ -301,7 +300,6 @@ impl Web3RpcConfig {
             blocks_by_hash_cache,
             block_sender,
             max_head_block_age,
-            tx_id_sender,
         )
         .await
     }

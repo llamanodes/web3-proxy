@@ -10,7 +10,7 @@ use crate::jsonrpc::{JsonRpcParams, JsonRpcResultData};
 use crate::rpcs::request::RequestErrorHandler;
 use anyhow::{anyhow, Context};
 use arc_swap::ArcSwapOption;
-use ethers::prelude::{Bytes, Middleware, TxHash, U64};
+use ethers::prelude::{Bytes, Middleware, U64};
 use ethers::types::{Address, Transaction, U256};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
@@ -93,14 +93,13 @@ impl Web3Rpc {
         name: String,
         chain_id: u64,
         db_conn: Option<DatabaseConnection>,
-        // optional because this is only used for http providers. websocket providers don't use it
+        // optional because this is only used for http providers. websocket-only providers don't use it
         http_client: Option<reqwest::Client>,
         redis_pool: Option<RedisPool>,
         block_interval: Duration,
         block_map: BlocksByHashCache,
         block_and_rpc_sender: Option<mpsc::UnboundedSender<BlockAndRpc>>,
         max_head_block_age: Duration,
-        tx_id_sender: Option<mpsc::UnboundedSender<(TxHash, Arc<Self>)>>,
     ) -> anyhow::Result<(Arc<Web3Rpc>, Web3ProxyJoinHandle<()>)> {
         let created_at = Instant::now();
 
@@ -124,12 +123,6 @@ impl Web3Rpc {
                     "no redis client pool! needed for hard limit"
                 ))
             }
-        };
-
-        let tx_id_sender = if config.subscribe_txs {
-            tx_id_sender
-        } else {
-            None
         };
 
         let backup = config.backup;
@@ -210,18 +203,11 @@ impl Web3Rpc {
 
         // subscribe to new blocks and new transactions
         // subscribing starts the connection (with retries)
-        // TODO: make transaction subscription optional (just pass None for tx_id_sender)
         let handle = {
             let new_connection = new_connection.clone();
             tokio::spawn(async move {
-                // TODO: this needs to be a subscribe_with_reconnect that does a retry with jitter and exponential backoff
                 new_connection
-                    .subscribe_with_reconnect(
-                        block_map,
-                        block_and_rpc_sender,
-                        chain_id,
-                        tx_id_sender,
-                    )
+                    .subscribe_with_reconnect(block_map, block_and_rpc_sender, chain_id)
                     .await
             })
         };
@@ -596,23 +582,18 @@ impl Web3Rpc {
         Ok(())
     }
 
+    /// TODO: this needs to be a subscribe_with_reconnect that does a retry with jitter and exponential backoff
     #[allow(clippy::too_many_arguments)]
     async fn subscribe_with_reconnect(
         self: Arc<Self>,
         block_map: BlocksByHashCache,
         block_and_rpc_sender: Option<mpsc::UnboundedSender<BlockAndRpc>>,
         chain_id: u64,
-        tx_id_sender: Option<mpsc::UnboundedSender<(TxHash, Arc<Self>)>>,
     ) -> Web3ProxyResult<()> {
         loop {
             if let Err(err) = self
                 .clone()
-                .subscribe(
-                    block_map.clone(),
-                    block_and_rpc_sender.clone(),
-                    chain_id,
-                    tx_id_sender.clone(),
-                )
+                .subscribe(block_map.clone(), block_and_rpc_sender.clone(), chain_id)
                 .await
             {
                 if self.should_disconnect() {
@@ -645,7 +626,6 @@ impl Web3Rpc {
         block_map: BlocksByHashCache,
         block_and_rpc_sender: Option<mpsc::UnboundedSender<BlockAndRpc>>,
         chain_id: u64,
-        tx_id_sender: Option<mpsc::UnboundedSender<(TxHash, Arc<Self>)>>,
     ) -> Web3ProxyResult<()> {
         let error_handler = if self.backup {
             Some(RequestErrorHandler::DebugLevel)
@@ -766,18 +746,6 @@ impl Web3Rpc {
             futures.push(flatten_handle(tokio::spawn(f)));
         }
 
-        // subscribe pending transactions
-        // TODO: make this opt-in. its a lot of bandwidth
-        if let Some(tx_id_sender) = tx_id_sender {
-            let subscribe_stop_rx = subscribe_stop_tx.subscribe();
-
-            let f = self
-                .clone()
-                .subscribe_pending_transactions(tx_id_sender, subscribe_stop_rx);
-
-            futures.push(flatten_handle(tokio::spawn(f)));
-        }
-
         // exit if any of the futures exit
         let first_exit = futures.next().await;
 
@@ -809,11 +777,16 @@ impl Web3Rpc {
         trace!("subscribing to new heads on {}", self);
 
         // TODO: different handler depending on backup or not
-        let error_handler = None;
-        let authorization = Default::default();
+        let error_handler = if self.backup {
+            Some(Level::DEBUG.into())
+        } else {
+            Some(Level::ERROR.into())
+        };
 
         if let Some(ws_provider) = self.ws_provider.load().as_ref() {
             // todo: move subscribe_blocks onto the request handle
+            let authorization = Default::default();
+
             let active_request_handle = self
                 .wait_for_request_handle(&authorization, None, error_handler)
                 .await;
@@ -826,11 +799,10 @@ impl Web3Rpc {
             // TODO: how does this get wrapped in an arc? does ethers handle that?
             // TODO: send this request to the ws_provider instead of the http_provider
             let latest_block: Result<Option<ArcBlock>, _> = self
-                .authorized_request(
+                .internal_request(
                     "eth_getBlockByNumber",
                     &("latest", false),
-                    &authorization,
-                    Some(Level::WARN.into()),
+                    error_handler,
                     Some(2),
                     Some(Duration::from_secs(5)),
                 )
@@ -863,11 +835,10 @@ impl Web3Rpc {
                 }
 
                 let block_result = self
-                    .authorized_request::<_, Option<ArcBlock>>(
+                    .internal_request::<_, Option<ArcBlock>>(
                         "eth_getBlockByNumber",
                         &("latest", false),
-                        &authorization,
-                        Some(Level::WARN.into()),
+                        error_handler,
                         Some(2),
                         Some(Duration::from_secs(5)),
                     )
@@ -891,71 +862,6 @@ impl Web3Rpc {
             Ok(())
         } else {
             Err(anyhow!("new_heads subscription exited. reconnect needed").into())
-        }
-    }
-
-    /// Turn on the firehose of pending transactions
-    async fn subscribe_pending_transactions(
-        self: Arc<Self>,
-        tx_id_sender: mpsc::UnboundedSender<(TxHash, Arc<Self>)>,
-        mut subscribe_stop_rx: watch::Receiver<bool>,
-    ) -> Web3ProxyResult<()> {
-        // TODO: check that it actually changed to true
-        loop {
-            if *subscribe_stop_rx.borrow_and_update() {
-                break;
-            }
-
-            subscribe_stop_rx.changed().await?;
-        }
-
-        /*
-        trace!("watching pending transactions on {}", self);
-        // TODO: does this keep the lock open for too long?
-        match provider.as_ref() {
-            Web3Provider::Http(_provider) => {
-                // there is a "watch_pending_transactions" function, but a lot of public nodes do not support the necessary rpc endpoints
-                self.wait_for_disconnect().await?;
-            }
-            Web3Provider::Both(_, client) | Web3Provider::Ws(client) => {
-                // TODO: maybe the subscribe_pending_txs function should be on the active_request_handle
-                let active_request_handle = self
-                    .wait_for_request_handle(&authorization, None, Some(provider.clone()))
-                    .await?;
-
-                let mut stream = client.subscribe_pending_txs().await?;
-
-                drop(active_request_handle);
-
-                while let Some(pending_tx_id) = stream.next().await {
-                    tx_id_sender
-                        .send_async((pending_tx_id, self.clone()))
-                        .await
-                        .context("tx_id_sender")?;
-
-                    // TODO: periodically check for listeners. if no one is subscribed, unsubscribe and wait for a subscription
-
-                    // TODO: select on this instead of checking every loop
-                    if self.should_disconnect() {
-                        break;
-                    }
-                }
-
-                // TODO: is this always an error?
-                // TODO: we probably don't want a warn and to return error
-                debug!("pending_transactions subscription ended on {}", self);
-            }
-            #[cfg(test)]
-            Web3Provider::Mock => {
-                self.wait_for_disconnect().await?;
-            }
-        }
-        */
-
-        if *subscribe_stop_rx.borrow() {
-            Ok(())
-        } else {
-            Err(anyhow!("pending_transactions subscription exited. reconnect needed").into())
         }
     }
 

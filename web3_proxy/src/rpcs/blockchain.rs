@@ -2,10 +2,8 @@
 use super::consensus::ConsensusFinder;
 use super::many::Web3Rpcs;
 use super::one::Web3Rpc;
-use super::transactions::TxStatus;
 use crate::config::{average_block_interval, BlockAndRpc};
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
-use crate::frontend::authorization::Authorization;
 use derive_more::From;
 use ethers::prelude::{Block, TxHash, H256, U64};
 use moka::future::Cache;
@@ -15,7 +13,7 @@ use serde_json::json;
 use std::hash::Hash;
 use std::time::Duration;
 use std::{fmt::Display, sync::Arc};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::mpsc;
 use tokio::time::timeout;
 use tracing::{debug, error, warn};
 
@@ -267,7 +265,6 @@ impl Web3Rpcs {
     /// Will query a specific node or the best available.
     pub async fn block(
         &self,
-        authorization: &Arc<Authorization>,
         hash: &H256,
         rpc: Option<&Arc<Web3Rpc>>,
         max_tries: Option<usize>,
@@ -301,11 +298,10 @@ impl Web3Rpcs {
 
         let mut block: Option<ArcBlock> = if let Some(rpc) = rpc {
             // ask a specific rpc
-            // TODO: request_with_metadata would probably be better than authorized_request
-            rpc.authorized_request::<_, Option<ArcBlock>>(
+            // this doesn't have retries, so we do retries with `self.internal_request` below (note the "self" vs "rpc")
+            rpc.internal_request::<_, Option<ArcBlock>>(
                 "eth_getBlockByHash",
                 &get_block_params,
-                authorization,
                 None,
                 max_tries,
                 max_wait,
@@ -339,12 +335,8 @@ impl Web3Rpcs {
     }
 
     /// Convenience method to get the cannonical block at a given block height.
-    pub async fn block_hash(
-        &self,
-        authorization: &Arc<Authorization>,
-        num: &U64,
-    ) -> Web3ProxyResult<(H256, u64)> {
-        let (block, block_depth) = self.cannonical_block(authorization, num).await?;
+    pub async fn block_hash(&self, num: &U64) -> Web3ProxyResult<(H256, u64)> {
+        let (block, block_depth) = self.cannonical_block(num).await?;
 
         let hash = *block.hash();
 
@@ -353,11 +345,7 @@ impl Web3Rpcs {
 
     /// Get the heaviest chain's block from cache or backend rpc
     /// Caution! If a future block is requested, this might wait forever. Be sure to have a timeout outside of this!
-    pub async fn cannonical_block(
-        &self,
-        authorization: &Arc<Authorization>,
-        num: &U64,
-    ) -> Web3ProxyResult<(Web3ProxyBlock, u64)> {
+    pub async fn cannonical_block(&self, num: &U64) -> Web3ProxyResult<(Web3ProxyBlock, u64)> {
         // we only have blocks by hash now
         // maybe save them during save_block in a blocks_by_number Cache<U64, Vec<ArcBlock>>
         // if theres multiple, use petgraph to find the one on the main chain (and remove the others if they have enough confirmations)
@@ -376,17 +364,23 @@ impl Web3Rpcs {
             .web3_context("no consensus head block")?
             .number();
 
-        loop {
-            if num <= &head_block_num {
-                break;
+        if *num > head_block_num {
+            // if num is too far in the future, error now
+            if *num - head_block_num > self.max_head_block_lag {
+                return Err(Web3ProxyError::UnknownBlockNumber {
+                    known: head_block_num,
+                    unknown: *num,
+                });
             }
 
-            debug!(%head_block_num, %num, "waiting for future block");
+            while *num > head_block_num {
+                debug!(%head_block_num, %num, "waiting for future block");
 
-            consensus_head_receiver.changed().await?;
+                consensus_head_receiver.changed().await?;
 
-            if let Some(head) = consensus_head_receiver.borrow_and_update().as_ref() {
-                head_block_num = *head.number();
+                if let Some(head) = consensus_head_receiver.borrow_and_update().as_ref() {
+                    head_block_num = *head.number();
+                }
             }
         }
 
@@ -397,9 +391,7 @@ impl Web3Rpcs {
         if let Some(block_hash) = self.blocks_by_number.get(num) {
             // TODO: sometimes this needs to fetch the block. why? i thought block_numbers would only be set if the block hash was set
             // TODO: configurable max wait and rpc
-            let block = self
-                .block(authorization, &block_hash, None, Some(3), None)
-                .await?;
+            let block = self.block(&block_hash, None, Some(3), None).await?;
 
             return Ok((block, block_depth));
         }
@@ -426,11 +418,7 @@ impl Web3Rpcs {
 
     pub(super) async fn process_incoming_blocks(
         &self,
-        authorization: &Arc<Authorization>,
         mut block_receiver: mpsc::UnboundedReceiver<BlockAndRpc>,
-        // TODO: document that this is a watch sender and not a broadcast! if things get busy, blocks might get missed
-        // Geth's subscriptions have the same potential for skipping blocks.
-        pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
     ) -> Web3ProxyResult<()> {
         let mut consensus_finder =
             ConsensusFinder::new(Some(self.max_head_block_age), Some(self.max_head_block_lag));
@@ -449,13 +437,7 @@ impl Web3Rpcs {
                     // TODO: what timeout on this?
                     match timeout(
                         Duration::from_secs(1),
-                        consensus_finder.process_block_from_rpc(
-                            self,
-                            authorization,
-                            new_block,
-                            rpc,
-                            &pending_tx_sender,
-                        ),
+                        consensus_finder.process_block_from_rpc(self, new_block, rpc),
                     )
                     .await
                     {
@@ -493,7 +475,7 @@ impl Web3Rpcs {
                     // TODO: what timeout on this?
                     match timeout(
                         Duration::from_secs(2),
-                        consensus_finder.refresh(self, authorization, None, None),
+                        consensus_finder.refresh(self, None, None),
                     )
                     .await
                     {
