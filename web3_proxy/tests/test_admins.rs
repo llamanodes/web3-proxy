@@ -17,12 +17,6 @@ use tracing::info;
 #[ignore = "under construction"]
 #[test_log::test(tokio::test)]
 async fn test_admin_imitate_user() {
-    let a: TestAnvil = TestAnvil::spawn(31337).await;
-
-    let db = TestMysql::spawn().await;
-
-    let x = TestApp::spawn(&a, Some(&db)).await;
-
     todo!();
 }
 
@@ -75,10 +69,5 @@ async fn test_admin_grant_credits() {
 #[ignore = "under construction"]
 #[test_log::test(tokio::test)]
 async fn test_admin_change_user_tier() {
-    let a = TestAnvil::spawn(31337).await;
-    let db = TestMysql::spawn().await;
-
-    let x = TestApp::spawn(&a, Some(&db)).await;
-
     todo!();
 }

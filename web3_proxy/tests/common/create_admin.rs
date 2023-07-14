@@ -66,9 +66,11 @@ pub async fn create_user_as_admin(
     };
     info!(?admin_status_changer);
 
+    let db_conn = db.conn().await;
+
     info!("Changing the status of the admin_wallet to be an admin");
     // Pass on the database into it ...
-    admin_status_changer.main(db.conn()).await.unwrap();
+    admin_status_changer.main(&db_conn).await.unwrap();
 
     // Now log him in again, because he was just signed out
     // Login the admin again, because he was just signed out

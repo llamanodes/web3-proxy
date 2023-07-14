@@ -174,7 +174,7 @@ impl ProxydSubCommand {
 
         // start the frontend port
         let frontend_handle = tokio::spawn(frontend::serve(
-            spawned_app.app,
+            spawned_app.app.clone(),
             frontend_shutdown_receiver,
             frontend_shutdown_complete_sender,
         ));
@@ -284,6 +284,17 @@ impl ProxydSubCommand {
                     continue;
                 }
             }
+        }
+
+        if let Ok(db_conn) = spawned_app.app.db_conn().cloned() {
+            /*
+            From the sqlx docs:
+
+            We recommend calling .close().await to gracefully close the pool and its connections when you are done using it.
+            This will also wake any tasks that are waiting on an .acquire() call,
+            so for long-lived applications it’s a good idea to call .close() during shutdown.
+            */
+            db_conn.close().await?;
         }
 
         if background_errors.is_zero() && !exited_with_err {

@@ -4,23 +4,21 @@ use super::consensus::{RankedRpcs, ShouldWaitForBlock};
 use super::one::Web3Rpc;
 use super::request::{OpenRequestHandle, OpenRequestResult, RequestErrorHandler};
 use crate::app::{flatten_handle, Web3ProxyApp, Web3ProxyJoinHandle};
-use crate::config::{average_block_interval, BlockAndRpc, TxHashAndRpc, Web3RpcConfig};
+use crate::config::{average_block_interval, BlockAndRpc, Web3RpcConfig};
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::frontend::status::MokaCacheSerializer;
 use crate::jsonrpc::{JsonRpcErrorData, JsonRpcParams, JsonRpcResultData};
-use crate::rpcs::transactions::TxStatus;
 use counter::Counter;
 use derive_more::From;
-use ethers::prelude::{ProviderError, TxHash, U64};
+use ethers::prelude::{ProviderError, U64};
 use futures::future::try_join_all;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::HashMap;
 use itertools::Itertools;
-use migration::sea_orm::DatabaseConnection;
-use moka::future::{Cache, CacheBuilder};
+use moka::future::CacheBuilder;
 use parking_lot::RwLock;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
@@ -31,7 +29,7 @@ use std::fmt::{self, Display};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::select;
-use tokio::sync::{broadcast, mpsc, watch, RwLock as AsyncRwLock};
+use tokio::sync::{mpsc, watch};
 use tokio::time::{sleep, sleep_until, Duration, Instant};
 use tracing::{debug, error, info, trace, warn};
 
@@ -53,10 +51,6 @@ pub struct Web3Rpcs {
     pub(crate) watch_ranked_rpcs: watch::Sender<Option<Arc<RankedRpcs>>>,
     /// this head receiver makes it easy to wait until there is a new block
     pub(super) watch_head_block: Option<watch::Sender<Option<Web3ProxyBlock>>>,
-    /// keep track of transactions that we have sent through subscriptions
-    pub(super) pending_transaction_cache: Cache<TxHash, TxStatus>,
-    pub(super) pending_tx_id_receiver: AsyncRwLock<mpsc::UnboundedReceiver<TxHashAndRpc>>,
-    pub(super) pending_tx_id_sender: mpsc::UnboundedSender<TxHashAndRpc>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
     /// all blocks, including orphans
     pub(super) blocks_by_hash: BlocksByHashCache,
@@ -78,20 +72,16 @@ impl Web3Rpcs {
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         chain_id: u64,
-        db_conn: Option<DatabaseConnection>,
         max_head_block_lag: Option<U64>,
         min_head_rpcs: usize,
         min_sum_soft_limit: u32,
         name: String,
-        pending_transaction_cache: Cache<TxHash, TxStatus>,
-        pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
         watch_consensus_head_sender: Option<watch::Sender<Option<Web3ProxyBlock>>>,
     ) -> anyhow::Result<(
         Arc<Self>,
         Web3ProxyJoinHandle<()>,
         watch::Receiver<Option<Arc<RankedRpcs>>>,
     )> {
-        let (pending_tx_id_sender, pending_tx_id_receiver) = mpsc::unbounded_channel();
         let (block_sender, block_receiver) = mpsc::unbounded_channel::<BlockAndRpc>();
 
         // these blocks don't have full transactions, but they do have rather variable amounts of transaction hashes
@@ -132,19 +122,14 @@ impl Web3Rpcs {
             min_synced_rpcs: min_head_rpcs,
             min_sum_soft_limit,
             name,
-            pending_transaction_cache,
-            pending_tx_id_receiver: AsyncRwLock::new(pending_tx_id_receiver),
-            pending_tx_id_sender,
             watch_head_block: watch_consensus_head_sender,
             watch_ranked_rpcs: watch_consensus_rpcs_sender,
         });
 
-        let authorization = Arc::new(Authorization::internal(db_conn)?);
-
         let handle = {
             let connections = connections.clone();
 
-            tokio::spawn(connections.subscribe(authorization, block_receiver, pending_tx_sender))
+            tokio::spawn(connections.subscribe(block_receiver))
         };
 
         Ok((connections, handle, consensus_connections_watcher))
@@ -205,7 +190,6 @@ impl Web3Rpcs {
                     None
                 };
 
-                let pending_tx_id_sender = Some(self.pending_tx_id_sender.clone());
                 let blocks_by_hash_cache = self.blocks_by_hash.clone();
 
                 debug!("spawning tasks for {}", server_name);
@@ -222,7 +206,6 @@ impl Web3Rpcs {
                     blocks_by_hash_cache,
                     block_sender,
                     self.max_head_block_age,
-                    pending_tx_id_sender,
                 ));
 
                 Some(handle)
@@ -328,51 +311,42 @@ impl Web3Rpcs {
     /// transaction ids from all the `Web3Rpc`s are deduplicated and forwarded to `pending_tx_sender`
     async fn subscribe(
         self: Arc<Self>,
-        authorization: Arc<Authorization>,
         block_receiver: mpsc::UnboundedReceiver<BlockAndRpc>,
-        pending_tx_sender: Option<broadcast::Sender<TxStatus>>,
     ) -> Web3ProxyResult<()> {
         let mut futures = vec![];
 
-        // setup the transaction funnel
-        // it skips any duplicates (unless they are being orphaned)
-        // fetches new transactions from the notifying rpc
-        // forwards new transacitons to pending_tx_receipt_sender
-        if let Some(pending_tx_sender) = pending_tx_sender.clone() {
-            let clone = self.clone();
-            let authorization = authorization.clone();
-            let handle = tokio::task::spawn(async move {
-                // TODO: set up this future the same as the block funnel
-                while let Some((pending_tx_id, rpc)) =
-                    clone.pending_tx_id_receiver.write().await.recv().await
-                {
-                    let f = clone.clone().process_incoming_tx_id(
-                        authorization.clone(),
-                        rpc,
-                        pending_tx_id,
-                        pending_tx_sender.clone(),
-                    );
-                    tokio::spawn(f);
-                }
+        // // setup the transaction funnel
+        // // it skips any duplicates (unless they are being orphaned)
+        // // fetches new transactions from the notifying rpc
+        // // forwards new transacitons to pending_tx_receipt_sender
+        // if let Some(pending_tx_sender) = pending_tx_sender.clone() {
+        //     let clone = self.clone();
+        //     let handle = tokio::task::spawn(async move {
+        //         // TODO: set up this future the same as the block funnel
+        //         while let Some((pending_tx_id, rpc)) =
+        //             clone.pending_tx_id_receiver.write().await.recv().await
+        //         {
+        //             let f = clone.clone().process_incoming_tx_id(
+        //                 rpc,
+        //                 pending_tx_id,
+        //                 pending_tx_sender.clone(),
+        //             );
+        //             tokio::spawn(f);
+        //         }
 
-                Ok(())
-            });
+        //         Ok(())
+        //     });
 
-            futures.push(flatten_handle(handle));
-        }
+        //     futures.push(flatten_handle(handle));
+        // }
 
         // setup the block funnel
         if self.watch_head_block.is_some() {
             let connections = Arc::clone(&self);
-            let pending_tx_sender = pending_tx_sender.clone();
 
             let handle = tokio::task::Builder::default()
                 .name("process_incoming_blocks")
-                .spawn(async move {
-                    connections
-                        .process_incoming_blocks(&authorization, block_receiver, pending_tx_sender)
-                        .await
-                })?;
+                .spawn(async move { connections.process_incoming_blocks(block_receiver).await })?;
 
             futures.push(flatten_handle(handle));
         }
@@ -480,9 +454,9 @@ impl Web3Rpcs {
 
         for (rpc_a, rpc_b) in potential_rpcs.iter().circular_tuple_windows() {
             trace!("{} vs {}", rpc_a, rpc_b);
-            // TODO: cached key to save a read lock
-            // TODO: ties to the server with the smallest block_data_limit
-            let faster_rpc = min_by_key(rpc_a, rpc_b, |x| x.weighted_peak_latency());
+            // TODO: ties within X% to the server with the smallest block_data_limit
+            // faster rpc. backups always lose.
+            let faster_rpc = min_by_key(rpc_a, rpc_b, |x| (x.backup, x.weighted_peak_latency()));
             trace!("winner: {}", faster_rpc);
 
             // add to the skip list in case this one fails
@@ -1353,7 +1327,6 @@ impl Serialize for Web3Rpcs {
             &(
                 MokaCacheSerializer(&self.blocks_by_hash),
                 MokaCacheSerializer(&self.blocks_by_number),
-                MokaCacheSerializer(&self.pending_transaction_cache),
             ),
         )?;
 
@@ -1382,7 +1355,7 @@ mod tests {
     use ethers::types::H256;
     use ethers::types::{Block, U256};
     use latency::PeakEwmaLatency;
-    use moka::future::CacheBuilder;
+    use moka::future::{Cache, CacheBuilder};
     use std::time::{SystemTime, UNIX_EPOCH};
     use tracing::trace;
 
@@ -1539,7 +1512,6 @@ mod tests {
         let lagged_rpc = Arc::new(lagged_rpc);
 
         let (block_sender, _block_receiver) = mpsc::unbounded_channel();
-        let (pending_tx_id_sender, pending_tx_id_receiver) = mpsc::unbounded_channel();
         let (watch_ranked_rpcs, _watch_consensus_rpcs_receiver) = watch::channel(None);
         let (watch_consensus_head_sender, _watch_consensus_head_receiver) = watch::channel(None);
 
@@ -1557,11 +1529,6 @@ mod tests {
             name: "test".to_string(),
             watch_head_block: Some(watch_consensus_head_sender),
             watch_ranked_rpcs,
-            pending_transaction_cache: CacheBuilder::new(100)
-                .time_to_live(Duration::from_secs(60))
-                .build(),
-            pending_tx_id_receiver: AsyncRwLock::new(pending_tx_id_receiver),
-            pending_tx_id_sender,
             blocks_by_hash: CacheBuilder::new(100)
                 .time_to_live(Duration::from_secs(60))
                 .build(),
@@ -1576,18 +1543,16 @@ mod tests {
             min_sum_soft_limit: 1,
         };
 
-        let authorization = Arc::new(Authorization::internal(None).unwrap());
-
         let mut consensus_finder = ConsensusFinder::new(None, None);
 
         consensus_finder
-            .process_block_from_rpc(&rpcs, &authorization, None, lagged_rpc.clone(), &None)
+            .process_block_from_rpc(&rpcs, None, lagged_rpc.clone())
             .await
             .expect(
                 "its lagged, but it should still be seen as consensus if its the first to report",
             );
         consensus_finder
-            .process_block_from_rpc(&rpcs, &authorization, None, head_rpc.clone(), &None)
+            .process_block_from_rpc(&rpcs, None, head_rpc.clone())
             .await
             .unwrap();
 
@@ -1634,10 +1599,8 @@ mod tests {
         consensus_finder
             .process_block_from_rpc(
                 &rpcs,
-                &authorization,
                 Some(lagged_block.clone().try_into().unwrap()),
                 lagged_rpc.clone(),
-                &None,
             )
             .await
             .unwrap();
@@ -1655,16 +1618,14 @@ mod tests {
         consensus_finder
             .process_block_from_rpc(
                 &rpcs,
-                &authorization,
                 Some(lagged_block.clone().try_into().unwrap()),
                 head_rpc.clone(),
-                &None,
             )
             .await
             .unwrap();
 
         // TODO: how do we spawn this and wait for it to process things? subscribe and watch consensus connections?
-        // rpcs.process_incoming_blocks(&authorization, block_receiver, pending_tx_sender)
+        // rpcs.process_incoming_blocks(block_receiver, pending_tx_sender)
 
         assert!(head_rpc.has_block_data(lagged_block.number.as_ref().unwrap()));
         assert!(!head_rpc.has_block_data(head_block.number.as_ref().unwrap()));
@@ -1688,10 +1649,8 @@ mod tests {
         consensus_finder
             .process_block_from_rpc(
                 &rpcs,
-                &authorization,
                 Some(head_block.clone().try_into().unwrap()),
                 head_rpc.clone(),
-                &None,
             )
             .await
             .unwrap();
@@ -1809,7 +1768,6 @@ mod tests {
         let archive_rpc = Arc::new(archive_rpc);
 
         let (block_sender, _) = mpsc::unbounded_channel();
-        let (pending_tx_id_sender, pending_tx_id_receiver) = mpsc::unbounded_channel();
         let (watch_ranked_rpcs, _) = watch::channel(None);
         let (watch_consensus_head_sender, _watch_consensus_head_receiver) = watch::channel(None);
 
@@ -1826,11 +1784,6 @@ mod tests {
             name: "test".to_string(),
             watch_head_block: Some(watch_consensus_head_sender),
             watch_ranked_rpcs,
-            pending_transaction_cache: CacheBuilder::new(100)
-                .time_to_live(Duration::from_secs(120))
-                .build(),
-            pending_tx_id_receiver: AsyncRwLock::new(pending_tx_id_receiver),
-            pending_tx_id_sender,
             blocks_by_hash: CacheBuilder::new(100)
                 .time_to_live(Duration::from_secs(120))
                 .build(),
@@ -1843,19 +1796,11 @@ mod tests {
             max_head_block_lag: 5.into(),
         };
 
-        let authorization = Arc::new(Authorization::internal(None).unwrap());
-
         let mut connection_heads = ConsensusFinder::new(None, None);
 
         // min sum soft limit will require 2 servers
         let x = connection_heads
-            .process_block_from_rpc(
-                &rpcs,
-                &authorization,
-                Some(head_block.clone()),
-                pruned_rpc.clone(),
-                &None,
-            )
+            .process_block_from_rpc(&rpcs, Some(head_block.clone()), pruned_rpc.clone())
             .await
             .unwrap();
         assert!(!x);
@@ -1863,13 +1808,7 @@ mod tests {
         assert_eq!(rpcs.num_synced_rpcs(), 0);
 
         let x = connection_heads
-            .process_block_from_rpc(
-                &rpcs,
-                &authorization,
-                Some(head_block.clone()),
-                archive_rpc.clone(),
-                &None,
-            )
+            .process_block_from_rpc(&rpcs, Some(head_block.clone()), archive_rpc.clone())
             .await
             .unwrap();
         assert!(x);
@@ -1993,7 +1932,6 @@ mod tests {
         let mock_erigon_archive = Arc::new(mock_erigon_archive);
 
         let (block_sender, _) = mpsc::unbounded_channel();
-        let (pending_tx_id_sender, pending_tx_id_receiver) = mpsc::unbounded_channel();
         let (watch_ranked_rpcs, _) = watch::channel(None);
         let (watch_consensus_head_sender, _watch_consensus_head_receiver) = watch::channel(None);
 
@@ -2014,9 +1952,6 @@ mod tests {
             name: "test".to_string(),
             watch_head_block: Some(watch_consensus_head_sender),
             watch_ranked_rpcs,
-            pending_transaction_cache: Cache::new(10_000),
-            pending_tx_id_receiver: AsyncRwLock::new(pending_tx_id_receiver),
-            pending_tx_id_sender,
             blocks_by_hash: Cache::new(10_000),
             blocks_by_number: Cache::new(10_000),
             min_synced_rpcs: 1,
@@ -2025,29 +1960,15 @@ mod tests {
             max_head_block_lag: 5.into(),
         };
 
-        let authorization = Arc::new(Authorization::internal(None).unwrap());
-
         let mut consensus_finder = ConsensusFinder::new(None, None);
 
         consensus_finder
-            .process_block_from_rpc(
-                &rpcs,
-                &authorization,
-                Some(block_1.clone()),
-                mock_geth.clone(),
-                &None,
-            )
+            .process_block_from_rpc(&rpcs, Some(block_1.clone()), mock_geth.clone())
             .await
             .unwrap();
 
         consensus_finder
-            .process_block_from_rpc(
-                &rpcs,
-                &authorization,
-                Some(block_2.clone()),
-                mock_erigon_archive.clone(),
-                &None,
-            )
+            .process_block_from_rpc(&rpcs, Some(block_2.clone()), mock_erigon_archive.clone())
             .await
             .unwrap();
 
@@ -2103,6 +2024,16 @@ mod test {
             Reverse(Some(1)),
             Reverse(None),
         ];
+
+        let mut sorted_vec = test_vec.clone();
+        sorted_vec.sort();
+
+        assert_eq!(test_vec, sorted_vec);
+    }
+
+    #[test]
+    fn test_bool_sort() {
+        let test_vec = vec![false, true];
 
         let mut sorted_vec = test_vec.clone();
         sorted_vec.sort();

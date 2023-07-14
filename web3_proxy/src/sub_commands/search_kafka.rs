@@ -1,4 +1,4 @@
-use crate::{config::TopConfig, frontend::authorization::RpcSecretKey, relational_db::get_db};
+use crate::{config::TopConfig, frontend::authorization::RpcSecretKey, relational_db::connect_db};
 use anyhow::Context;
 use argh::FromArgs;
 use entities::rpc_key;
@@ -35,7 +35,7 @@ impl SearchKafkaSubCommand {
         let mut rpc_key_id = self.rpc_key_id.map(|x| x.get());
 
         if let Some(rpc_key) = self.rpc_key {
-            let db_conn = get_db(top_config.app.db_url.unwrap(), 1, 1).await?;
+            let db_conn = connect_db(top_config.app.db_url.unwrap(), 1, 1).await?;
 
             let rpc_key: Uuid = rpc_key.into();
 

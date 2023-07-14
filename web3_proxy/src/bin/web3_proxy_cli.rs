@@ -18,7 +18,7 @@ use web3_proxy::sub_commands;
 use web3_proxy::{
     app::APP_USER_AGENT,
     config::TopConfig,
-    relational_db::{get_db, get_migrated_db},
+    relational_db::{connect_db, get_migrated_db},
 };
 
 #[cfg(feature = "mimalloc")]
@@ -307,7 +307,7 @@ fn main() -> anyhow::Result<()> {
                     "'--config' (with a db) or '--db-url' is required to run change_admin_status",
                 );
 
-                let db_conn = get_db(db_url, 1, 1).await?;
+                let db_conn = connect_db(db_url, 1, 1).await?;
 
                 x.main(&db_conn).await
             }
@@ -316,7 +316,7 @@ fn main() -> anyhow::Result<()> {
                     .db_url
                     .expect("'--config' (with a db) or '--db-url' is required to run change_user_addres");
 
-                let db_conn = get_db(db_url, 1, 1).await?;
+                let db_conn = connect_db(db_url, 1, 1).await?;
 
                 x.main(&db_conn).await
             }
@@ -325,7 +325,7 @@ fn main() -> anyhow::Result<()> {
                     .db_url
                     .expect("'--config' (with a db) or '--db-url' is required to run change_user_tier");
 
-                let db_conn = get_db(db_url, 1, 1).await?;
+                let db_conn = connect_db(db_url, 1, 1).await?;
 
                 x.main(&db_conn).await
             }
@@ -334,7 +334,7 @@ fn main() -> anyhow::Result<()> {
                     "'--config' (with a db) or '--db-url' is required to run change_user_tier_by_address",
                 );
 
-                let db_conn = get_db(db_url, 1, 1).await?;
+                let db_conn = connect_db(db_url, 1, 1).await?;
 
                 x.main(&db_conn).await
             }
@@ -343,7 +343,7 @@ fn main() -> anyhow::Result<()> {
                     .db_url
                     .expect("'--config' (with a db) or '--db-url' is required to run change_user_tier_by_key");
 
-                let db_conn = get_db(db_url, 1, 1).await?;
+                let db_conn = connect_db(db_url, 1, 1).await?;
 
                 x.main(&db_conn).await
             }
@@ -371,7 +371,7 @@ fn main() -> anyhow::Result<()> {
                     .db_url
                     .expect("'--config' (with a db) or '--db-url' is required to run count_users");
 
-                let db_conn = get_db(db_url, 1, 1).await?;
+                let db_conn = connect_db(db_url, 1, 1).await?;
 
                 x.main(&db_conn).await
             }
@@ -388,7 +388,7 @@ fn main() -> anyhow::Result<()> {
                     .expect("'--config' (with a db) or '--db-url' is required to run drop_migration_lock");
 
                 // very intentionally, do NOT run migrations here. that would wait forever if the migration lock is abandoned
-                let db_conn = get_db(db_url, 1, 1).await?;
+                let db_conn = connect_db(db_url, 1, 1).await?;
 
                 x.main(&db_conn).await
             }
@@ -402,7 +402,7 @@ fn main() -> anyhow::Result<()> {
                     .db_url
                     .expect("'--config' (with a db) or '--db-url' is required to run the migration from stats-mysql to stats-influx");
 
-                let db_conn = get_db(db_url, 1, 1).await?;
+                let db_conn = connect_db(db_url, 1, 1).await?;
                 x.main(top_config, &db_conn).await
             }
             SubCommand::Pagerduty(x) => {
@@ -434,7 +434,7 @@ fn main() -> anyhow::Result<()> {
                 let db_url = cli_config
                     .db_url
                     .expect("'--config' (with a db) or '--db-url' is required to run transfer_key");
-                let db_conn = get_db(db_url, 1, 1).await?;
+                let db_conn = connect_db(db_url, 1, 1).await?;
 
                 x.main(&db_conn).await
             }

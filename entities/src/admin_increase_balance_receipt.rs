@@ -13,6 +13,7 @@ pub struct Model {
     pub admin_id: u64,
     pub deposit_to_user_id: u64,
     pub note: String,
+    pub date_created: DateTimeUtc,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -1,9 +1,7 @@
 use super::blockchain::Web3ProxyBlock;
 use super::many::Web3Rpcs;
 use super::one::Web3Rpc;
-use super::transactions::TxStatus;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
-use crate::frontend::authorization::Authorization;
 use base64::engine::general_purpose;
 use derive_more::Constructor;
 use ethers::prelude::{H256, U64};
@@ -16,7 +14,6 @@ use serde::Serialize;
 use std::cmp::{Ordering, Reverse};
 use std::sync::{atomic, Arc};
 use std::time::Duration;
-use tokio::sync::broadcast;
 use tokio::time::Instant;
 use tracing::{debug, enabled, info, trace, warn, Level};
 
@@ -423,12 +420,11 @@ impl ConsensusFinder {
     pub(super) async fn refresh(
         &mut self,
         web3_rpcs: &Web3Rpcs,
-        authorization: &Arc<Authorization>,
         rpc: Option<&Arc<Web3Rpc>>,
         new_block: Option<Web3ProxyBlock>,
     ) -> Web3ProxyResult<bool> {
         let new_ranked_rpcs = match self
-            .find_consensus_connections(authorization, web3_rpcs)
+            .find_consensus_connections(web3_rpcs)
             .await
             .web3_context("error while finding consensus head block!")?
         {
@@ -616,10 +612,8 @@ impl ConsensusFinder {
     pub(super) async fn process_block_from_rpc(
         &mut self,
         web3_rpcs: &Web3Rpcs,
-        authorization: &Arc<Authorization>,
         new_block: Option<Web3ProxyBlock>,
         rpc: Arc<Web3Rpc>,
-        _pending_tx_sender: &Option<broadcast::Sender<TxStatus>>,
     ) -> Web3ProxyResult<bool> {
         // TODO: how should we handle an error here?
         if !self
@@ -632,8 +626,7 @@ impl ConsensusFinder {
             return Ok(false);
         }
 
-        self.refresh(web3_rpcs, authorization, Some(&rpc), new_block)
-            .await
+        self.refresh(web3_rpcs, Some(&rpc), new_block).await
     }
 
     fn remove(&mut self, rpc: &Arc<Web3Rpc>) -> Option<Web3ProxyBlock> {
@@ -797,7 +790,6 @@ impl ConsensusFinder {
 
     pub async fn find_consensus_connections(
         &mut self,
-        authorization: &Arc<Authorization>,
         web3_rpcs: &Web3Rpcs,
     ) -> Web3ProxyResult<Option<RankedRpcs>> {
         self.update_tiers().await?;
@@ -868,10 +860,7 @@ impl ConsensusFinder {
 
                 let parent_hash = block_to_check.parent_hash();
 
-                match web3_rpcs
-                    .block(authorization, parent_hash, Some(rpc), Some(1), None)
-                    .await
-                {
+                match web3_rpcs.block(parent_hash, Some(rpc), Some(1), None).await {
                     Ok(parent_block) => block_to_check = parent_block,
                     Err(err) => {
                         debug!(

@@ -12,7 +12,7 @@ use crate::jsonrpc::{
     JsonRpcErrorData, JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcId,
     JsonRpcParams, JsonRpcRequest, JsonRpcRequestEnum, JsonRpcResultData,
 };
-use crate::relational_db::{get_db, get_migrated_db, DatabaseConnection, DatabaseReplica};
+use crate::relational_db::{connect_db, get_migrated_db, DatabaseConnection, DatabaseReplica};
 use crate::response_cache::{
     JsonRpcQueryCacheKey, JsonRpcResponseCache, JsonRpcResponseEnum, JsonRpcResponseWeigher,
 };
@@ -21,7 +21,6 @@ use crate::rpcs::consensus::RankedRpcs;
 use crate::rpcs::many::Web3Rpcs;
 use crate::rpcs::one::Web3Rpc;
 use crate::rpcs::provider::{connect_http, EthersHttpProvider};
-use crate::rpcs::transactions::TxStatus;
 use crate::stats::{AppStat, FlushedStats, StatBuffer};
 use anyhow::Context;
 use axum::http::StatusCode;
@@ -29,7 +28,7 @@ use chrono::Utc;
 use deferred_rate_limiter::DeferredRateLimiter;
 use entities::user;
 use ethers::core::utils::keccak256;
-use ethers::prelude::{Address, Bytes, Transaction, TxHash, H256, U64};
+use ethers::prelude::{Address, Bytes, Transaction, H256, U64};
 use ethers::types::U256;
 use ethers::utils::rlp::{Decodable, Rlp};
 use futures::future::join_all;
@@ -50,6 +49,7 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{atomic, Arc};
 use std::time::Duration;
+use tokio::runtime::Runtime;
 use tokio::sync::{broadcast, mpsc, oneshot, watch, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
@@ -87,9 +87,6 @@ pub struct Web3ProxyApp {
     /// don't drop this or the sender will stop working
     /// TODO: broadcast channel instead?
     pub watch_consensus_head_receiver: watch::Receiver<Option<Web3ProxyBlock>>,
-    /// rpc clients that subscribe to pendingTransactions use this channel
-    /// This is the Sender so that new channels can subscribe to it
-    pending_tx_sender: broadcast::Sender<TxStatus>,
     /// Optional database for users and accounting
     pub db_conn: Option<DatabaseConnection>,
     /// Optional read-only database for users and accounting
@@ -107,9 +104,6 @@ pub struct Web3ProxyApp {
     /// rate limit the login endpoint
     /// we do this because each pending login is a row in the database
     pub login_rate_limiter: Option<RedisRateLimiter>,
-    /// store pending transactions that we've seen so that we don't send duplicates to subscribers
-    /// TODO: think about this more. might be worth storing if we sent the transaction or not and using this for automatic retries
-    pub pending_transactions: Cache<TxHash, TxStatus>,
     /// Send private requests (like eth_sendRawTransaction) to all these servers
     /// TODO: include another type so that we can use private miner relays that do not use JSONRPC requests
     pub private_rpcs: Option<Arc<Web3Rpcs>>,
@@ -167,9 +161,29 @@ pub struct Web3ProxyAppSpawn {
     /// these are important and must be allowed to finish
     pub background_handles: FuturesUnordered<Web3ProxyJoinHandle<()>>,
     /// config changes are sent here
-    pub new_top_config: watch::Sender<TopConfig>,
+    pub new_top_config: Arc<watch::Sender<TopConfig>>,
     /// watch this to know when the app is ready to serve requests
     pub ranked_rpcs: watch::Receiver<Option<Arc<RankedRpcs>>>,
+}
+
+impl Drop for Web3ProxyApp {
+    fn drop(&mut self) {
+        if let Ok(db_conn) = self.db_conn().cloned() {
+            /*
+            From the sqlx docs:
+
+            We recommend calling .close().await to gracefully close the pool and its connections when you are done using it.
+            This will also wake any tasks that are waiting on an .acquire() call,
+            so for long-lived applications it’s a good idea to call .close() during shutdown.
+            */
+
+            let rt = Runtime::new().unwrap();
+
+            if let Err(err) = rt.block_on(db_conn.close()) {
+                error!(?err, "Unable to close db!");
+            };
+        }
+    }
 }
 
 impl Web3ProxyApp {
@@ -252,7 +266,7 @@ impl Web3ProxyApp {
                         .db_replica_max_connections
                         .unwrap_or(db_max_connections);
 
-                    let db_replica = get_db(
+                    let db_replica = connect_db(
                         db_replica_url,
                         db_replica_min_connections,
                         db_replica_max_connections,
@@ -453,25 +467,6 @@ impl Web3ProxyApp {
         }
 
         let (watch_consensus_head_sender, watch_consensus_head_receiver) = watch::channel(None);
-        // TODO: will one receiver lagging be okay? how big should this be?
-        let (pending_tx_sender, pending_tx_receiver) = broadcast::channel(256);
-
-        // TODO: use this? it could listen for confirmed transactions and then clear pending_transactions, but the head_block_sender is doing that
-        // TODO: don't drop the pending_tx_receiver. instead, read it to mark transactions as "seen". once seen, we won't re-send them?
-        // TODO: once a transaction is "Confirmed" we remove it from the map. this should prevent major memory leaks.
-        // TODO: we should still have some sort of expiration or maximum size limit for the map
-        drop(pending_tx_receiver);
-
-        // TODO: capacity from configs
-        // all these are the same size, so no need for a weigher
-        // TODO: this used to have a time_to_idle
-        // TODO: different chains might handle this differently
-        // TODO: what should we set? 5 minutes is arbitrary. the nodes themselves hold onto transactions for much longer
-        // TODO: this used to be time_to_update, but
-        let pending_transactions = CacheBuilder::new(10_000)
-            .name("pending_transactions")
-            .time_to_live(Duration::from_secs(300))
-            .build();
 
         // responses can be very different in sizes, so this is a cache with a max capacity and a weigher
         // TODO: we should emit stats to calculate a more accurate expected cache size
@@ -499,13 +494,10 @@ impl Web3ProxyApp {
 
         let (balanced_rpcs, balanced_handle, consensus_connections_watcher) = Web3Rpcs::spawn(
             chain_id,
-            db_conn.clone(),
             top_config.app.max_head_block_lag,
             top_config.app.min_synced_rpcs,
             top_config.app.min_sum_soft_limit,
             "balanced rpcs".to_string(),
-            pending_transactions.clone(),
-            Some(pending_tx_sender.clone()),
             Some(watch_consensus_head_sender),
         )
         .await
@@ -520,19 +512,13 @@ impl Web3ProxyApp {
             None
         } else {
             // TODO: do something with the spawn handle
-            // TODO: Merge
-            // let (private_rpcs, private_rpcs_handle) = Web3Rpcs::spawn(
             let (private_rpcs, private_handle, _) = Web3Rpcs::spawn(
                 chain_id,
-                db_conn.clone(),
                 // private rpcs don't get subscriptions, so no need for max_head_block_lag
                 None,
                 0,
                 0,
                 "protected rpcs".to_string(),
-                pending_transactions.clone(),
-                // TODO: subscribe to pending transactions on the private rpcs? they seem to have low rate limits, but they should have
-                None,
                 // subscribing to new heads here won't work well. if they are fast, they might be ahead of balanced_rpcs
                 // they also often have low rate limits
                 // however, they are well connected to miners/validators. so maybe using them as a safety check would be good
@@ -556,14 +542,11 @@ impl Web3ProxyApp {
             // TODO: do something with the spawn handle
             let (bundler_4337_rpcs, bundler_4337_rpcs_handle, _) = Web3Rpcs::spawn(
                 chain_id,
-                db_conn.clone(),
                 // bundler_4337_rpcs don't get subscriptions, so no need for max_head_block_lag
                 None,
                 0,
                 0,
                 "eip4337 rpcs".to_string(),
-                pending_transactions.clone(),
-                None,
                 None,
             )
             .await
@@ -595,8 +578,6 @@ impl Web3ProxyApp {
             jsonrpc_response_cache,
             kafka_producer,
             login_rate_limiter,
-            pending_transactions,
-            pending_tx_sender,
             private_rpcs,
             prometheus_port: prometheus_port.clone(),
             rpc_secret_key_cache,
@@ -650,7 +631,7 @@ impl Web3ProxyApp {
             app,
             app_handles,
             background_handles: important_background_handles,
-            new_top_config: new_top_config_sender,
+            new_top_config: Arc::new(new_top_config_sender),
             ranked_rpcs: consensus_connections_watcher,
         })
     }
@@ -1184,8 +1165,6 @@ impl Web3ProxyApp {
         // TODO: don't clone into a new string?
         let request_method = method.to_string();
 
-        let authorization = request_metadata.authorization.clone().unwrap_or_default();
-
         // TODO: serve net_version without querying the backend
         // TODO: don't force RawValue
         let response_data: JsonRpcResponseEnum<Arc<RawValue>> = match request_method.as_ref() {
@@ -1608,7 +1587,6 @@ impl Web3ProxyApp {
                 // TODO: add a stat for archive vs full since they should probably cost different
                 // TODO: this cache key can be rather large. is that okay?
                 let cache_key: Option<JsonRpcQueryCacheKey> = match CacheMode::new(
-                    &authorization,
                     method,
                     params,
                     &head_block,

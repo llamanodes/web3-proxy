@@ -1,4 +1,5 @@
 //! Helper functions for turning ether's BlockNumber into numbers and updating incoming queries to match.
+use crate::rpcs::many::Web3Rpcs;
 use crate::{
     errors::{Web3ProxyError, Web3ProxyResult},
     rpcs::blockchain::Web3ProxyBlock,
@@ -10,10 +11,7 @@ use ethers::{
     types::H256,
 };
 use serde_json::json;
-use std::sync::Arc;
 use tracing::{error, trace, warn};
-
-use crate::{frontend::authorization::Authorization, rpcs::many::Web3Rpcs};
 
 #[allow(non_snake_case)]
 pub fn BlockNumber_to_U64(block_num: BlockNumber, latest_block: &U64) -> (U64, bool) {
@@ -67,7 +65,6 @@ impl From<&Web3ProxyBlock> for BlockNumAndHash {
 /// modify params to always have a block hash and not "latest"
 /// TODO: this should replace all block numbers with hashes, not just "latest"
 pub async fn clean_block_number(
-    authorization: &Arc<Authorization>,
     params: &mut serde_json::Value,
     block_param_id: usize,
     latest_block: &Web3ProxyBlock,
@@ -101,7 +98,7 @@ pub async fn clean_block_number(
                             serde_json::from_value(block_hash).context("decoding blockHash")?;
 
                         let block = rpcs
-                            .block(authorization, &block_hash, None, Some(3), None)
+                            .block(&block_hash, None, Some(3), None)
                             .await
                             .context("fetching block number from hash")?;
 
@@ -115,12 +112,12 @@ pub async fn clean_block_number(
                     // TODO: move this to a helper function?
                     if let Ok(block_num) = serde_json::from_value::<U64>(x.clone()) {
                         let (block_hash, _) = rpcs
-                            .block_hash(authorization, &block_num)
+                            .block_hash(&block_num)
                             .await
                             .context("fetching block hash from number")?;
 
                         let block = rpcs
-                            .block(authorization, &block_hash, None, Some(3), None)
+                            .block(&block_hash, None, Some(3), None)
                             .await
                             .context("fetching block from hash")?;
 
@@ -136,12 +133,12 @@ pub async fn clean_block_number(
                             (latest_block.into(), change)
                         } else {
                             let (block_hash, _) = rpcs
-                                .block_hash(authorization, &block_num)
+                                .block_hash(&block_num)
                                 .await
                                 .context("fetching block hash from number")?;
 
                             let block = rpcs
-                                .block(authorization, &block_hash, None, Some(3), None)
+                                .block(&block_hash, None, Some(3), None)
                                 .await
                                 .context("fetching block from hash")?;
 
@@ -149,7 +146,7 @@ pub async fn clean_block_number(
                         }
                     } else if let Ok(block_hash) = serde_json::from_value::<H256>(x.clone()) {
                         let block = rpcs
-                            .block(authorization, &block_hash, None, Some(3), None)
+                            .block(&block_hash, None, Some(3), None)
                             .await
                             .context("fetching block number from hash")?;
 
@@ -193,13 +190,12 @@ pub enum CacheMode {
 
 impl CacheMode {
     pub async fn new(
-        authorization: &Arc<Authorization>,
         method: &str,
         params: &mut serde_json::Value,
         head_block: &Web3ProxyBlock,
         rpcs: &Web3Rpcs,
     ) -> Self {
-        match Self::try_new(authorization, method, params, head_block, rpcs).await {
+        match Self::try_new(method, params, head_block, rpcs).await {
             Ok(x) => x,
             Err(err) => {
                 warn!(?err, "unable to determine cache mode from params");
@@ -209,7 +205,6 @@ impl CacheMode {
     }
 
     pub async fn try_new(
-        authorization: &Arc<Authorization>,
         method: &str,
         params: &mut serde_json::Value,
         head_block: &Web3ProxyBlock,
@@ -284,7 +279,7 @@ impl CacheMode {
                             *x = json!(block_num);
                         }
 
-                        let (block_hash, _) = rpcs.block_hash(authorization, &block_num).await?;
+                        let (block_hash, _) = rpcs.block_hash(&block_num).await?;
 
                         BlockNumAndHash(block_num, block_hash)
                     } else {
@@ -304,7 +299,7 @@ impl CacheMode {
                             *x = json!(block_num);
                         }
 
-                        let (block_hash, _) = rpcs.block_hash(authorization, &block_num).await?;
+                        let (block_hash, _) = rpcs.block_hash(&block_num).await?;
 
                         BlockNumAndHash(block_num, block_hash)
                     } else {
@@ -366,7 +361,7 @@ impl CacheMode {
             }
         };
 
-        match clean_block_number(authorization, params, block_param_id, head_block, rpcs).await {
+        match clean_block_number(params, block_param_id, head_block, rpcs).await {
             Ok(block) => Ok(CacheMode::Cache {
                 block,
                 cache_errors: true,

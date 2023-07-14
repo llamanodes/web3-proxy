@@ -1,11 +1,9 @@
 use crate::app::Web3ProxyApp;
 use crate::balance::Balance;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse, Web3ProxyResult};
-use crate::frontend::authorization::{
-    login_is_authorized, Authorization as Web3ProxyAuthorization,
-};
+use crate::frontend::authorization::login_is_authorized;
 use crate::frontend::users::authentication::register_new_user;
-use crate::premium::grant_premium_tier;
+use crate::premium::{get_user_and_tier_from_address, grant_premium_tier};
 use anyhow::Context;
 use axum::{
     extract::Path,
@@ -17,7 +15,7 @@ use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use entities::{
     admin_increase_balance_receipt, increase_on_chain_balance_receipt,
-    stripe_increase_balance_receipt, user, user_tier,
+    stripe_increase_balance_receipt,
 };
 use ethers::abi::AbiEncode;
 use ethers::types::{Address, Block, TransactionReceipt, TxHash, H256};
@@ -31,7 +29,7 @@ use payment_contracts::ierc20::IERC20;
 use payment_contracts::payment_factory::{self, PaymentFactory};
 use serde_json::json;
 use std::sync::Arc;
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 /// Implements any logic related to payments
 /// Removed this mainly from "user" as this was getting clogged
@@ -83,6 +81,7 @@ pub async fn user_chain_deposits_get(
                 "amount": x.amount,
                 "chain_id": x.chain_id,
                 "tx_hash": x.tx_hash,
+                "date_created": x.date_created
             })
         })
         .collect::<Vec<_>>();
@@ -165,6 +164,7 @@ pub async fn user_admin_deposits_get(
                 "amount": x.amount,
                 "deposit_to_user_id": x.deposit_to_user_id,
                 "note": x.note,
+                "date_created": x.date_created
             })
         })
         .collect::<Vec<_>>();
@@ -185,14 +185,12 @@ pub async fn user_balance_post(
     Path(mut params): Path<HashMap<String, String>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
 ) -> Web3ProxyResponse {
+    // TODO: think more about rate limits here. internal scripts should have no limits, but public entry should
     // rate limit by bearer token **OR** IP address
-    let authorization = if let Some(TypedHeader(Authorization(bearer))) = bearer {
+    if let Some(TypedHeader(Authorization(bearer))) = bearer {
         app.bearer_is_authorized(bearer).await?;
-
-        // TODO: is handling this as internal fine?
-        Web3ProxyAuthorization::internal(app.db_conn().ok().cloned())?
     } else if let Some(InsecureClientIp(ip)) = ip {
-        login_is_authorized(&app, ip).await?
+        login_is_authorized(&app, ip).await?;
     } else {
         return Err(Web3ProxyError::AccessDenied("no bearer token or ip".into()));
     };
@@ -210,15 +208,9 @@ pub async fn user_balance_post(
 
     let db_conn = app.db_conn()?;
 
-    let authorization = Arc::new(authorization);
-
     // get the transaction receipt
     let transaction_receipt = app
-        .authorized_request::<_, Option<TransactionReceipt>>(
-            "eth_getTransactionReceipt",
-            (tx_hash,),
-            authorization.clone(),
-        )
+        .internal_request::<_, Option<TransactionReceipt>>("eth_getTransactionReceipt", (tx_hash,))
         .await?;
 
     // check for uncles
@@ -250,10 +242,20 @@ pub async fn user_balance_post(
         .map(|x| serde_json::from_str(x.block_hash.as_str()).unwrap())
         .collect();
 
-    for uncle_hash in uncle_hashes.into_iter() {
-        if let Some(x) = handle_uncle_block(&app, &authorization, uncle_hash).await? {
-            info!("balance changes from uncle: {:#?}", x);
-        }
+    {
+        let app = app.clone();
+        tokio::spawn(async move {
+            for uncle_hash in uncle_hashes.into_iter() {
+                match handle_uncle_block(&app, uncle_hash).await {
+                    Ok(x) => {
+                        info!(?x, "balance changes from uncle");
+                    }
+                    Err(err) => {
+                        error!(%uncle_hash, ?err, "handling uncle block");
+                    }
+                }
+            }
+        });
     }
 
     if tx_pending {
@@ -276,14 +278,12 @@ pub async fn user_balance_post(
     // TODO: if the transaction doesn't have enough confirmations yet, add it to a queue to try again later
     // 1 confirmation should be fine though
 
-    let txn = db_conn.begin().await?;
-
     // if the transaction is already saved, return early
     if increase_on_chain_balance_receipt::Entity::find()
         .filter(increase_on_chain_balance_receipt::Column::TxHash.eq(tx_hash.encode_hex()))
         .filter(increase_on_chain_balance_receipt::Column::ChainId.eq(app.config.chain_id))
         .filter(increase_on_chain_balance_receipt::Column::BlockHash.eq(block_hash.encode_hex()))
-        .one(&txn)
+        .one(db_conn)
         .await?
         .is_some()
     {
@@ -303,11 +303,8 @@ pub async fn user_balance_post(
 
     // TODO: check bloom filters
 
-    let mut user_ids_need_premium = HashSet::new();
-
     // the transaction might contain multiple relevant logs. collect them all
     let mut response_data = vec![];
-    let mut user_ids_to_invalidate = HashSet::new();
     for log in transaction_receipt.logs {
         if let Some(true) = log.removed {
             // TODO: do we need to make sure this row is deleted? it should be handled by `handle_uncle_block`
@@ -355,18 +352,17 @@ pub async fn user_balance_post(
                 payment_token_amount
             );
 
-            let recipient = match user::Entity::find()
-                .filter(user::Column::Address.eq(recipient_account.as_bytes()))
-                .one(&txn)
-                .await?
-            {
-                Some(x) => x,
-                None => {
-                    let (user, _) = register_new_user(&txn, recipient_account).await?;
+            let txn = db_conn.begin().await?;
 
-                    user
-                }
-            };
+            let (recipient, recipient_tier) =
+                match get_user_and_tier_from_address(&recipient_account, &txn).await? {
+                    Some(x) => x,
+                    None => {
+                        let (user, _) = register_new_user(&txn, recipient_account).await?;
+
+                        (user, None)
+                    }
+                };
 
             // For now we only accept stablecoins. This will need conversions if we accept other tokens.
             // 1$ = Decimal(1) for any stablecoin
@@ -389,12 +385,17 @@ pub async fn user_balance_post(
                 log_index: sea_orm::ActiveValue::Set(log_index),
                 token_address: sea_orm::ActiveValue::Set(payment_token_address.encode_hex()),
                 tx_hash: sea_orm::ActiveValue::Set(tx_hash.encode_hex()),
+                date_created: sea_orm::ActiveValue::NotSet,
             };
             trace!("Trying to insert receipt {:?}", receipt);
 
             receipt.save(&txn).await?;
 
-            user_ids_to_invalidate.insert(recipient.id);
+            grant_premium_tier(&recipient, recipient_tier.as_ref(), &txn)
+                .await
+                .web3_context("granting premium tier")?;
+
+            txn.commit().await?;
 
             let x = json!({
                 "amount": payment_token_amount,
@@ -409,31 +410,15 @@ pub async fn user_balance_post(
 
             response_data.push(x);
 
-            user_ids_need_premium.insert(recipient);
+            // invalidate the cache as well
+            if let Err(err) = app
+                .user_balance_cache
+                .invalidate(&recipient.id, db_conn, &app.rpc_secret_key_cache)
+                .await
+            {
+                warn!(?err, user_id=%recipient.id, "unable to invalidate cache");
+            };
         }
-    }
-
-    for user in user_ids_need_premium.into_iter() {
-        let user_tier = user_tier::Entity::find_by_id(user.user_tier_id)
-            .one(&txn)
-            .await?;
-
-        grant_premium_tier(&user, user_tier.as_ref(), &txn)
-            .await
-            .web3_context("granting premium tier")?;
-    }
-
-    txn.commit().await?;
-
-    for user_id in user_ids_to_invalidate.into_iter() {
-        // Finally invalidate the cache as well
-        if let Err(err) = app
-            .user_balance_cache
-            .invalidate(&user_id, db_conn, &app.rpc_secret_key_cache)
-            .await
-        {
-            warn!(?err, "unable to invalidate caches");
-        };
     }
 
     let response = (StatusCode::CREATED, Json(json!(response_data))).into_response();
@@ -445,10 +430,19 @@ pub async fn user_balance_post(
 #[debug_handler]
 pub async fn user_balance_uncle_post(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
-    InsecureClientIp(ip): InsecureClientIp,
+    ip: Option<InsecureClientIp>,
     Path(mut params): Path<HashMap<String, String>>,
+    bearer: Option<TypedHeader<Authorization<Bearer>>>,
 ) -> Web3ProxyResponse {
-    let authorization = login_is_authorized(&app, ip).await?;
+    // TODO: think more about rate limits here. internal scripts should have no limits, but public entry should
+    // rate limit by bearer token **OR** IP address
+    if let Some(TypedHeader(Authorization(bearer))) = bearer {
+        app.bearer_is_authorized(bearer).await?;
+    } else if let Some(InsecureClientIp(ip)) = ip {
+        login_is_authorized(&app, ip).await?;
+    } else {
+        return Err(Web3ProxyError::AccessDenied("no bearer token or ip".into()));
+    };
 
     // Get the transaction hash, and the amount that the user wants to top up by.
     // Let's say that for now, 1 credit is equivalent to 1 dollar (assuming any stablecoin has a 1:1 peg)
@@ -462,9 +456,7 @@ pub async fn user_balance_uncle_post(
             Web3ProxyError::BadRequest(format!("unable to parse uncle_hash: {}", err).into())
         })?;
 
-    let authorization = Arc::new(authorization);
-
-    if let Some(x) = handle_uncle_block(&app, &authorization, uncle_hash).await? {
+    if let Some(x) = handle_uncle_block(&app, uncle_hash).await? {
         Ok(Json(x).into_response())
     } else {
         // TODO: is BadRequest the right error to use?
@@ -474,49 +466,51 @@ pub async fn user_balance_uncle_post(
 
 pub async fn handle_uncle_block(
     app: &Arc<Web3ProxyApp>,
-    authorization: &Arc<Web3ProxyAuthorization>,
     uncle_hash: H256,
 ) -> Web3ProxyResult<Option<HashMap<u64, Decimal>>> {
-    info!("handling uncle: {:?}", uncle_hash);
-
     // cancel if uncle_hash is actually a confirmed block
     if app
-        .authorized_request::<_, Option<Block<TxHash>>>(
-            "eth_getBlockByHash",
-            (uncle_hash, false),
-            authorization.clone(),
-        )
+        .internal_request::<_, Option<Block<TxHash>>>("eth_getBlockByHash", (uncle_hash, false))
         .await
         .context("eth_getBlockByHash failed")?
         .is_some()
     {
+        debug!(?uncle_hash, "not an uncle");
         return Ok(None);
     }
+
+    debug!(?uncle_hash, "handling uncle");
 
     // user_id -> balance that we need to subtract
     let mut reversed_balances: HashMap<u64, Decimal> = HashMap::new();
 
-    let txn = app.db_transaction().await?;
+    let db_conn = app.db_conn()?;
 
     // delete any deposit txids with uncle_hash
     for reversed_deposit in increase_on_chain_balance_receipt::Entity::find()
         .filter(increase_on_chain_balance_receipt::Column::BlockHash.eq(uncle_hash.encode_hex()))
-        .all(&txn)
+        .all(db_conn)
         .await?
     {
-        let reversed_balance = reversed_balances
-            .entry(reversed_deposit.deposit_to_user_id)
-            .or_default();
+        let user_id = reversed_deposit.deposit_to_user_id;
+
+        let reversed_balance = reversed_balances.entry(user_id).or_default();
 
         *reversed_balance += reversed_deposit.amount;
 
         // TODO: instead of delete, mark as uncled? seems like it would bloat the db unnecessarily. a stat should be enough
-        reversed_deposit.delete(&txn).await?;
+        reversed_deposit.delete(db_conn).await?;
+
+        if let Err(err) = app
+            .user_balance_cache
+            .invalidate(&user_id, db_conn, &app.rpc_secret_key_cache)
+            .await
+        {
+            warn!(%user_id, ?err, "unable to invalidate caches");
+        };
     }
 
-    debug!("removing balances: {:#?}", reversed_balances);
-
-    txn.commit().await?;
+    debug!(?reversed_balances, "removing balances");
 
     Ok(Some(reversed_balances))
 }

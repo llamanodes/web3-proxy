@@ -2,50 +2,17 @@ use crate::app::Web3ProxyApp;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
 use crate::premium::grant_premium_tier;
 use anyhow::Context;
-use axum::{
-    headers::{authorization::Bearer, Authorization},
-    response::IntoResponse,
-    Extension, Json, TypedHeader,
-};
+use axum::{response::IntoResponse, Extension};
 use axum_macros::debug_handler;
 use entities::{stripe_increase_balance_receipt, user, user_tier};
-use ethers::types::Address;
 use http::HeaderMap;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
 };
-use serde_json::json;
 use std::sync::Arc;
 use stripe::Webhook;
 use tracing::{debug, error, warn};
-
-/// `GET /user/balance/stripe` -- Use a bearer token to get the user's balance and spend.
-///
-/// - shows a list of all stripe deposits, all fields from entity
-#[debug_handler]
-pub async fn user_stripe_deposits_get(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
-    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-) -> Web3ProxyResponse {
-    let user = app.bearer_is_authorized(bearer).await?;
-
-    let db_replica = app.db_replica().context("Getting database connection")?;
-
-    // Filter by user ...
-    let receipts = stripe_increase_balance_receipt::Entity::find()
-        .filter(stripe_increase_balance_receipt::Column::DepositToUserId.eq(user.id))
-        .all(db_replica.as_ref())
-        .await?;
-
-    // Return the response, all except the user ...
-    let response = json!({
-        "user": Address::from_slice(&user.address),
-        "deposits": receipts,
-    });
-
-    Ok(Json(response).into_response())
-}
 
 /// `POST /user/balance/stripe` -- Process a stripe transaction;
 /// this endpoint is called from the webhook with the user_id parameter in the request
@@ -144,7 +111,6 @@ pub async fn user_balance_stripe_post(
     };
 
     // In all these cases, we should record the transaction, but not increase the balance
-    let txn = db_conn.begin().await?;
 
     // Assert that it's usd
     if intent.currency.to_string() != "usd" || recipient.is_none() {
@@ -155,13 +121,15 @@ pub async fn user_balance_stripe_post(
             currency=%intent.currency, %recipient_user_id, %intent.id,
             "Please refund this transaction!",
         );
-        let _ = insert_receipt_model.save(&txn).await;
-        txn.commit().await?;
+        let _ = insert_receipt_model.save(db_conn).await;
+
         return Ok("Received Webhook".into_response());
     }
     // Otherwise, also increase the balance ...
     match recipient {
         Some(recipient) => {
+            let txn = db_conn.begin().await?;
+
             let _ = insert_receipt_model.save(&txn).await;
 
             let user_tier = user_tier::Entity::find_by_id(recipient.user_tier_id)
