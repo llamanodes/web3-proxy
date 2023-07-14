@@ -6,7 +6,7 @@ use crate::app::Web3ProxyApp;
 use crate::errors::Web3ProxyResponse;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext};
 use crate::frontend::users::authentication::PostLogin;
-use crate::globals::{global_db_conn, global_db_replica_conn, global_db_transaction};
+use crate::globals::{global_db_conn, global_db_replica_conn};
 use crate::premium::{get_user_and_tier_from_address, grant_premium_tier};
 use crate::user_token::UserBearerToken;
 use axum::{
@@ -27,6 +27,7 @@ use http::StatusCode;
 use migration::sea_orm::prelude::{Decimal, Uuid};
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
+    TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
