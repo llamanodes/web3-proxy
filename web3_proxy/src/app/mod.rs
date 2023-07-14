@@ -178,6 +178,10 @@ impl Web3ProxyApp {
         let mut config_watcher_shutdown_receiver = shutdown_sender.subscribe();
         let mut background_shutdown_receiver = shutdown_sender.subscribe();
 
+        let (new_top_config_sender, mut new_top_config_receiver) =
+            watch::channel(top_config.clone());
+        new_top_config_receiver.borrow_and_update();
+
         // safety checks on the config
         // while i would prefer this to be in a "apply_top_config" function, that is a larger refactor
         // TODO: maybe don't spawn with a config at all. have all config updates come through an apply_top_config call
@@ -413,6 +417,7 @@ impl Web3ProxyApp {
 
         let chain_id = top_config.app.chain_id;
 
+        // TODO: remove this. it should only be done by apply_top_config
         let (balanced_rpcs, balanced_handle, consensus_connections_watcher) = Web3Rpcs::spawn(
             chain_id,
             top_config.app.max_head_block_lag,
@@ -428,6 +433,7 @@ impl Web3ProxyApp {
 
         // prepare a Web3Rpcs to hold all our private connections
         // only some chains have this, so this is optional
+        // TODO: remove this. it should only be done by apply_top_config
         let private_rpcs = if top_config.private_rpcs.is_none() {
             warn!("No private relays configured. Any transactions will be broadcast to the public mempool!");
             None
@@ -456,6 +462,7 @@ impl Web3ProxyApp {
 
         // prepare a Web3Rpcs to hold all our 4337 Abstraction Bundler connections
         // only some chains have this, so this is optional
+        // TODO: remove this. it should only be done by apply_top_config
         let bundler_4337_rpcs = if top_config.bundler_4337_rpcs.is_none() {
             warn!("No bundler_4337_rpcs configured");
             None
@@ -507,16 +514,22 @@ impl Web3ProxyApp {
             watch_consensus_head_receiver,
         };
 
+        // TODO: do apply_top_config once we don't duplicate the db
+        if let Err(err) = app.apply_top_config_db(&top_config).await {
+            warn!(?err, "unable to fully apply config while starting!");
+        };
+
         let app = Arc::new(app);
 
         // watch for config changes
         // TODO: move this to its own function/struct
-        let (new_top_config_sender, mut new_top_config_receiver) = watch::channel(top_config);
         {
             let app = app.clone();
             let config_handle = tokio::spawn(async move {
                 loop {
                     let new_top_config = new_top_config_receiver.borrow_and_update().to_owned();
+
+                    // TODO: compare new and old here? the sender should be doing that already but maybe its better here
 
                     if let Err(err) = app.apply_top_config_rpcs(&new_top_config).await {
                         error!(?err, "unable to apply config! Retrying in 10 seconds (or if the config changes)");
@@ -565,12 +578,14 @@ impl Web3ProxyApp {
         })
     }
 
-    pub async fn apply_top_config(&self, new_top_config: TopConfig) -> Web3ProxyResult<()> {
+    pub async fn apply_top_config(&self, new_top_config: &TopConfig) -> Web3ProxyResult<()> {
+        // TODO: update self.config from new_top_config.app (or move it entirely to a global)
+
         // connect to the db first
-        let db = self.apply_top_config_db(&new_top_config).await;
+        let db = self.apply_top_config_db(new_top_config).await;
 
         // then refresh rpcs
-        let rpcs = self.apply_top_config_rpcs(&new_top_config).await;
+        let rpcs = self.apply_top_config_rpcs(new_top_config).await;
 
         // error if either failed
         // TODO: if both error, log both errors
@@ -581,38 +596,47 @@ impl Web3ProxyApp {
     }
 
     async fn apply_top_config_rpcs(&self, new_top_config: &TopConfig) -> Web3ProxyResult<()> {
-        // TODO: also update self.config from new_top_config.app
         info!("applying new config");
 
-        // connect to the backends
-        self.balanced_rpcs
+        let balanced = self
+            .balanced_rpcs
             .apply_server_configs(self, new_top_config.balanced_rpcs.clone())
             .await
-            .web3_context("updating balanced rpcs")?;
+            .web3_context("updating balanced rpcs");
 
-        if let Some(private_rpc_configs) = new_top_config.private_rpcs.clone() {
+        let private = if let Some(private_rpc_configs) = new_top_config.private_rpcs.clone() {
             if let Some(ref private_rpcs) = self.private_rpcs {
                 private_rpcs
                     .apply_server_configs(self, private_rpc_configs)
                     .await
-                    .web3_context("updating private_rpcs")?;
+                    .web3_context("updating private_rpcs")
             } else {
                 // TODO: maybe we should have private_rpcs just be empty instead of being None
                 todo!("handle toggling private_rpcs")
             }
-        }
+        } else {
+            Ok(())
+        };
 
-        if let Some(bundler_4337_rpc_configs) = new_top_config.bundler_4337_rpcs.clone() {
-            if let Some(ref bundler_4337_rpcs) = self.bundler_4337_rpcs {
-                bundler_4337_rpcs
-                    .apply_server_configs(self, bundler_4337_rpc_configs.clone())
-                    .await
-                    .web3_context("updating bundler_4337_rpcs")?;
+        let bundler_4337 =
+            if let Some(bundler_4337_rpc_configs) = new_top_config.bundler_4337_rpcs.clone() {
+                if let Some(ref bundler_4337_rpcs) = self.bundler_4337_rpcs {
+                    bundler_4337_rpcs
+                        .apply_server_configs(self, bundler_4337_rpc_configs.clone())
+                        .await
+                        .web3_context("updating bundler_4337_rpcs")
+                } else {
+                    // TODO: maybe we should have bundler_4337_rpcs just be empty instead of being None
+                    todo!("handle toggling bundler_4337_rpcs")
+                }
             } else {
-                // TODO: maybe we should have bundler_4337_rpcs just be empty instead of being None
-                todo!("handle toggling bundler_4337_rpcs")
-            }
-        }
+                Ok(())
+            };
+
+        // TODO: log all the errors if there are multiple
+        balanced?;
+        private?;
+        bundler_4337?;
 
         Ok(())
     }
