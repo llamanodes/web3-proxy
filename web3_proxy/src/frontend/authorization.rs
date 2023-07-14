@@ -1142,18 +1142,9 @@ impl Web3ProxyApp {
     ) -> Web3ProxyResult<AuthorizationChecks> {
         // TODO: move onto a helper function
 
-        let fresh = Arc::new(Mutex::new(false));
-
-        let fresh_clone = fresh.clone();
-
         let x = self
             .rpc_secret_key_cache
             .try_get_with_by_ref(rpc_secret_key, async move {
-                {
-                    let mut f = fresh.lock_arc();
-                    *f = true;
-                }
-
                 let db_replica = self.db_replica()?;
 
                 // TODO: join the user table to this to return the User? we don't always need it
@@ -1302,12 +1293,6 @@ impl Web3ProxyApp {
                 }
             })
             .await?;
-
-        if *fresh_clone.lock() {
-            info!(?rpc_secret_key, "authorization_checks miss");
-        } else {
-            info!(?rpc_secret_key, "authorization_checks hit");
-        }
 
         Ok(x)
     }
