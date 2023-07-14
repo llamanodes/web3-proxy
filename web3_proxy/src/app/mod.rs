@@ -166,26 +166,6 @@ pub struct Web3ProxyAppSpawn {
     pub ranked_rpcs: watch::Receiver<Option<Arc<RankedRpcs>>>,
 }
 
-impl Drop for Web3ProxyApp {
-    fn drop(&mut self) {
-        if let Ok(db_conn) = self.db_conn().cloned() {
-            /*
-            From the sqlx docs:
-
-            We recommend calling .close().await to gracefully close the pool and its connections when you are done using it.
-            This will also wake any tasks that are waiting on an .acquire() call,
-            so for long-lived applications it’s a good idea to call .close() during shutdown.
-            */
-
-            let rt = Runtime::new().unwrap();
-
-            if let Err(err) = rt.block_on(db_conn.close()) {
-                error!(?err, "Unable to close db!");
-            };
-        }
-    }
-}
-
 impl Web3ProxyApp {
     /// The main entrypoint.
     pub async fn spawn(

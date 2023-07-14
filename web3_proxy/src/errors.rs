@@ -615,6 +615,7 @@ impl Web3ProxyError {
                 )
             }
             Self::NoDatabase => {
+                // TODO: this needs more context
                 error!("no database configured");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
