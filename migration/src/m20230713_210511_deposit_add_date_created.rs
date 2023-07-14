@@ -76,21 +76,11 @@ impl MigrationTrait for Migration {
 #[derive(Iden)]
 enum AdminIncreaseBalanceReceipt {
     Table,
-    Id,
-    Amount,
-    AdminId,
-    DepositToUserId,
-    Note,
     DateCreated,
 }
 
 #[derive(Iden)]
 enum IncreaseOnChainBalanceReceipt {
     Table,
-    Id,
-    TxHash,
-    ChainId,
-    Amount,
-    DepositToUserId,
     DateCreated,
 }
