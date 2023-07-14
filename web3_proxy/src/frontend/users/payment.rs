@@ -81,6 +81,7 @@ pub async fn user_chain_deposits_get(
                 "amount": x.amount,
                 "chain_id": x.chain_id,
                 "tx_hash": x.tx_hash,
+                "date_created": x.date_created
             })
         })
         .collect::<Vec<_>>();
@@ -163,6 +164,7 @@ pub async fn user_admin_deposits_get(
                 "amount": x.amount,
                 "deposit_to_user_id": x.deposit_to_user_id,
                 "note": x.note,
+                "date_created": x.date_created
             })
         })
         .collect::<Vec<_>>();
@@ -383,6 +385,7 @@ pub async fn user_balance_post(
                 log_index: sea_orm::ActiveValue::Set(log_index),
                 token_address: sea_orm::ActiveValue::Set(payment_token_address.encode_hex()),
                 tx_hash: sea_orm::ActiveValue::Set(tx_hash.encode_hex()),
+                date_created: sea_orm::ActiveValue::NotSet,
             };
             trace!("Trying to insert receipt {:?}", receipt);
 

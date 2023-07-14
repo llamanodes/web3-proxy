@@ -16,6 +16,7 @@ pub struct Model {
     pub block_hash: String,
     pub log_index: u64,
     pub token_address: String,
+    pub date_created: DateTimeUtc,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
