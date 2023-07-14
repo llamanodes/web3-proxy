@@ -821,15 +821,7 @@ pub async fn ip_is_authorized(
 ) -> Web3ProxyResult<(Authorization, Option<OwnedSemaphorePermit>)> {
     // TODO: i think we could write an `impl From` for this
     // TODO: move this to an AuthorizedUser extrator
-    let (authorization, semaphore) = match app
-        .rate_limit_by_ip(
-            &app.config.allowed_origin_requests_per_period,
-            ip,
-            origin,
-            proxy_mode,
-        )
-        .await?
-    {
+    let (authorization, semaphore) = match app.rate_limit_by_ip(ip, origin, proxy_mode).await? {
         RateLimitResult::Allowed(authorization, semaphore) => (authorization, semaphore),
         RateLimitResult::RateLimited(authorization, retry_at) => {
             // TODO: in the background, emit a stat (maybe simplest to use a channel?)
@@ -1076,7 +1068,6 @@ impl Web3ProxyApp {
     /// origin is included because it can override the default rate limits
     pub async fn rate_limit_by_ip(
         &self,
-        allowed_origin_requests_per_period: &HashMap<String, u64>,
         ip: &IpAddr,
         origin: Option<&Origin>,
         proxy_mode: ProxyMode,
@@ -1087,6 +1078,8 @@ impl Web3ProxyApp {
 
             return Ok(RateLimitResult::Allowed(authorization, None));
         }
+
+        let allowed_origin_requests_per_period = &self.config.allowed_origin_requests_per_period;
 
         // ip rate limits don't check referer or user agent
         // they do check origin because we can override rate limits for some origins
@@ -1333,7 +1326,7 @@ impl Web3ProxyApp {
 
         // if no rpc_key_id matching the given rpc was found, then we can't rate limit by key
         if authorization_checks.rpc_secret_key_id.is_none() {
-            return Ok(RateLimitResult::UnknownKey);
+            return self.rate_limit_by_ip(ip, origin, proxy_mode).await;
         }
 
         // only allow this rpc_key to run a limited amount of concurrent requests
