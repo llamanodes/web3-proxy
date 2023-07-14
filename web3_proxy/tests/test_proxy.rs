@@ -100,5 +100,5 @@ async fn it_starts_and_stops() {
     x.flush_stats().await.unwrap_err();
 
     // most tests won't need to wait, but we should wait here to be sure all the shutdown logic works properly
-    x.wait().await;
+    x.wait_for_stop();
 }
