@@ -135,52 +135,50 @@ impl StatBuffer {
                             let mut approximate_balance_remaining = 0.into();
 
                             // TODO: re-enable this once I know its not the cause of Polygon W3P crashing all the time
-                            if false {
-                                // TODO: we want to do this even if the db is down. we need to buffer if there is an outage!
-                                if let Ok(db_conn) = global_db_conn().await {
-                                    let user_id = stat.authorization.checks.user_id;
+                            // TODO: we want to do this even if the db is down. we need to buffer if there is an outage!
+                            if let Ok(db_conn) = global_db_conn().await {
+                                let user_id = stat.authorization.checks.user_id;
 
-                                    // update the user's balance
-                                    if user_id != 0 {
-                                        // update the user's cached balance
-                                        let mut user_balance = stat.authorization.checks.latest_balance.write().await;
+                                // update the user's balance
+                                if user_id != 0 {
+                                    // update the user's cached balance
+                                    let mut user_balance = stat.authorization.checks.latest_balance.write().await;
 
-                                        // TODO: move this to a helper function
-                                        user_balance.total_frontend_requests += 1;
-                                        user_balance.total_spent += stat.compute_unit_cost;
+                                    // TODO: move this to a helper function
+                                    user_balance.total_frontend_requests += 1;
+                                    user_balance.total_spent += stat.compute_unit_cost;
 
-                                        if !stat.backend_rpcs_used.is_empty() {
-                                            user_balance.total_cache_misses += 1;
-                                        }
-
-                                        // if paid_credits_used is true, then they were premium at the start of the request
-                                        if stat.authorization.checks.paid_credits_used {
-                                            // TODO: this lets them get a negative remaining balance. we should clear if close to 0
-                                            user_balance.total_spent_paid_credits += stat.compute_unit_cost;
-
-                                            // check if they still have premium
-                                            if user_balance.active_premium() {
-                                                // TODO: referall credits here? i think in the save_db section still makes sense for those
-                                            } else if let Err(err) = self.user_balance_cache.invalidate(&user_balance.user_id, &db_conn, &self.rpc_secret_key_cache).await {
-                                                // was premium, but isn't anymore due to paying for this query. clear the cache
-                                                // TODO: stop at <$0.000001 instead of negative?
-                                                warn!(?err, "unable to clear caches");
-                                            }
-                                        } else if user_balance.active_premium() {
-                                            // paid credits were not used, but now we have active premium. invalidate the caches
-                                            // TODO: this seems unliekly. should we warn if this happens so we can investigate?
-                                            if let Err(err) = self.user_balance_cache.invalidate(&user_balance.user_id, &db_conn, &self.rpc_secret_key_cache).await {
-                                                // was premium, but isn't anymore due to paying for this query. clear the cache
-                                                // TODO: stop at <$0.000001 instead of negative?
-                                                warn!(?err, "unable to clear caches");
-                                            }
-                                        }
-
-                                        approximate_balance_remaining = user_balance.remaining();
+                                    if !stat.backend_rpcs_used.is_empty() {
+                                        user_balance.total_cache_misses += 1;
                                     }
 
-                                    // self.accounting_db_buffer.entry(stat.accounting_key(self.billing_period_seconds)).or_default().add(stat.clone(), approximate_balance_remaining).await;
+                                    // if paid_credits_used is true, then they were premium at the start of the request
+                                    if stat.authorization.checks.paid_credits_used {
+                                        // TODO: this lets them get a negative remaining balance. we should clear if close to 0
+                                        user_balance.total_spent_paid_credits += stat.compute_unit_cost;
+
+                                        // check if they still have premium
+                                        if user_balance.active_premium() {
+                                            // TODO: referall credits here? i think in the save_db section still makes sense for those
+                                        } else if let Err(err) = self.user_balance_cache.invalidate(&user_balance.user_id, &db_conn, &self.rpc_secret_key_cache).await {
+                                            // was premium, but isn't anymore due to paying for this query. clear the cache
+                                            // TODO: stop at <$0.000001 instead of negative?
+                                            warn!(?err, "unable to clear caches");
+                                        }
+                                    } else if user_balance.active_premium() {
+                                        // paid credits were not used, but now we have active premium. invalidate the caches
+                                        // TODO: this seems unliekly. should we warn if this happens so we can investigate?
+                                        if let Err(err) = self.user_balance_cache.invalidate(&user_balance.user_id, &db_conn, &self.rpc_secret_key_cache).await {
+                                            // was premium, but isn't anymore due to paying for this query. clear the cache
+                                            // TODO: stop at <$0.000001 instead of negative?
+                                            warn!(?err, "unable to clear caches");
+                                        }
+                                    }
+
+                                    approximate_balance_remaining = user_balance.remaining();
                                 }
+
+                                self.accounting_db_buffer.entry(stat.accounting_key(self.billing_period_seconds)).or_default().add(stat.clone(), approximate_balance_remaining).await;
                             }
 
                             if self.influxdb_client.is_some() {

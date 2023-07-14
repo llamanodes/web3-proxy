@@ -1302,12 +1302,12 @@ impl Web3ProxyApp {
         let authorization_checks = match self.authorization_checks(proxy_mode, rpc_key).await {
             Ok(x) => x,
             Err(err) => {
-                if let Ok(err) = err.split_db_errors() {
-                    // TODO: this will probably be too verbose
-                    warn!(
-                        ?err,
-                        "db is down. cannot check rpc key. fallback to ip rate limits"
-                    );
+                if let Ok(_err) = err.split_db_errors() {
+                    // // TODO: this is too verbose during an outage. the warnings on the config reloader should be fine
+                    // warn!(
+                    //     ?err,
+                    //     "db is down. cannot check rpc key. fallback to ip rate limits"
+                    // );
                     return self.rate_limit_by_ip(ip, origin, proxy_mode).await;
                 }
 
