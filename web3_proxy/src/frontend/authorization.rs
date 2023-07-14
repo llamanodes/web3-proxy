@@ -27,7 +27,6 @@ use http::HeaderValue;
 use ipnet::IpNet;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
-use parking_lot::Mutex;
 use rdkafka::message::{Header as KafkaHeader, OwnedHeaders as KafkaOwnedHeaders, OwnedMessage};
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::util::Timeout as KafkaTimeout;
@@ -47,7 +46,7 @@ use tokio::sync::RwLock as AsyncRwLock;
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use tracing::{error, info, trace, warn};
+use tracing::{error, trace, warn};
 use ulid::Ulid;
 use uuid::Uuid;
 

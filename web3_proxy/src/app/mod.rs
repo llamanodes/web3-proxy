@@ -12,7 +12,9 @@ use crate::jsonrpc::{
     JsonRpcErrorData, JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcId,
     JsonRpcParams, JsonRpcRequest, JsonRpcRequestEnum, JsonRpcResultData,
 };
-use crate::relational_db::{connect_db, get_migrated_db, DatabaseConnection, DatabaseReplica};
+use crate::relational_db::{
+    connect_db, migrate_db, DatabaseConnection, DatabaseReplica,
+};
 use crate::response_cache::{
     JsonRpcQueryCacheKey, JsonRpcResponseCache, JsonRpcResponseEnum, JsonRpcResponseWeigher,
 };
@@ -49,7 +51,6 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{atomic, Arc};
 use std::time::Duration;
-use tokio::runtime::Runtime;
 use tokio::sync::{broadcast, mpsc, oneshot, watch, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
@@ -227,9 +228,12 @@ impl Web3ProxyApp {
                 .db_max_connections
                 .unwrap_or(db_min_connections * 2);
 
-            db_conn = Some(
-                get_migrated_db(db_url.clone(), db_min_connections, db_max_connections).await?,
-            );
+            db_conn =
+                Some(connect_db(db_url.clone(), db_min_connections, db_max_connections).await?);
+
+            if let Err(err) = migrate_db(db_conn.as_ref().unwrap(), false).await {
+                error!(?err, "unable to migrate the db!");
+            }
 
             db_replica = if let Some(db_replica_url) = top_config.app.db_replica_url.clone() {
                 if db_replica_url == db_url {
