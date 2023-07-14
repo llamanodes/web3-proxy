@@ -454,9 +454,9 @@ impl Web3Rpcs {
 
         for (rpc_a, rpc_b) in potential_rpcs.iter().circular_tuple_windows() {
             trace!("{} vs {}", rpc_a, rpc_b);
-            // TODO: cached key to save a read lock
-            // TODO: ties to the server with the smallest block_data_limit
-            let faster_rpc = min_by_key(rpc_a, rpc_b, |x| x.weighted_peak_latency());
+            // TODO: ties within X% to the server with the smallest block_data_limit
+            // faster rpc. backups always lose.
+            let faster_rpc = min_by_key(rpc_a, rpc_b, |x| (x.backup, x.weighted_peak_latency()));
             trace!("winner: {}", faster_rpc);
 
             // add to the skip list in case this one fails
@@ -2024,6 +2024,16 @@ mod test {
             Reverse(Some(1)),
             Reverse(None),
         ];
+
+        let mut sorted_vec = test_vec.clone();
+        sorted_vec.sort();
+
+        assert_eq!(test_vec, sorted_vec);
+    }
+
+    #[test]
+    fn test_bool_sort() {
+        let test_vec = vec![false, true];
 
         let mut sorted_vec = test_vec.clone();
         sorted_vec.sort();
