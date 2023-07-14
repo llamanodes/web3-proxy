@@ -2,6 +2,7 @@ use crate::TestApp;
 use entities::{user, user_tier};
 use ethers::prelude::{LocalWallet, Signer};
 use ethers::types::Signature;
+use http::StatusCode;
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
     QueryFilter,
@@ -46,11 +47,12 @@ pub async fn create_user(
         .unwrap();
     trace!(?user_login_response);
 
-    let user_login_response = user_login_response.text().await.unwrap();
-    trace!("user_login_response: {:#}", user_login_response);
+    assert_eq!(user_login_response.status(), StatusCode::OK);
 
-    let user_login_response: LoginPostResponse =
-        serde_json::from_str(&user_login_response).unwrap();
+    let user_login_text = user_login_response.text().await.unwrap();
+    trace!("user_login_text: {:#}", user_login_text);
+
+    let user_login_response: LoginPostResponse = serde_json::from_str(&user_login_text).unwrap();
     info!(?user_login_response);
 
     user_login_response

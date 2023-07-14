@@ -149,6 +149,10 @@ impl ProxydSubCommand {
             prometheus_shutdown_receiver,
         ));
 
+        if spawned_app.app.config.db_url.is_some() {
+            // give 30 seconds for the db to connect. if it does not connect, it will keep retrying
+        }
+
         info!("waiting for head block");
         let max_wait_until = Instant::now() + Duration::from_secs(35);
         loop {
