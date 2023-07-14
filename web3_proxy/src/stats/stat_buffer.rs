@@ -2,13 +2,13 @@ use super::{AppStat, FlushedStats, RpcQueryKey};
 use crate::app::Web3ProxyJoinHandle;
 use crate::caches::{RpcSecretKeyCache, UserBalanceCache};
 use crate::errors::Web3ProxyResult;
+use crate::globals::global_db_conn;
 use crate::stats::RpcQueryStats;
 use derive_more::From;
 use futures::stream;
 use hashbrown::HashMap;
 use influxdb2::api::write::TimestampPrecision;
 use migration::sea_orm::prelude::Decimal;
-use migration::sea_orm::DatabaseConnection;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::time::{interval, sleep};
@@ -45,7 +45,6 @@ pub struct StatBuffer {
     accounting_db_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
     billing_period_seconds: i64,
     chain_id: u64,
-    db_conn: Option<DatabaseConnection>,
     db_save_interval_seconds: u32,
     global_timeseries_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
     influxdb_bucket: Option<String>,
@@ -64,7 +63,6 @@ impl StatBuffer {
     pub fn try_spawn(
         billing_period_seconds: i64,
         chain_id: u64,
-        db_conn: Option<DatabaseConnection>,
         db_save_interval_seconds: u32,
         influxdb_bucket: Option<String>,
         mut influxdb_client: Option<influxdb2::Client>,
@@ -79,10 +77,6 @@ impl StatBuffer {
             influxdb_client = None;
         }
 
-        if db_conn.is_none() && influxdb_client.is_none() {
-            return Ok(None);
-        }
-
         let (stat_sender, stat_receiver) = mpsc::unbounded_channel();
 
         let timestamp_precision = TimestampPrecision::Seconds;
@@ -91,7 +85,6 @@ impl StatBuffer {
             accounting_db_buffer: Default::default(),
             billing_period_seconds,
             chain_id,
-            db_conn,
             db_save_interval_seconds,
             global_timeseries_buffer: Default::default(),
             influxdb_bucket,
@@ -143,7 +136,8 @@ impl StatBuffer {
 
                             // TODO: re-enable this once I know its not the cause of Polygon W3P crashing all the time
                             if false {
-                                if let Some(db_conn) = self.db_conn.as_ref() {
+                                // TODO: we want to do this even if the db is down. we need to buffer if there is an outage!
+                                if let Ok(db_conn) = global_db_conn().await {
                                     let user_id = stat.authorization.checks.user_id;
 
                                     // update the user's balance
@@ -167,7 +161,7 @@ impl StatBuffer {
                                             // check if they still have premium
                                             if user_balance.active_premium() {
                                                 // TODO: referall credits here? i think in the save_db section still makes sense for those
-                                            } else if let Err(err) = self.user_balance_cache.invalidate(&user_balance.user_id, db_conn, &self.rpc_secret_key_cache).await {
+                                            } else if let Err(err) = self.user_balance_cache.invalidate(&user_balance.user_id, &db_conn, &self.rpc_secret_key_cache).await {
                                                 // was premium, but isn't anymore due to paying for this query. clear the cache
                                                 // TODO: stop at <$0.000001 instead of negative?
                                                 warn!(?err, "unable to clear caches");
@@ -175,7 +169,7 @@ impl StatBuffer {
                                         } else if user_balance.active_premium() {
                                             // paid credits were not used, but now we have active premium. invalidate the caches
                                             // TODO: this seems unliekly. should we warn if this happens so we can investigate?
-                                            if let Err(err) = self.user_balance_cache.invalidate(&user_balance.user_id, db_conn, &self.rpc_secret_key_cache).await {
+                                            if let Err(err) = self.user_balance_cache.invalidate(&user_balance.user_id, &db_conn, &self.rpc_secret_key_cache).await {
                                                 // was premium, but isn't anymore due to paying for this query. clear the cache
                                                 // TODO: stop at <$0.000001 instead of negative?
                                                 warn!(?err, "unable to clear caches");
@@ -259,8 +253,8 @@ impl StatBuffer {
 
         // TODO: wait on all websockets to close
         // TODO: wait on all pending external requests to finish
-        info!("waiting 10 seconds for remaining stats to arrive");
-        sleep(Duration::from_secs(10)).await;
+        info!("waiting 5 seconds for remaining stats to arrive");
+        sleep(Duration::from_secs(5)).await;
 
         // loop {
         //     // nope. this won't ever be true because we keep making stats for internal requests
@@ -289,7 +283,7 @@ impl StatBuffer {
     async fn save_relational_stats(&mut self) -> usize {
         let mut count = 0;
 
-        if let Some(db_conn) = self.db_conn.as_ref() {
+        if let Ok(db_conn) = global_db_conn().await {
             count = self.accounting_db_buffer.len();
             for (key, stat) in self.accounting_db_buffer.drain() {
                 // TODO: batch saves
@@ -297,7 +291,7 @@ impl StatBuffer {
                 if let Err(err) = stat
                     .save_db(
                         self.chain_id,
-                        db_conn,
+                        &db_conn,
                         key,
                         &self.user_balance_cache,
                         &self.rpc_secret_key_cache,

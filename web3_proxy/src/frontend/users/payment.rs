@@ -3,6 +3,7 @@ use crate::balance::Balance;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse, Web3ProxyResult};
 use crate::frontend::authorization::login_is_authorized;
 use crate::frontend::users::authentication::register_new_user;
+use crate::globals::{global_db_conn, global_db_replica_conn};
 use crate::premium::{get_user_and_tier_from_address, grant_premium_tier};
 use anyhow::Context;
 use axum::{
@@ -45,7 +46,7 @@ pub async fn user_balance_get(
 ) -> Web3ProxyResponse {
     let user = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app.db_replica()?;
+    let db_replica = global_db_replica_conn().await?;
 
     let user_balance = match Balance::try_from_db(db_replica.as_ref(), user.id).await? {
         None => Balance::default(),
@@ -65,7 +66,7 @@ pub async fn user_chain_deposits_get(
 ) -> Web3ProxyResponse {
     let user = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app.db_replica()?;
+    let db_replica = global_db_replica_conn().await?;
 
     // Filter by user ...
     let receipts = increase_on_chain_balance_receipt::Entity::find()
@@ -104,7 +105,7 @@ pub async fn user_stripe_deposits_get(
 ) -> Web3ProxyResponse {
     let user = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app.db_replica()?;
+    let db_replica = global_db_replica_conn().await?;
 
     // Filter by user ...
     let receipts = stripe_increase_balance_receipt::Entity::find()
@@ -147,7 +148,7 @@ pub async fn user_admin_deposits_get(
 ) -> Web3ProxyResponse {
     let user = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app.db_replica()?;
+    let db_replica = global_db_replica_conn().await?;
 
     // Filter by user ...
     let receipts = admin_increase_balance_receipt::Entity::find()
@@ -206,7 +207,7 @@ pub async fn user_balance_post(
             Web3ProxyError::BadRequest(format!("unable to parse tx_hash: {}", err).into())
         })?;
 
-    let db_conn = app.db_conn()?;
+    let db_conn = global_db_conn().await?;
 
     // get the transaction receipt
     let transaction_receipt = app
@@ -235,7 +236,7 @@ pub async fn user_balance_post(
             true
         };
 
-    let uncle_hashes = find_uncles.all(db_conn).await?;
+    let uncle_hashes = find_uncles.all(&db_conn).await?;
 
     let uncle_hashes: HashSet<_> = uncle_hashes
         .into_iter()
@@ -283,7 +284,7 @@ pub async fn user_balance_post(
         .filter(increase_on_chain_balance_receipt::Column::TxHash.eq(tx_hash.encode_hex()))
         .filter(increase_on_chain_balance_receipt::Column::ChainId.eq(app.config.chain_id))
         .filter(increase_on_chain_balance_receipt::Column::BlockHash.eq(block_hash.encode_hex()))
-        .one(db_conn)
+        .one(&db_conn)
         .await?
         .is_some()
     {
@@ -413,7 +414,7 @@ pub async fn user_balance_post(
             // invalidate the cache as well
             if let Err(err) = app
                 .user_balance_cache
-                .invalidate(&recipient.id, db_conn, &app.rpc_secret_key_cache)
+                .invalidate(&recipient.id, &db_conn, &app.rpc_secret_key_cache)
                 .await
             {
                 warn!(?err, user_id=%recipient.id, "unable to invalidate cache");
@@ -484,12 +485,12 @@ pub async fn handle_uncle_block(
     // user_id -> balance that we need to subtract
     let mut reversed_balances: HashMap<u64, Decimal> = HashMap::new();
 
-    let db_conn = app.db_conn()?;
+    let db_conn = global_db_conn().await?;
 
     // delete any deposit txids with uncle_hash
     for reversed_deposit in increase_on_chain_balance_receipt::Entity::find()
         .filter(increase_on_chain_balance_receipt::Column::BlockHash.eq(uncle_hash.encode_hex()))
-        .all(db_conn)
+        .all(&db_conn)
         .await?
     {
         let user_id = reversed_deposit.deposit_to_user_id;
@@ -499,11 +500,11 @@ pub async fn handle_uncle_block(
         *reversed_balance += reversed_deposit.amount;
 
         // TODO: instead of delete, mark as uncled? seems like it would bloat the db unnecessarily. a stat should be enough
-        reversed_deposit.delete(db_conn).await?;
+        reversed_deposit.delete(&db_conn).await?;
 
         if let Err(err) = app
             .user_balance_cache
-            .invalidate(&user_id, db_conn, &app.rpc_secret_key_cache)
+            .invalidate(&user_id, &db_conn, &app.rpc_secret_key_cache)
             .await
         {
             warn!(%user_id, ?err, "unable to invalidate caches");

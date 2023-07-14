@@ -180,7 +180,6 @@ impl Web3Rpcs {
                     return None;
                 }
 
-                let db_conn = app.db_conn().ok().cloned();
                 let http_client = app.http_client.clone();
                 let vredis_pool = app.vredis_pool.clone();
 
@@ -198,7 +197,6 @@ impl Web3Rpcs {
 
                 let handle = tokio::spawn(server_config.spawn(
                     server_name,
-                    db_conn,
                     vredis_pool,
                     chain_id,
                     block_interval,
@@ -367,11 +365,11 @@ impl Web3Rpcs {
         }
 
         if let Err(e) = try_join_all(futures).await {
-            error!("subscriptions over: {:?}", self);
+            error!(?self, "subscriptions over");
             return Err(e);
         }
 
-        info!("subscriptions over: {:?}", self);
+        info!(?self, "subscriptions over");
         Ok(())
     }
 

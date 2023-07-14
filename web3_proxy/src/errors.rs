@@ -40,7 +40,6 @@ impl From<Web3ProxyError> for Web3ProxyResult<()> {
     }
 }
 
-// TODO: replace all String with `Cow<'static, str>`
 #[derive(Debug, Display, Error, From)]
 pub enum Web3ProxyError {
     Abi(ethers::abi::Error),
@@ -59,6 +58,7 @@ pub enum Web3ProxyError {
     BadRouting,
     Contract(ContractError<EthersHttpProvider>),
     Database(DbErr),
+    DatabaseArc(Arc<DbErr>),
     Decimal(DecimalError),
     EthersHttpClient(ethers::prelude::HttpClientError),
     EthersProvider(ethers::prelude::ProviderError),
@@ -100,7 +100,7 @@ pub enum Web3ProxyError {
     NoBlockNumberOrHash,
     NoBlocksKnown,
     NoConsensusHeadBlock,
-    NoDatabase,
+    NoDatabaseConfigured,
     NoHandleReady,
     NoServersSynced,
     #[display(fmt = "{}/{}", num_known, min_head_rpcs)]
@@ -266,6 +266,17 @@ impl Web3ProxyError {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
                         message: "database error!".into(),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: None,
+                    },
+                )
+            }
+            Self::DatabaseArc(err) => {
+                error!(?err, "database (arc) err: {}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcErrorData {
+                        message: "database (arc) error!".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -614,13 +625,13 @@ impl Web3ProxyError {
                     },
                 )
             }
-            Self::NoDatabase => {
+            Self::NoDatabaseConfigured => {
                 // TODO: this needs more context
-                error!("no database configured");
+                debug!("no database configured");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: "no database configured!".into(),
+                        message: "no database configured! this request needs a database".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         data: None,
                     },
@@ -1087,6 +1098,26 @@ impl Web3ProxyError {
         let response = JsonRpcForwardedResponse::from_response_data(response_data, id);
 
         (status_code, Json(response)).into_response()
+    }
+
+    /// some things should keep going even if the db is down
+    pub fn split_db_errors(&self) -> Result<&Self, &Self> {
+        match self {
+            Web3ProxyError::NoDatabaseConfigured => Ok(self),
+            Web3ProxyError::Database(err) => {
+                warn!(?err, "db error while checking rpc key authorization");
+                Ok(self)
+            }
+            Web3ProxyError::DatabaseArc(err) => {
+                warn!(?err, "db arc error while checking rpc key authorization");
+                Ok(self)
+            }
+            Web3ProxyError::Arc(x) => {
+                // errors from inside moka cache helpers are wrapped in an Arc
+                x.split_db_errors()
+            }
+            _ => Err(self),
+        }
     }
 }
 

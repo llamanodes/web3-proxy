@@ -1,5 +1,5 @@
 use crate::balance::Balance;
-use crate::errors::Web3ProxyResult;
+use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::{AuthorizationChecks, RpcSecretKey};
 use derive_more::From;
 use entities::rpc_key;
@@ -50,7 +50,7 @@ impl UserBalanceCache {
                 };
                 trace!(?x, "from database");
 
-                Ok(Arc::new(AsyncRwLock::new(x)))
+                Ok::<_, Web3ProxyError>(Arc::new(AsyncRwLock::new(x)))
             })
             .await?;
 

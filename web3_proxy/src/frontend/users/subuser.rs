@@ -2,6 +2,7 @@
 use crate::app::Web3ProxyApp;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
 use crate::frontend::authorization::RpcSecretKey;
+use crate::globals::{global_db_conn, global_db_replica_conn};
 use anyhow::Context;
 use axum::{
     extract::Query,
@@ -35,7 +36,7 @@ pub async fn get_keys_as_subuser(
     // First, authenticate
     let subuser = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app.db_replica()?;
+    let db_replica = global_db_replica_conn().await?;
 
     // TODO: JOIN over RPC_KEY, SUBUSER, PRIMARY_USER and return these items
 
@@ -100,7 +101,7 @@ pub async fn get_subusers(
     // First, authenticate
     let user = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app.db_replica()?;
+    let db_replica = global_db_replica_conn().await?;
 
     let rpc_key: u64 = params
         .remove("key_id")
@@ -172,7 +173,7 @@ pub async fn modify_subuser(
     // First, authenticate
     let user = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app.db_replica()?;
+    let db_replica = global_db_replica_conn().await?;
 
     trace!("Parameters are: {:?}", params);
 
@@ -256,7 +257,8 @@ pub async fn modify_subuser(
     }
 
     // TODO: There is a good chunk of duplicate logic as login-post. Consider refactoring ...
-    let db_conn = app.db_conn()?;
+    let db_conn = global_db_conn().await?;
+
     let (subuser, _subuser_rpc_keys, _status_code) = match subuser {
         None => {
             // First add a user; the only thing we need from them is an address
@@ -332,12 +334,12 @@ pub async fn modify_subuser(
             let mut active_subuser_entry_secondary_user = secondary_user.into_active_model();
             if !keep_subuser {
                 // Remove the user
-                active_subuser_entry_secondary_user.delete(db_conn).await?;
+                active_subuser_entry_secondary_user.delete(&db_conn).await?;
                 action = "removed";
             } else {
                 // Just change the role
                 active_subuser_entry_secondary_user.role = sea_orm::Set(new_role.clone());
-                active_subuser_entry_secondary_user.save(db_conn).await?;
+                active_subuser_entry_secondary_user.save(&db_conn).await?;
                 action = "role modified";
             }
         }
@@ -348,7 +350,7 @@ pub async fn modify_subuser(
                 role: sea_orm::Set(new_role.clone()),
                 ..Default::default()
             };
-            active_subuser_entry_secondary_user.insert(db_conn).await?;
+            active_subuser_entry_secondary_user.insert(&db_conn).await?;
             action = "added";
         }
         _ => {

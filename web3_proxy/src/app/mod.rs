@@ -8,13 +8,12 @@ use crate::frontend::authorization::{
     Authorization, RequestMetadata, RequestOrMethod, ResponseOrBytes,
 };
 use crate::frontend::rpc_proxy_ws::ProxyMode;
+use crate::globals::{global_db_conn, DatabaseError, DB_CONN, DB_REPLICA};
 use crate::jsonrpc::{
     JsonRpcErrorData, JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcId,
     JsonRpcParams, JsonRpcRequest, JsonRpcRequestEnum, JsonRpcResultData,
 };
-use crate::relational_db::{
-    connect_db, migrate_db, DatabaseConnection, DatabaseReplica,
-};
+use crate::relational_db::{connect_db, migrate_db};
 use crate::response_cache::{
     JsonRpcQueryCacheKey, JsonRpcResponseCache, JsonRpcResponseEnum, JsonRpcResponseWeigher,
 };
@@ -36,7 +35,7 @@ use ethers::utils::rlp::{Decodable, Rlp};
 use futures::future::join_all;
 use futures::stream::{FuturesUnordered, StreamExt};
 use hashbrown::{HashMap, HashSet};
-use migration::sea_orm::{DatabaseTransaction, EntityTrait, PaginatorTrait, TransactionTrait};
+use migration::sea_orm::{EntityTrait, PaginatorTrait};
 use moka::future::{Cache, CacheBuilder};
 use once_cell::sync::OnceCell;
 use redis_rate_limiter::redis::AsyncCommands;
@@ -51,9 +50,10 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{atomic, Arc};
 use std::time::Duration;
+use tokio::select;
 use tokio::sync::{broadcast, mpsc, oneshot, watch, Semaphore};
 use tokio::task::JoinHandle;
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 use tracing::{error, info, trace, warn, Level};
 
 // TODO: make this customizable?
@@ -88,10 +88,6 @@ pub struct Web3ProxyApp {
     /// don't drop this or the sender will stop working
     /// TODO: broadcast channel instead?
     pub watch_consensus_head_receiver: watch::Receiver<Option<Web3ProxyBlock>>,
-    /// Optional database for users and accounting
-    pub db_conn: Option<DatabaseConnection>,
-    /// Optional read-only database for users and accounting
-    pub db_replica: Option<DatabaseReplica>,
     pub hostname: Option<String>,
     pub frontend_port: Arc<AtomicU16>,
     /// rate limit anonymous users
@@ -179,6 +175,7 @@ impl Web3ProxyApp {
         flush_stat_buffer_receiver: mpsc::Receiver<oneshot::Sender<FlushedStats>>,
     ) -> anyhow::Result<Web3ProxyAppSpawn> {
         let stat_buffer_shutdown_receiver = shutdown_sender.subscribe();
+        let mut config_watcher_shutdown_receiver = shutdown_sender.subscribe();
         let mut background_shutdown_receiver = shutdown_sender.subscribe();
 
         // safety checks on the config
@@ -212,65 +209,6 @@ impl Web3ProxyApp {
         // we must wait for these to end on their own (and they need to subscribe to shutdown_sender)
         let important_background_handles: FuturesUnordered<Web3ProxyJoinHandle<()>> =
             FuturesUnordered::new();
-
-        // connect to the database and make sure the latest migrations have run
-        let mut db_conn = None::<DatabaseConnection>;
-        let mut db_replica = None::<DatabaseReplica>;
-        if let Some(db_url) = top_config.app.db_url.clone() {
-            let db_min_connections = top_config
-                .app
-                .db_min_connections
-                .unwrap_or(num_workers as u32);
-
-            // TODO: what default multiple?
-            let db_max_connections = top_config
-                .app
-                .db_max_connections
-                .unwrap_or(db_min_connections * 2);
-
-            db_conn =
-                Some(connect_db(db_url.clone(), db_min_connections, db_max_connections).await?);
-
-            if let Err(err) = migrate_db(db_conn.as_ref().unwrap(), false).await {
-                error!(?err, "unable to migrate the db!");
-            }
-
-            db_replica = if let Some(db_replica_url) = top_config.app.db_replica_url.clone() {
-                if db_replica_url == db_url {
-                    // url is the same. do not make a new connection or we might go past our max connections
-                    db_conn.clone().map(Into::into)
-                } else {
-                    let db_replica_min_connections = top_config
-                        .app
-                        .db_replica_min_connections
-                        .unwrap_or(db_min_connections);
-
-                    let db_replica_max_connections = top_config
-                        .app
-                        .db_replica_max_connections
-                        .unwrap_or(db_max_connections);
-
-                    let db_replica = connect_db(
-                        db_replica_url,
-                        db_replica_min_connections,
-                        db_replica_max_connections,
-                    )
-                    .await?;
-
-                    Some(db_replica.into())
-                }
-            } else {
-                // just clone so that we don't need a bunch of checks all over our code
-                db_conn.clone().map(Into::into)
-            };
-        } else {
-            anyhow::ensure!(
-                top_config.app.db_replica_url.is_none(),
-                "if there is a db_replica_url, there must be a db_url"
-            );
-
-            warn!("no database. some features will be disabled");
-        };
 
         // connect to kafka for logging requests from the /debug/ urls
 
@@ -383,7 +321,6 @@ impl Web3ProxyApp {
         let stat_sender = if let Some(spawned_stat_buffer) = StatBuffer::try_spawn(
             BILLING_PERIOD_SECONDS,
             top_config.app.chain_id,
-            db_conn.clone(),
             60,
             top_config.app.influxdb_bucket.clone(),
             influxdb_client.clone(),
@@ -549,8 +486,6 @@ impl Web3ProxyApp {
             balanced_rpcs,
             bundler_4337_rpcs,
             config: top_config.app.clone(),
-            db_conn,
-            db_replica,
             frontend_port: frontend_port.clone(),
             frontend_ip_rate_limiter,
             frontend_registered_user_rate_limiter,
@@ -575,10 +510,8 @@ impl Web3ProxyApp {
         let app = Arc::new(app);
 
         // watch for config changes
-        // TODO: initial config reload should be from this channel. not from the call to spawn
-
+        // TODO: move this to its own function/struct
         let (new_top_config_sender, mut new_top_config_receiver) = watch::channel(top_config);
-
         {
             let app = app.clone();
             let config_handle = tokio::spawn(async move {
@@ -586,17 +519,29 @@ impl Web3ProxyApp {
                     let new_top_config = new_top_config_receiver.borrow_and_update().to_owned();
 
                     if let Err(err) = app.apply_top_config(new_top_config).await {
-                        error!("unable to apply config! {:?}", err);
-                    };
+                        error!(?err, "unable to apply config! Retrying in 10 seconds (or if the config changes)");
 
-                    new_top_config_receiver
-                        .changed()
-                        .await
-                        .web3_context("failed awaiting top_config change")?;
+                        select! {
+                            _ = config_watcher_shutdown_receiver.recv() => {
+                                break;
+                            }
+                            _ = sleep(Duration::from_secs(10)) => {}
+                            _ = new_top_config_receiver.changed() => {}
+                        }
+                    } else {
+                        select! {
+                            _ = config_watcher_shutdown_receiver.recv() => {
+                                break;
+                            }
+                            _ = new_top_config_receiver.changed() => {}
+                        }
+                    }
                 }
+
+                Ok(())
             });
 
-            app_handles.push(config_handle);
+            important_background_handles.push(config_handle);
         }
 
         if important_background_handles.is_empty() {
@@ -654,7 +599,103 @@ impl Web3ProxyApp {
             }
         }
 
-        info!("config applied successfully");
+        // TODO: get the actual value
+        let num_workers = 2;
+
+        // connect to the db
+        // THIS DOES NOT RUN MIGRATIONS!
+        if let Some(db_url) = new_top_config.app.db_url.clone() {
+            let db_min_connections = new_top_config
+                .app
+                .db_min_connections
+                .unwrap_or(num_workers as u32);
+
+            // TODO: what default multiple?
+            let db_max_connections = new_top_config
+                .app
+                .db_max_connections
+                .unwrap_or(db_min_connections * 2);
+
+            let db_conn = if let Ok(old_db_conn) = global_db_conn().await {
+                // TODO: compare old settings with new settings. don't always re-use!
+                Ok(old_db_conn)
+            } else {
+                connect_db(db_url.clone(), db_min_connections, db_max_connections)
+                    .await
+                    .map_err(|err| DatabaseError::Connect(Arc::new(err)))
+            };
+
+            let db_replica = if let Ok(db_conn) = db_conn.as_ref() {
+                let db_replica =
+                    if let Some(db_replica_url) = new_top_config.app.db_replica_url.clone() {
+                        if db_replica_url == db_url {
+                            // url is the same. do not make a new connection or we might go past our max connections
+                            Ok(db_conn.clone().into())
+                        } else {
+                            let db_replica_min_connections = new_top_config
+                                .app
+                                .db_replica_min_connections
+                                .unwrap_or(db_min_connections);
+
+                            let db_replica_max_connections = new_top_config
+                                .app
+                                .db_replica_max_connections
+                                .unwrap_or(db_max_connections);
+
+                            let db_replica = if let Ok(old_db_replica) = global_db_conn().await {
+                                // TODO: compare old settings with new settings. don't always re-use!
+                                Ok(old_db_replica)
+                            } else {
+                                connect_db(
+                                    db_replica_url,
+                                    db_replica_min_connections,
+                                    db_replica_max_connections,
+                                )
+                                .await
+                                .map_err(|err| DatabaseError::Connect(Arc::new(err)))
+                            };
+
+                            // if db_replica is error, but db_conn is success. log error and just use db_conn
+
+                            if let Err(err) = db_replica.as_ref() {
+                                error!(?err, "db replica is down! using primary");
+
+                                Ok(db_conn.clone().into())
+                            } else {
+                                db_replica.map(Into::into)
+                            }
+                        }
+                    } else {
+                        // just clone so that we don't need a bunch of checks all over our code
+                        trace!("no db replica configured");
+                        Ok(db_conn.clone().into())
+                    };
+
+                // db and replica are connected. try to migrate
+                if let Err(err) = migrate_db(db_conn, false).await {
+                    error!(?err, "unable to migrate!");
+                }
+
+                db_replica
+            } else {
+                db_conn.clone().map(Into::into)
+            };
+
+            let mut locked_conn = DB_CONN.write().await;
+            let mut locked_replica = DB_REPLICA.write().await;
+
+            *locked_conn = db_conn.clone();
+            *locked_replica = db_replica.clone();
+
+            db_conn?;
+            db_replica?;
+
+            info!("set global db connections");
+        } else if new_top_config.app.db_replica_url.is_some() {
+            return Err(anyhow::anyhow!("db_replica_url set, but no db_url set!").into());
+        } else {
+            warn!("no database. some features will be disabled");
+        };
 
         Ok(())
     }
@@ -666,7 +707,7 @@ impl Web3ProxyApp {
     pub fn influxdb_client(&self) -> Web3ProxyResult<&influxdb2::Client> {
         self.influxdb_client
             .as_ref()
-            .ok_or(Web3ProxyError::NoDatabase)
+            .ok_or(Web3ProxyError::NoDatabaseConfigured)
     }
 
     /// an ethers provider that you can use with ether's abigen.
@@ -706,8 +747,8 @@ impl Web3ProxyApp {
         #[derive(Default, Serialize)]
         struct UserCount(i64);
 
-        let user_count: UserCount = if let Ok(db) = self.db_conn() {
-            match user::Entity::find().count(db).await {
+        let user_count: UserCount = if let Ok(db) = global_db_conn().await {
+            match user::Entity::find().count(&db).await {
                 Ok(user_count) => UserCount(user_count as i64),
                 Err(err) => {
                     warn!(?err, "unable to count users");
@@ -868,9 +909,7 @@ impl Web3ProxyApp {
         method: &str,
         params: P,
     ) -> Web3ProxyResult<R> {
-        let db_conn = self.db_conn().ok().cloned();
-
-        let authorization = Arc::new(Authorization::internal(db_conn)?);
+        let authorization = Arc::new(Authorization::internal()?);
 
         self.authorized_request(method, params, authorization).await
     }
@@ -992,29 +1031,9 @@ impl Web3ProxyApp {
         Ok((collected, collected_rpcs))
     }
 
-    #[inline]
-    pub fn db_conn(&self) -> Web3ProxyResult<&DatabaseConnection> {
-        self.db_conn.as_ref().ok_or(Web3ProxyError::NoDatabase)
-    }
-
-    #[inline]
-    pub async fn db_transaction(&self) -> Web3ProxyResult<DatabaseTransaction> {
-        if let Some(ref db_conn) = self.db_conn {
-            let x = db_conn.begin().await?;
-            Ok(x)
-        } else {
-            Err(Web3ProxyError::NoDatabase)
-        }
-    }
-
-    #[inline]
-    pub fn db_replica(&self) -> Web3ProxyResult<&DatabaseReplica> {
-        self.db_replica.as_ref().ok_or(Web3ProxyError::NoDatabase)
-    }
-
     pub async fn redis_conn(&self) -> Web3ProxyResult<redis_rate_limiter::RedisConnection> {
         match self.vredis_pool.as_ref() {
-            None => Err(Web3ProxyError::NoDatabase),
+            None => Err(Web3ProxyError::NoDatabaseConfigured),
             Some(redis_pool) => {
                 // TODO: add a From for this
                 let redis_conn = redis_pool.get().await.context("redis pool error")?;
@@ -1456,7 +1475,7 @@ impl Web3ProxyApp {
                                         .zadd(recent_tx_hash_key, hashed_tx_hash.to_string(), now)
                                         .await?;
                                 }
-                                Err(Web3ProxyError::NoDatabase) => {},
+                                Err(Web3ProxyError::NoDatabaseConfigured) => {},
                                 Err(err) => {
                                     warn!(
                                         ?err,
