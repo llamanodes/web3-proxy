@@ -97,7 +97,9 @@ async fn it_starts_and_stops() {
     assert_eq!(anvil_result, proxy_result.unwrap());
 
     // this won't do anything since stats aren't tracked when there isn't a db
-    x.flush_stats().await.unwrap_err();
+    let flushed = x.flush_stats().await.unwrap();
+    assert_eq!(flushed.relational, 0);
+    assert_eq!(flushed.timeseries, 0);
 
     // most tests won't need to wait, but we should wait here to be sure all the shutdown logic works properly
     x.wait_for_stop();
