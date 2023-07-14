@@ -518,7 +518,7 @@ impl Web3ProxyApp {
                 loop {
                     let new_top_config = new_top_config_receiver.borrow_and_update().to_owned();
 
-                    if let Err(err) = app.apply_top_config(new_top_config).await {
+                    if let Err(err) = app.apply_top_config_rpcs(&new_top_config).await {
                         error!(?err, "unable to apply config! Retrying in 10 seconds (or if the config changes)");
 
                         select! {
@@ -566,16 +566,31 @@ impl Web3ProxyApp {
     }
 
     pub async fn apply_top_config(&self, new_top_config: TopConfig) -> Web3ProxyResult<()> {
+        // connect to the db first
+        let db = self.apply_top_config_db(&new_top_config).await;
+
+        // then refresh rpcs
+        let rpcs = self.apply_top_config_rpcs(&new_top_config).await;
+
+        // error if either failed
+        // TODO: if both error, log both errors
+        db?;
+        rpcs?;
+
+        Ok(())
+    }
+
+    async fn apply_top_config_rpcs(&self, new_top_config: &TopConfig) -> Web3ProxyResult<()> {
         // TODO: also update self.config from new_top_config.app
         info!("applying new config");
 
         // connect to the backends
         self.balanced_rpcs
-            .apply_server_configs(self, new_top_config.balanced_rpcs)
+            .apply_server_configs(self, new_top_config.balanced_rpcs.clone())
             .await
             .web3_context("updating balanced rpcs")?;
 
-        if let Some(private_rpc_configs) = new_top_config.private_rpcs {
+        if let Some(private_rpc_configs) = new_top_config.private_rpcs.clone() {
             if let Some(ref private_rpcs) = self.private_rpcs {
                 private_rpcs
                     .apply_server_configs(self, private_rpc_configs)
@@ -587,10 +602,10 @@ impl Web3ProxyApp {
             }
         }
 
-        if let Some(bundler_4337_rpc_configs) = new_top_config.bundler_4337_rpcs {
+        if let Some(bundler_4337_rpc_configs) = new_top_config.bundler_4337_rpcs.clone() {
             if let Some(ref bundler_4337_rpcs) = self.bundler_4337_rpcs {
                 bundler_4337_rpcs
-                    .apply_server_configs(self, bundler_4337_rpc_configs)
+                    .apply_server_configs(self, bundler_4337_rpc_configs.clone())
                     .await
                     .web3_context("updating bundler_4337_rpcs")?;
             } else {
@@ -599,6 +614,10 @@ impl Web3ProxyApp {
             }
         }
 
+        Ok(())
+    }
+
+    pub async fn apply_top_config_db(&self, new_top_config: &TopConfig) -> Web3ProxyResult<()> {
         // TODO: get the actual value
         let num_workers = 2;
 
