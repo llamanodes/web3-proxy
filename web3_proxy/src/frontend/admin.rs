@@ -58,7 +58,8 @@ pub async fn admin_increase_balance(
     let caller = app.bearer_is_authorized(bearer).await?;
 
     // Establish connections
-    let txn = global_db_transaction().await?;
+    let db_conn = global_db_conn().await?;
+    let txn = db_conn.begin().await?;
 
     // Check if the caller is an admin (if not, return early)
     let admin_entry: admin::Model = admin::Entity::find()
@@ -91,11 +92,7 @@ pub async fn admin_increase_balance(
     // Invalidate the user_balance_cache for this user:
     if let Err(err) = app
         .user_balance_cache
-        .invalidate(
-            &user_entry.id,
-            &global_db_conn().await?,
-            &app.rpc_secret_key_cache,
-        )
+        .invalidate(&user_entry.id, &db_conn, &app.rpc_secret_key_cache)
         .await
     {
         warn!(?err, "unable to invalidate caches");
