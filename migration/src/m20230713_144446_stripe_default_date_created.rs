@@ -1,5 +1,4 @@
 // TODO: Try to re-export timestamp from within sea-orm
-use chrono;
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
@@ -33,7 +32,7 @@ impl MigrationTrait for Migration {
         manager.exec_stmt(update_to_current_timestamp).await
     }
 
-    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+    async fn down(&self, _manager: &SchemaManager) -> Result<(), DbErr> {
         // Do nothing ...
         Ok(())
     }
@@ -43,12 +42,5 @@ impl MigrationTrait for Migration {
 #[derive(Iden)]
 enum StripeIncreaseBalanceReceipt {
     Table,
-    Id,
-    StripePaymentIntendId,
-    Amount,
-    Currency,
-    Status,
-    DepositToUserId,
-    Description,
     DateCreated,
 }
