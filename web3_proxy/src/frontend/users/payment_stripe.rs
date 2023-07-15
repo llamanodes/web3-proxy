@@ -1,5 +1,6 @@
 use crate::app::Web3ProxyApp;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
+use crate::globals::global_db_conn;
 use crate::premium::grant_premium_tier;
 use anyhow::Context;
 use axum::{response::IntoResponse, Extension};
@@ -68,13 +69,15 @@ pub async fn user_balance_stripe_post(
         return Ok("Received Webhook".into_response());
     }
 
-    let db_conn = app.db_conn().context("query_user_stats needs a db")?;
+    let db_conn = global_db_conn()
+        .await
+        .web3_context("query_user_stats needs a db")?;
 
     if stripe_increase_balance_receipt::Entity::find()
         .filter(
             stripe_increase_balance_receipt::Column::StripePaymentIntendId.eq(intent.id.as_str()),
         )
-        .one(db_conn)
+        .one(&db_conn)
         .await?
         .is_some()
     {
@@ -93,7 +96,7 @@ pub async fn user_balance_stripe_post(
     ))?;
 
     let recipient: Option<user::Model> = user::Entity::find_by_id(recipient_user_id)
-        .one(db_conn)
+        .one(&db_conn)
         .await?;
 
     // we do a fixed 2 decimal points because we only accept USD for now
@@ -121,7 +124,7 @@ pub async fn user_balance_stripe_post(
             currency=%intent.currency, %recipient_user_id, %intent.id,
             "Please refund this transaction!",
         );
-        let _ = insert_receipt_model.save(db_conn).await;
+        let _ = insert_receipt_model.save(&db_conn).await;
 
         return Ok("Received Webhook".into_response());
     }
@@ -145,7 +148,7 @@ pub async fn user_balance_stripe_post(
             // Finally invalidate the cache as well
             if let Err(err) = app
                 .user_balance_cache
-                .invalidate(&recipient.id, db_conn, &app.rpc_secret_key_cache)
+                .invalidate(&recipient.id, &db_conn, &app.rpc_secret_key_cache)
                 .await
             {
                 warn!(?err, "unable to invalidate caches");

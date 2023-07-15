@@ -62,7 +62,7 @@ async fn test_admin_grant_credits() {
     let user_balance = user_get_balance(&x, &r, &user_login_response).await;
     assert_eq!(user_balance.remaining(), Decimal::from(100));
 
-    x.wait().await;
+    x.wait_for_stop();
 }
 
 // #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]

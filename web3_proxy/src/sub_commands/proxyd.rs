@@ -1,6 +1,7 @@
 use crate::app::{flatten_handle, flatten_handles, Web3ProxyApp};
 use crate::compute_units::default_usd_per_cu;
 use crate::config::TopConfig;
+use crate::globals::global_db_conn;
 use crate::stats::FlushedStats;
 use crate::{frontend, prometheus};
 use argh::FromArgs;
@@ -148,6 +149,10 @@ impl ProxydSubCommand {
             prometheus_shutdown_receiver,
         ));
 
+        if spawned_app.app.config.db_url.is_some() {
+            // give 30 seconds for the db to connect. if it does not connect, it will keep retrying
+        }
+
         info!("waiting for head block");
         let max_wait_until = Instant::now() + Duration::from_secs(35);
         loop {
@@ -286,7 +291,8 @@ impl ProxydSubCommand {
             }
         }
 
-        if let Ok(db_conn) = spawned_app.app.db_conn().cloned() {
+        // TODO: make sure this happens even if we exit with an error
+        if let Ok(db_conn) = global_db_conn().await {
             /*
             From the sqlx docs:
 

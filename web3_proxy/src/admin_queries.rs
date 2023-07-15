@@ -1,5 +1,6 @@
 use crate::app::Web3ProxyApp;
 use crate::errors::{Web3ProxyError, Web3ProxyResponse};
+use crate::globals::{global_db_conn, global_db_replica_conn};
 use crate::http_params::get_user_id_from_params;
 use axum::response::IntoResponse;
 use axum::{
@@ -42,8 +43,8 @@ pub async fn query_admin_modify_usertier<'a>(
     let mut response_body = HashMap::new();
 
     // Establish connections
-    let db_conn = app.db_conn()?;
-    let db_replica = app.db_replica()?;
+    let db_conn = global_db_conn().await?;
+    let db_replica = global_db_replica_conn().await?;
     let mut redis_conn = app.redis_conn().await?;
 
     // Will modify logic here
@@ -52,14 +53,14 @@ pub async fn query_admin_modify_usertier<'a>(
     // TODO: Make a single query, where you retrieve the user, and directly from it the secondary user (otherwise we do two jumpy, which is unnecessary)
     // get the user id first. if it is 0, we should use a cache on the app
     let caller_id =
-        get_user_id_from_params(&mut redis_conn, db_conn, db_replica, bearer, params).await?;
+        get_user_id_from_params(&mut redis_conn, &db_conn, &db_replica, bearer, params).await?;
 
     trace!(%caller_id, "query_admin_modify_usertier");
 
     // Check if the caller is an admin (i.e. if he is in an admin table)
     let _admin = admin::Entity::find()
         .filter(admin::Column::UserId.eq(caller_id))
-        .one(db_conn)
+        .one(&db_conn)
         .await?
         .ok_or(Web3ProxyError::AccessDenied("not an admin".into()))?;
 
@@ -68,7 +69,7 @@ pub async fn query_admin_modify_usertier<'a>(
     // Fetch the admin, and the user
     let user: user::Model = user::Entity::find()
         .filter(user::Column::Address.eq(user_address.as_bytes()))
-        .one(db_conn)
+        .one(&db_conn)
         .await?
         .ok_or(Web3ProxyError::BadRequest(
             "No user with this id found".into(),
@@ -82,7 +83,7 @@ pub async fn query_admin_modify_usertier<'a>(
     // Now we can modify the user's tier
     let new_user_tier: user_tier::Model = user_tier::Entity::find()
         .filter(user_tier::Column::Title.eq(user_tier_title.clone()))
-        .one(db_conn)
+        .one(&db_conn)
         .await?
         .ok_or(Web3ProxyError::BadRequest(
             "User Tier name was not found".into(),
@@ -95,7 +96,7 @@ pub async fn query_admin_modify_usertier<'a>(
 
         user.user_tier_id = sea_orm::Set(new_user_tier.id);
 
-        user.save(db_conn).await?;
+        user.save(&db_conn).await?;
 
         info!("user's tier changed");
     }
@@ -103,7 +104,7 @@ pub async fn query_admin_modify_usertier<'a>(
     // Now delete all bearer tokens of this user
     login::Entity::delete_many()
         .filter(login::Column::UserId.eq(user.id))
-        .exec(db_conn)
+        .exec(&db_conn)
         .await?;
 
     Ok(Json(&response_body).into_response())

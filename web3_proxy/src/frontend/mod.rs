@@ -259,25 +259,28 @@ pub async fn serve(
         .layer(Extension(Arc::new(response_cache)))
         // request id
         .layer(
-            TraceLayer::new_for_http().make_span_with(|request: &Request<Body>| {
-                // We get the request id from the header
-                // If no header, a new Ulid is created
-                // TODO: move this header name to config
-                let request_id = request
-                    .headers()
-                    .get("x-amzn-trace-id")
-                    .and_then(|x| x.to_str().ok())
-                    .map(ToString::to_string)
-                    .unwrap_or_else(|| Ulid::new().to_string());
+            TraceLayer::new_for_http()
+                .make_span_with(|request: &Request<Body>| {
+                    // We get the request id from the header
+                    // If no header, a new Ulid is created
+                    // TODO: move this header name to config
+                    let request_id = request
+                        .headers()
+                        .get("x-amzn-trace-id")
+                        .and_then(|x| x.to_str().ok())
+                        .map(ToString::to_string)
+                        .unwrap_or_else(|| Ulid::new().to_string());
 
-                // And then we put it along with other information into the `request` span
-                error_span!(
-                    "request",
-                    id = %request_id,
-                    // method = %request.method(),
-                    // path = %request.uri().path(),
-                )
-            }),
+                    // And then we put it along with other information into the `request` span
+                    error_span!(
+                        "request",
+                        id = %request_id,
+                        // method = %request.method(),
+                        // path = %request.uri().path(),
+                    )
+                })
+                // TODO: on failure that has the request and response body so we can debug more easily
+                .on_failure(()),
         )
         // 404 for any unknown routes
         .fallback(errors::handler_404);

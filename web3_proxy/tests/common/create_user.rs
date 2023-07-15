@@ -2,11 +2,12 @@ use crate::TestApp;
 use entities::{user, user_tier};
 use ethers::prelude::{LocalWallet, Signer};
 use ethers::types::Signature;
+use http::StatusCode;
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
     QueryFilter,
 };
-use tracing::info;
+use tracing::{info, trace};
 use web3_proxy::errors::Web3ProxyResult;
 use web3_proxy::frontend::users::authentication::{LoginPostResponse, PostLogin};
 
@@ -38,15 +39,20 @@ pub async fn create_user(
     };
     info!(?user_post_login_data);
 
-    let mut user_login_response = r
+    let user_login_response = r
         .post(&login_post_url)
         .json(&user_post_login_data)
         .send()
         .await
-        .unwrap()
-        .json::<LoginPostResponse>()
-        .await
         .unwrap();
+    trace!(?user_login_response);
+
+    assert_eq!(user_login_response.status(), StatusCode::OK);
+
+    let user_login_text = user_login_response.text().await.unwrap();
+    trace!("user_login_text: {:#}", user_login_text);
+
+    let user_login_response: LoginPostResponse = serde_json::from_str(&user_login_text).unwrap();
     info!(?user_login_response);
 
     user_login_response

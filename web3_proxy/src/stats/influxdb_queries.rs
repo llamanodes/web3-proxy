@@ -1,5 +1,6 @@
 use super::StatType;
 use crate::errors::Web3ProxyErrorContext;
+use crate::globals::global_db_replica_conn;
 use crate::{
     app::Web3ProxyApp,
     errors::{Web3ProxyError, Web3ProxyResponse},
@@ -47,7 +48,7 @@ pub async fn query_user_stats<'a>(
         ));
     }
 
-    let db_replica = app.db_replica()?;
+    let db_replica = global_db_replica_conn().await?;
 
     // Read the (optional) user-id from the request, this is the logic for subusers
     // If there is no bearer token, this is not allowed

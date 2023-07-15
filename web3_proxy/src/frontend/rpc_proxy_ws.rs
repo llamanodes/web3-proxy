@@ -35,7 +35,7 @@ use std::str::from_utf8_mut;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, OwnedSemaphorePermit, RwLock as AsyncRwLock};
-use tracing::{info, trace};
+use tracing::trace;
 
 /// How to select backend servers for a request
 #[derive(Copy, Clone, Debug, Default)]
@@ -484,7 +484,7 @@ async fn read_web3_socket(
                                 return;
                             }
                             Message::Close(_) => {
-                                info!("closing websocket connection");
+                                trace!("closing websocket connection");
                                 // TODO: do something to close subscriptions?
                                 let _ = close_sender.send(true);
                                 return;

@@ -1,7 +1,8 @@
 //! Handle registration, logins, and managing account data.
-use crate::app::Web3ProxyApp;
 use crate::errors::Web3ProxyResponse;
+use crate::globals::global_db_conn;
 use crate::referral_code::ReferralCode;
+use crate::{app::Web3ProxyApp, globals::global_db_replica_conn};
 use anyhow::Context;
 use axum::{
     extract::Query,
@@ -35,7 +36,7 @@ pub async fn user_referral_link_get(
     // First get the bearer token and check if the user is logged in
     let user = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app.db_replica()?;
+    let db_replica = global_db_replica_conn().await?;
 
     // Then get the referral token. If one doesn't exist, create one
     let user_referrer = referrer::Entity::find()
@@ -47,7 +48,7 @@ pub async fn user_referral_link_get(
         Some(x) => (x.referral_code, StatusCode::OK),
         None => {
             // Connect to the database for writes
-            let db_conn = app.db_conn()?;
+            let db_conn = global_db_conn().await?;
 
             let referral_code = ReferralCode::default().to_string();
 
@@ -56,7 +57,7 @@ pub async fn user_referral_link_get(
                 referral_code: sea_orm::ActiveValue::Set(referral_code.clone()),
                 ..Default::default()
             };
-            referrer_entry.save(db_conn).await?;
+            referrer_entry.save(&db_conn).await?;
 
             (referral_code, StatusCode::CREATED)
         }
@@ -80,7 +81,7 @@ pub async fn user_used_referral_stats(
     // First get the bearer token and check if the user is logged in
     let user = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app.db_replica()?;
+    let db_replica = global_db_replica_conn().await?;
 
     // Get all referral records associated with this user
     let referrals = referee::Entity::find()
@@ -138,7 +139,7 @@ pub async fn user_shared_referral_stats(
     // First get the bearer token and check if the user is logged in
     let user = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app.db_replica()?;
+    let db_replica = global_db_replica_conn().await?;
 
     // Get all referral records associated with this user
     let query_result = referrer::Entity::find()

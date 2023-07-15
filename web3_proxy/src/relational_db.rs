@@ -34,15 +34,15 @@ pub async fn connect_db(
 
     // TODO: load all these options from the config file. i think docker mysql default max is 100
     // Amazon RDS Proxy default idle timeout is 1800 seconds
-    // TODO: sqlx info logging is way too verbose for production.
     db_opt
-        .acquire_timeout(Duration::from_secs(5))
-        .connect_timeout(Duration::from_secs(5))
+        .acquire_timeout(Duration::from_secs(3))
+        .connect_timeout(Duration::from_secs(3))
         .idle_timeout(Duration::from_secs(1795))
-        .min_connections(min_connections)
         .max_connections(max_connections)
-        .sqlx_logging_level(tracing::log::LevelFilter::Trace)
-        .sqlx_logging(true);
+        .max_lifetime(Duration::from_secs(60))
+        .min_connections(min_connections)
+        .sqlx_logging(true)
+        .sqlx_logging_level(tracing::log::LevelFilter::Trace);
 
     Database::connect(db_opt).await
 }
@@ -76,33 +76,23 @@ pub async fn migrate_db(
             .col(ColumnDef::new(Alias::new("locked")).boolean().default(true)),
     );
 
-    loop {
-        if Migrator::get_pending_migrations(db_conn).await?.is_empty() {
-            info!("no migrations to apply");
-            return Ok(());
+    if Migrator::get_pending_migrations(db_conn).await?.is_empty() {
+        info!("no migrations to apply");
+        return Ok(());
+    }
+
+    info!("checking migration lock...");
+
+    // there are migrations to apply
+    // acquire a lock
+    if db_conn.execute(create_lock_statment).await.is_err() {
+        if override_existing_lock {
+            warn!("OVERRIDING EXISTING LOCK in 10 seconds! ctrl+c now if other migrations are actually running!");
+
+            sleep(Duration::from_secs(10)).await
+        } else {
+            return Err(anyhow::anyhow!("Unable to acquire lock. if you are positive no migration is running, run \"web3_proxy_cli drop_migration_lock\""));
         }
-
-        info!("waiting for migration lock...");
-
-        // there are migrations to apply
-        // acquire a lock
-        if let Err(err) = db_conn.execute(create_lock_statment.clone()).await {
-            if override_existing_lock {
-                warn!("OVERRIDING EXISTING LOCK in 10 seconds! ctrl+c now if other migrations are actually running!");
-
-                sleep(Duration::from_secs(10)).await
-            } else {
-                debug!("Unable to acquire lock. if you are positive no migration is running, run \"web3_proxy_cli drop_migration_lock\". err={:?}", err);
-
-                // TODO: exponential backoff with jitter?
-                sleep(Duration::from_secs(1)).await;
-
-                continue;
-            }
-        }
-
-        debug!("migration lock acquired");
-        break;
     }
 
     info!("migrating...");

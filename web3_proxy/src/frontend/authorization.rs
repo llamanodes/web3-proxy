@@ -5,6 +5,7 @@ use crate::app::{Web3ProxyApp, APP_USER_AGENT};
 use crate::balance::Balance;
 use crate::caches::RegisteredUserRateLimitKey;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
+use crate::globals::global_db_replica_conn;
 use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::blockchain::Web3ProxyBlock;
 use crate::rpcs::one::Web3Rpc;
@@ -26,8 +27,7 @@ use hashbrown::HashMap;
 use http::HeaderValue;
 use ipnet::IpNet;
 use migration::sea_orm::prelude::Decimal;
-use migration::sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
-use parking_lot::Mutex;
+use migration::sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use rdkafka::message::{Header as KafkaHeader, OwnedHeaders as KafkaOwnedHeaders, OwnedMessage};
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::util::Timeout as KafkaTimeout;
@@ -47,7 +47,7 @@ use tokio::sync::RwLock as AsyncRwLock;
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use tracing::{error, info, trace, warn};
+use tracing::{error, trace, warn};
 use ulid::Ulid;
 use uuid::Uuid;
 
@@ -173,7 +173,6 @@ pub struct AuthorizationChecks {
 #[derive(Clone, Debug)]
 pub struct Authorization {
     pub checks: AuthorizationChecks,
-    pub db_conn: Option<DatabaseConnection>,
     pub ip: IpAddr,
     pub origin: Option<Origin>,
     pub referer: Option<Referer>,
@@ -390,7 +389,7 @@ pub struct RequestMetadata {
 
 impl Default for Authorization {
     fn default() -> Self {
-        Authorization::internal(None).unwrap()
+        Authorization::internal().unwrap()
     }
 }
 
@@ -670,7 +669,7 @@ impl From<RpcSecretKey> for Uuid {
 }
 
 impl Authorization {
-    pub fn internal(db_conn: Option<DatabaseConnection>) -> Web3ProxyResult<Self> {
+    pub fn internal() -> Web3ProxyResult<Self> {
         let authorization_checks = AuthorizationChecks {
             // any error logs on a local (internal) query are likely problems. log them all
             log_revert_chance: 100,
@@ -683,7 +682,6 @@ impl Authorization {
 
         Self::try_new(
             authorization_checks,
-            db_conn,
             &ip,
             None,
             None,
@@ -694,7 +692,6 @@ impl Authorization {
 
     pub fn external(
         allowed_origin_requests_per_period: &HashMap<String, u64>,
-        db_conn: Option<DatabaseConnection>,
         ip: &IpAddr,
         origin: Option<&Origin>,
         proxy_mode: ProxyMode,
@@ -719,7 +716,6 @@ impl Authorization {
 
         Self::try_new(
             authorization_checks,
-            db_conn,
             ip,
             origin,
             referer,
@@ -731,7 +727,6 @@ impl Authorization {
     #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         authorization_checks: AuthorizationChecks,
-        db_conn: Option<DatabaseConnection>,
         ip: &IpAddr,
         origin: Option<&Origin>,
         referer: Option<&Referer>,
@@ -786,7 +781,6 @@ impl Authorization {
 
         Ok(Self {
             checks: authorization_checks,
-            db_conn,
             ip: *ip,
             origin: origin.cloned(),
             referer: referer.cloned(),
@@ -994,7 +988,7 @@ impl Web3ProxyApp {
         let user_bearer_token = UserBearerToken::try_from(bearer)?;
 
         // get the attached address from the database for the given auth_token.
-        let db_replica = self.db_replica()?;
+        let db_replica = global_db_replica_conn().await?;
 
         let user_bearer_uuid: Uuid = user_bearer_token.into();
 
@@ -1019,7 +1013,6 @@ impl Web3ProxyApp {
         // we don't care about user agent or origin or referer
         let authorization = Authorization::external(
             &self.config.allowed_origin_requests_per_period,
-            self.db_conn().ok().cloned(),
             &ip,
             None,
             proxy_mode,
@@ -1074,7 +1067,7 @@ impl Web3ProxyApp {
     ) -> Web3ProxyResult<RateLimitResult> {
         if ip.is_loopback() {
             // TODO: localhost being unlimited should be optional
-            let authorization = Authorization::internal(self.db_conn().ok().cloned())?;
+            let authorization = Authorization::internal()?;
 
             return Ok(RateLimitResult::Allowed(authorization, None));
         }
@@ -1085,7 +1078,6 @@ impl Web3ProxyApp {
         // they do check origin because we can override rate limits for some origins
         let authorization = Authorization::external(
             allowed_origin_requests_per_period,
-            self.db_conn().ok().cloned(),
             ip,
             origin,
             proxy_mode,
@@ -1145,7 +1137,7 @@ impl Web3ProxyApp {
         let x = self
             .rpc_secret_key_cache
             .try_get_with_by_ref(rpc_secret_key, async move {
-                let db_replica = self.db_replica()?;
+                let db_replica = global_db_replica_conn().await?;
 
                 // TODO: join the user table to this to return the User? we don't always need it
                 // TODO: join on secondary users
@@ -1270,7 +1262,7 @@ impl Web3ProxyApp {
                         let rpc_key_id =
                             Some(rpc_key_model.id.try_into().context("db ids are never 0")?);
 
-                        Ok(AuthorizationChecks {
+                        Ok::<_, Web3ProxyError>(AuthorizationChecks {
                             allowed_ips,
                             allowed_origins,
                             allowed_referers,
@@ -1307,10 +1299,25 @@ impl Web3ProxyApp {
         rpc_key: &RpcSecretKey,
         user_agent: Option<&UserAgent>,
     ) -> Web3ProxyResult<RateLimitResult> {
-        let authorization_checks = self.authorization_checks(proxy_mode, rpc_key).await?;
+        let authorization_checks = match self.authorization_checks(proxy_mode, rpc_key).await {
+            Ok(x) => x,
+            Err(err) => {
+                if let Ok(_err) = err.split_db_errors() {
+                    // // TODO: this is too verbose during an outage. the warnings on the config reloader should be fine
+                    // warn!(
+                    //     ?err,
+                    //     "db is down. cannot check rpc key. fallback to ip rate limits"
+                    // );
+                    return self.rate_limit_by_ip(ip, origin, proxy_mode).await;
+                }
+
+                return Err(err);
+            }
+        };
 
         // if no rpc_key_id matching the given rpc was found, then we can't rate limit by key
         if authorization_checks.rpc_secret_key_id.is_none() {
+            trace!("unknown key. falling back to free limits");
             return self.rate_limit_by_ip(ip, origin, proxy_mode).await;
         }
 
@@ -1320,7 +1327,6 @@ impl Web3ProxyApp {
 
         let authorization = Authorization::try_new(
             authorization_checks,
-            self.db_conn().ok().cloned(),
             ip,
             origin,
             referer,

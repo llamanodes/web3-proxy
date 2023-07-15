@@ -527,7 +527,7 @@ impl RpcQueryStats {
         let mut authorization = metadata.authorization.take();
 
         if authorization.is_none() {
-            authorization = Some(Arc::new(Authorization::internal(None)?));
+            authorization = Some(Arc::new(Authorization::internal()?));
         }
 
         let authorization = authorization.expect("Authorization will always be set");

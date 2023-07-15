@@ -92,7 +92,6 @@ impl Web3Rpc {
         config: Web3RpcConfig,
         name: String,
         chain_id: u64,
-        db_conn: Option<DatabaseConnection>,
         // optional because this is only used for http providers. websocket-only providers don't use it
         http_client: Option<reqwest::Client>,
         redis_pool: Option<RedisPool>,
@@ -183,7 +182,6 @@ impl Web3Rpc {
             block_data_limit,
             block_interval,
             created_at: Some(created_at),
-            db_conn,
             display_name: config.display_name,
             hard_limit,
             hard_limit_until: Some(hard_limit_until),
@@ -469,7 +467,7 @@ impl Web3Rpc {
 
                         let age = self.created_at.unwrap().elapsed().as_millis();
 
-                        debug!("clearing head block on {} ({}ms old)!", self, age);
+                        trace!("clearing head block on {} ({}ms old)!", self, age);
 
                         // send an empty block to take this server out of rotation
                         head_block_sender.send_replace(None);
@@ -676,7 +674,7 @@ impl Web3Rpc {
 
                     disconnect_watch_rx.changed().await?;
                 }
-                info!("disconnect triggered on {}", rpc);
+                trace!("disconnect triggered on {}", rpc);
                 Ok(())
             };
 
@@ -723,7 +721,7 @@ impl Web3Rpc {
                     sleep(Duration::from_secs(health_sleep_seconds)).await;
                 }
 
-                debug!("healthcheck loop on {} exited", rpc);
+                trace!("healthcheck loop on {} exited", rpc);
 
                 Ok(())
             };
@@ -747,6 +745,7 @@ impl Web3Rpc {
         }
 
         // exit if any of the futures exit
+        // TODO: have an enum for which one exited?
         let first_exit = futures.next().await;
 
         debug!(?first_exit, "subscriptions on {} exited", self);
@@ -858,7 +857,7 @@ impl Web3Rpc {
             .await?;
 
         if *subscribe_stop_rx.borrow() {
-            debug!(%self, "new heads subscription exited");
+            trace!(%self, "new heads subscription exited");
             Ok(())
         } else {
             Err(anyhow!("new_heads subscription exited. reconnect needed").into())

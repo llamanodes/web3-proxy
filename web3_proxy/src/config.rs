@@ -6,7 +6,6 @@ use ethers::prelude::{Address, TxHash};
 use ethers::types::{U256, U64};
 use hashbrown::HashMap;
 use migration::sea_orm::prelude::Decimal;
-use migration::sea_orm::DatabaseConnection;
 use sentry::types::Dsn;
 use serde::Deserialize;
 use serde_inline_default::serde_inline_default;
@@ -276,7 +275,6 @@ impl Web3RpcConfig {
     pub async fn spawn(
         self,
         name: String,
-        db_conn: Option<DatabaseConnection>,
         redis_pool: Option<redis_rate_limiter::RedisPool>,
         chain_id: u64,
         block_interval: Duration,
@@ -293,7 +291,6 @@ impl Web3RpcConfig {
             self,
             name,
             chain_id,
-            db_conn,
             http_client,
             redis_pool,
             block_interval,

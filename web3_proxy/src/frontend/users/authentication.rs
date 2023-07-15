@@ -2,6 +2,7 @@
 use crate::app::Web3ProxyApp;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
 use crate::frontend::authorization::{login_is_authorized, RpcSecretKey};
+use crate::globals::{global_db_conn, global_db_replica_conn};
 use crate::user_token::UserBearerToken;
 use axum::{
     extract::{Path, Query},
@@ -124,12 +125,12 @@ pub async fn user_login_get(
         resources: vec![],
     };
 
-    let db_conn = app.db_conn()?;
+    let db_conn = global_db_conn().await?;
 
     // delete any expired logins
     if let Err(err) = login::Entity::delete_many()
         .filter(login::Column::ExpiresAt.lte(now))
-        .exec(db_conn)
+        .exec(&db_conn)
         .await
     {
         warn!(?err, "expired_logins");
@@ -138,7 +139,7 @@ pub async fn user_login_get(
     // delete any expired pending logins
     if let Err(err) = pending_login::Entity::delete_many()
         .filter(pending_login::Column::ExpiresAt.lte(now))
-        .exec(db_conn)
+        .exec(&db_conn)
         .await
     {
         warn!(?err, "expired_pending_logins");
@@ -160,7 +161,7 @@ pub async fn user_login_get(
     };
 
     user_pending_login
-        .save(db_conn)
+        .save(&db_conn)
         .await
         .web3_context("saving user's pending_login")?;
 
@@ -261,7 +262,7 @@ pub async fn user_login_post(
     let login_nonce = UserBearerToken::from_str(&their_msg.nonce)?;
 
     // fetch the message we gave them from our database
-    let db_replica = app.db_replica()?;
+    let db_replica = global_db_replica_conn().await?;
 
     let user_pending_login = pending_login::Entity::find()
         .filter(pending_login::Column::Nonce.eq(Uuid::from(login_nonce)))
@@ -293,7 +294,7 @@ pub async fn user_login_post(
         .one(db_replica.as_ref())
         .await?;
 
-    let db_conn = app.db_conn()?;
+    let db_conn = global_db_conn().await?;
 
     let (caller, user_rpc_keys, status_code) = match caller {
         None => {
@@ -384,7 +385,7 @@ pub async fn user_login_post(
             // the user is already registered
             let user_rpc_keys = rpc_key::Entity::find()
                 .filter(rpc_key::Column::UserId.eq(caller.id))
-                .all(db_conn)
+                .all(&db_conn)
                 .await
                 .web3_context("failed loading user's key")?;
 
@@ -411,11 +412,15 @@ pub async fn user_login_post(
     };
 
     user_login
-        .save(db_conn)
+        .save(&db_conn)
         .await
         .web3_context("saving user login")?;
 
-    if let Err(err) = user_pending_login.into_active_model().delete(db_conn).await {
+    if let Err(err) = user_pending_login
+        .into_active_model()
+        .delete(&db_conn)
+        .await
+    {
         error!("Failed to delete nonce:{}: {}", login_nonce, err);
     }
 
@@ -438,16 +443,15 @@ pub async fn user_login_post(
 /// `POST /user/logout` - Forget the bearer token in the `Authentication` header.
 #[debug_handler]
 pub async fn user_logout_post(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
     let user_bearer = UserBearerToken::try_from(bearer)?;
 
-    let db_conn = app.db_conn()?;
+    let db_conn = global_db_conn().await?;
 
     if let Err(err) = login::Entity::delete_many()
         .filter(login::Column::BearerToken.eq(user_bearer.uuid()))
-        .exec(db_conn)
+        .exec(&db_conn)
         .await
     {
         warn!(key=%user_bearer.redis_key(), ?err, "Failed to delete from redis");

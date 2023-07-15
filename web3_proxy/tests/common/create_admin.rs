@@ -1,6 +1,7 @@
 use crate::TestApp;
 use ethers::prelude::{LocalWallet, Signer};
 use ethers::types::Signature;
+use http::StatusCode;
 use tracing::info;
 use web3_proxy::frontend::users::authentication::{LoginPostResponse, PostLogin};
 use web3_proxy::sub_commands::ChangeAdminStatusSubCommand;
@@ -80,17 +81,18 @@ pub async fn create_user_as_admin(
         admin_wallet.address()
     );
     let admin_login_message = r.get(admin_login_get_url).send().await.unwrap();
-    let admin_login_message = admin_login_message.text().await.unwrap();
+
+    assert_eq!(admin_login_message.status(), StatusCode::OK);
+
+    let admin_login_text = admin_login_message.text().await.unwrap();
+    info!(?admin_login_text);
 
     // Sign the message and POST it to login as admin
-    let admin_signed: Signature = admin_wallet
-        .sign_message(&admin_login_message)
-        .await
-        .unwrap();
+    let admin_signed: Signature = admin_wallet.sign_message(&admin_login_text).await.unwrap();
     info!(?admin_signed);
 
     let admin_post_login_data = PostLogin {
-        msg: admin_login_message,
+        msg: admin_login_text,
         sig: admin_signed.to_string(),
         referral_code: None,
     };
