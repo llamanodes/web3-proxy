@@ -204,7 +204,8 @@ impl OpenRequestHandle {
             ));
         };
 
-        // we do NOT want to measure errors, so we intentionally do not record this latency now.
+        // measure successes and errors
+        // originally i thought we wouldn't want errors, but I think it's a more accurate number including all requests
         let latency = start.elapsed();
 
         // we used to fetch_sub the active_request count here, but sometimes the handle is dropped without request being called!
@@ -263,21 +264,26 @@ impl OpenRequestHandle {
             // check for "execution reverted" here
             // TODO: move this info a function on ResponseErrorType
             let response_type = if let ProviderError::JsonRpcClientError(err) = err {
-                // JsonRpc and Application errors get rolled into the JsonRpcClientError
-                let msg = err.as_error_response().map(|x| x.message.clone());
+                if let Some(_err) = err.as_serde_error() {
+                    // this seems to pretty much always be a rate limit error
+                    ResponseTypes::RateLimit
+                } else if let Some(err) = err.as_error_response() {
+                    // JsonRpc and Application errors get rolled into the JsonRpcClientError
+                    let msg = err.message.as_str();
 
-                if let Some(msg) = msg {
                     trace!(%msg, "jsonrpc error message");
 
                     if msg.starts_with("execution reverted") {
-                        trace!("revert from {}", self.rpc);
                         ResponseTypes::Revert
                     } else if msg.contains("limit") || msg.contains("request") {
+                        // TODO! THIS HAS TOO MANY FALSE POSITIVES! Theres another spot in the code that checks for things.
                         ResponseTypes::RateLimit
                     } else {
                         ResponseTypes::Error
                     }
                 } else {
+                    // i don't think this is possible
+                    warn!(?err, "unexpected error");
                     ResponseTypes::Error
                 }
             } else {
