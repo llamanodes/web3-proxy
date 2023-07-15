@@ -1029,7 +1029,7 @@ impl Web3ProxyApp {
         request_metadata: &Arc<RequestMetadata>,
     ) -> Web3ProxyResult<Box<RawValue>> {
         if let Some(protected_rpcs) = self.private_rpcs.as_ref() {
-            if !protected_rpcs.is_empty() {
+            if !protected_rpcs.is_empty().await {
                 let protected_response = protected_rpcs
                     .try_send_all_synced_connections(
                         method,
