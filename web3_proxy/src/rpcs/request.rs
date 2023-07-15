@@ -1,8 +1,8 @@
 use super::one::Web3Rpc;
 use crate::errors::{Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, AuthorizationType};
+use crate::globals::{global_db_conn, DB_CONN};
 use crate::jsonrpc::{JsonRpcParams, JsonRpcResultData};
-use anyhow::Context;
 use chrono::Utc;
 use derive_more::From;
 use entities::revert_log;
@@ -90,7 +90,7 @@ impl Authorization {
             }
         };
 
-        let db_conn = self.db_conn.as_ref().context("no database connection")?;
+        let db_conn = global_db_conn().await?;
 
         // TODO: should the database set the timestamp?
         // we intentionally use "now" and not the time the request started
@@ -111,7 +111,7 @@ impl Authorization {
         };
 
         let rl = rl
-            .save(db_conn)
+            .save(&db_conn)
             .await
             .web3_context("Failed saving new revert log")?;
 
@@ -204,7 +204,8 @@ impl OpenRequestHandle {
             ));
         };
 
-        // we do NOT want to measure errors, so we intentionally do not record this latency now.
+        // measure successes and errors
+        // originally i thought we wouldn't want errors, but I think it's a more accurate number including all requests
         let latency = start.elapsed();
 
         // we used to fetch_sub the active_request count here, but sometimes the handle is dropped without request being called!
@@ -225,7 +226,7 @@ impl OpenRequestHandle {
                 if !["eth_call", "eth_estimateGas"].contains(&method) {
                     // trace!(%method, "skipping save on revert");
                     RequestErrorHandler::TraceLevel
-                } else if self.authorization.db_conn.is_some() {
+                } else if DB_CONN.read().await.is_ok() {
                     let log_revert_chance = self.authorization.checks.log_revert_chance;
 
                     if log_revert_chance == 0 {
@@ -263,21 +264,26 @@ impl OpenRequestHandle {
             // check for "execution reverted" here
             // TODO: move this info a function on ResponseErrorType
             let response_type = if let ProviderError::JsonRpcClientError(err) = err {
-                // JsonRpc and Application errors get rolled into the JsonRpcClientError
-                let msg = err.as_error_response().map(|x| x.message.clone());
+                if let Some(_err) = err.as_serde_error() {
+                    // this seems to pretty much always be a rate limit error
+                    ResponseTypes::RateLimit
+                } else if let Some(err) = err.as_error_response() {
+                    // JsonRpc and Application errors get rolled into the JsonRpcClientError
+                    let msg = err.message.as_str();
 
-                if let Some(msg) = msg {
                     trace!(%msg, "jsonrpc error message");
 
                     if msg.starts_with("execution reverted") {
-                        trace!("revert from {}", self.rpc);
                         ResponseTypes::Revert
                     } else if msg.contains("limit") || msg.contains("request") {
+                        // TODO! THIS HAS TOO MANY FALSE POSITIVES! Theres another spot in the code that checks for things.
                         ResponseTypes::RateLimit
                     } else {
                         ResponseTypes::Error
                     }
                 } else {
+                    // i don't think this is possible
+                    warn!(?err, "unexpected error");
                     ResponseTypes::Error
                 }
             } else {
@@ -378,6 +384,7 @@ impl OpenRequestHandle {
                     match serde_json::from_value::<EthCallParams>(json!(params)) {
                         Ok(params) => {
                             // spawn saving to the database so we don't slow down the request
+                            // TODO: log if this errors
                             let f = self.authorization.clone().save_revert(method, params.0 .0);
 
                             tokio::spawn(f);

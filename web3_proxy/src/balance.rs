@@ -10,7 +10,7 @@ use migration::{Func, SimpleExpr};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tracing::info;
+use tracing::trace;
 
 /// Implements the balance getter which combines data from several tables
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -220,8 +220,7 @@ impl Balance {
             user_id,
         };
 
-        // TODO: lower log level
-        info!("balance: {:#}", json!(&balance));
+        trace!("balance: {:#}", json!(&balance));
 
         // Return None if there is no entry
         Ok(Some(balance))

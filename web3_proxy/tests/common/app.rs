@@ -4,20 +4,20 @@ use ethers::{
     types::Address,
 };
 use hashbrown::HashMap;
-use parking_lot::Mutex;
 use serde_json::json;
 use std::{
     env,
     str::FromStr,
     sync::atomic::{AtomicU16, Ordering},
+    thread,
 };
 use std::{sync::Arc, time::Duration};
 use tokio::{
+    runtime::Builder,
     sync::{
         broadcast::{self, error::SendError},
         mpsc, oneshot,
     },
-    task::JoinHandle,
     time::{sleep, Instant},
 };
 use tracing::info;
@@ -28,8 +28,9 @@ use web3_proxy::{
 };
 
 pub struct TestApp {
-    /// spawn handle for the proxy.
-    pub proxy_handle: Mutex<Option<JoinHandle<anyhow::Result<()>>>>,
+    /// **THREAD** (not async) handle for the proxy.
+    /// In an Option so we can take it and not break the `impl Drop`
+    pub proxy_handle: Option<thread::JoinHandle<anyhow::Result<()>>>,
 
     /// connection to the proxy that is connected to anil.
     pub proxy_provider: Provider<Http>,
@@ -96,16 +97,29 @@ impl TestApp {
         // spawn the app
         // TODO: spawn in a thread so we can run from non-async tests and so the Drop impl can wait for it to stop
         let handle = {
-            tokio::spawn(ProxydSubCommand::_main(
-                top_config,
-                None,
-                frontend_port_arc.clone(),
-                prometheus_port_arc,
-                num_workers,
-                shutdown_sender.clone(),
-                flush_stat_buffer_sender.clone(),
-                flush_stat_buffer_receiver,
-            ))
+            let frontend_port_arc = frontend_port_arc.clone();
+            let prometheus_port_arc = prometheus_port_arc.clone();
+            let flush_stat_buffer_sender = flush_stat_buffer_sender.clone();
+            let shutdown_sender = shutdown_sender.clone();
+
+            thread::spawn(move || {
+                let runtime = Builder::new_multi_thread()
+                    .enable_all()
+                    .worker_threads(2)
+                    .build()
+                    .unwrap();
+
+                runtime.block_on(ProxydSubCommand::_main(
+                    top_config,
+                    None,
+                    frontend_port_arc,
+                    prometheus_port_arc,
+                    num_workers,
+                    shutdown_sender,
+                    flush_stat_buffer_sender,
+                    flush_stat_buffer_receiver,
+                ))
+            })
         };
 
         let mut frontend_port = frontend_port_arc.load(Ordering::Relaxed);
@@ -125,7 +139,7 @@ impl TestApp {
         let proxy_provider = Provider::<Http>::try_from(proxy_endpoint).unwrap();
 
         Self {
-            proxy_handle: Mutex::new(Some(handle)),
+            proxy_handle: Some(handle),
             proxy_provider,
             flush_stat_buffer_sender,
             shutdown_sender,
@@ -148,15 +162,11 @@ impl TestApp {
     }
 
     #[allow(unused)]
-    pub async fn wait(&self) {
+    pub fn wait_for_stop(mut self) {
         let _ = self.stop();
 
-        // TODO: lock+take feels weird, but it works
-        let handle = self.proxy_handle.lock().take();
-
-        if let Some(handle) = handle {
-            info!("waiting for the app to stop...");
-            handle.await.unwrap().unwrap();
+        if let Some(handle) = self.proxy_handle.take() {
+            handle.join().unwrap();
         }
     }
 }

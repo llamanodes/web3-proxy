@@ -1,6 +1,7 @@
 //! Handle registration, logins, and managing account data.
 use crate::app::Web3ProxyApp;
 use crate::errors::{Web3ProxyErrorContext, Web3ProxyResponse};
+use crate::globals::global_db_replica_conn;
 use crate::http_params::{
     get_chain_id_from_params, get_page_from_params, get_query_start_from_params,
 };
@@ -46,7 +47,7 @@ pub async fn user_revert_logs_get(
     response.insert("chain_id", json!(chain_id));
     response.insert("query_start", json!(query_start.timestamp() as u64));
 
-    let db_replica = app.db_replica()?;
+    let db_replica = global_db_replica_conn().await?;
 
     let uks = rpc_key::Entity::find()
         .filter(rpc_key::Column::UserId.eq(user.id))

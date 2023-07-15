@@ -6,6 +6,7 @@ use crate::app::Web3ProxyApp;
 use crate::errors::Web3ProxyResponse;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext};
 use crate::frontend::users::authentication::PostLogin;
+use crate::globals::{global_db_conn, global_db_replica_conn};
 use crate::premium::{get_user_and_tier_from_address, grant_premium_tier};
 use crate::user_token::UserBearerToken;
 use axum::{
@@ -26,6 +27,7 @@ use http::StatusCode;
 use migration::sea_orm::prelude::{Decimal, Uuid};
 use migration::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
+    TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -57,7 +59,8 @@ pub async fn admin_increase_balance(
     let caller = app.bearer_is_authorized(bearer).await?;
 
     // Establish connections
-    let txn = app.db_transaction().await?;
+    let db_conn = global_db_conn().await?;
+    let txn = db_conn.begin().await?;
 
     // Check if the caller is an admin (if not, return early)
     let admin_entry: admin::Model = admin::Entity::find()
@@ -90,7 +93,7 @@ pub async fn admin_increase_balance(
     // Invalidate the user_balance_cache for this user:
     if let Err(err) = app
         .user_balance_cache
-        .invalidate(&user_entry.id, app.db_conn()?, &app.rpc_secret_key_cache)
+        .invalidate(&user_entry.id, &db_conn, &app.rpc_secret_key_cache)
         .await
     {
         warn!(?err, "unable to invalidate caches");
@@ -194,8 +197,8 @@ pub async fn admin_imitate_login_get(
         resources: vec![],
     };
 
-    let db_conn = app.db_conn()?;
-    let db_replica = app.db_replica()?;
+    let db_conn = global_db_conn().await?;
+    let db_replica = global_db_replica_conn().await?;
 
     let admin = user::Entity::find()
         .filter(user::Column::Address.eq(admin_address.as_bytes()))
@@ -219,7 +222,7 @@ pub async fn admin_imitate_login_get(
     let now = Utc::now();
     let delete_result = pending_login::Entity::delete_many()
         .filter(pending_login::Column::ExpiresAt.lte(now))
-        .exec(db_conn)
+        .exec(&db_conn)
         .await?;
     trace!("cleared expired pending_logins: {:?}", delete_result);
 
@@ -233,7 +236,7 @@ pub async fn admin_imitate_login_get(
     };
 
     trail
-        .save(db_conn)
+        .save(&db_conn)
         .await
         .web3_context("saving user's pending_login")?;
 
@@ -256,7 +259,7 @@ pub async fn admin_imitate_login_get(
     };
 
     user_pending_login
-        .save(db_conn)
+        .save(&db_conn)
         .await
         .web3_context("saving an admin trail pre login")?;
 
@@ -333,7 +336,7 @@ pub async fn admin_imitate_login_post(
     })?;
 
     // fetch the message we gave them from our database
-    let db_replica = app.db_replica()?;
+    let db_replica = global_db_replica_conn().await?;
 
     let user_pending_login = pending_login::Entity::find()
         .filter(pending_login::Column::Nonce.eq(Uuid::from(login_nonce)))
@@ -376,7 +379,7 @@ pub async fn admin_imitate_login_post(
         .await?
         .web3_context("admin address was not found!")?;
 
-    let db_conn = app.db_conn()?;
+    let db_conn = global_db_conn().await?;
 
     // Add a message that the admin has logged in
     // Note that the admin is trying to log in as this user
@@ -388,7 +391,7 @@ pub async fn admin_imitate_login_post(
         ..Default::default()
     };
     trail
-        .save(db_conn)
+        .save(&db_conn)
         .await
         .web3_context("saving an admin trail post login")?;
 
@@ -437,11 +440,15 @@ pub async fn admin_imitate_login_post(
     };
 
     user_login
-        .save(db_conn)
+        .save(&db_conn)
         .await
         .web3_context("saving user login")?;
 
-    if let Err(err) = user_pending_login.into_active_model().delete(db_conn).await {
+    if let Err(err) = user_pending_login
+        .into_active_model()
+        .delete(&db_conn)
+        .await
+    {
         warn!(none=?login_nonce.0, ?err, "Failed to delete nonce");
     }
 

@@ -46,7 +46,7 @@ pub struct Web3ProxyCli {
     #[argh(option)]
     pub db_url: Option<String>,
 
-    /// if no config, what sentry url should the client should connect to
+    /// if no config, what sentry url should the client should connect to (only required for some commands)
     #[argh(option)]
     pub sentry_url: Option<Dsn>,
 

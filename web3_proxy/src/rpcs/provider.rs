@@ -2,7 +2,8 @@ use ethers::providers::{Authorization, ConnectionDetails};
 use std::time::Duration;
 use url::Url;
 
-// TODO: our own structs for these that handle streaming large responses
+use crate::errors::Web3ProxyResult;
+
 pub type EthersHttpProvider = ethers::providers::Provider<ethers::providers::Http>;
 pub type EthersWsProvider = ethers::providers::Provider<ethers::providers::Ws>;
 
@@ -30,12 +31,14 @@ pub fn connect_http(
     mut url: Url,
     http_client: Option<reqwest::Client>,
     interval: Duration,
-) -> anyhow::Result<EthersHttpProvider> {
+) -> Web3ProxyResult<EthersHttpProvider> {
     let auth = extract_auth(&mut url);
 
     let mut provider = if url.scheme().starts_with("http") {
         let provider = if let Some(auth) = auth {
-            ethers::providers::Http::new_with_auth(url, auth)?
+            // TODO: there are two "HttpClientError" in ethers. this one is not in the prelude
+            ethers::providers::Http::new_with_auth(url, auth)
+                .map_err(|err| anyhow::anyhow!("http client error: {:?}", err))?
         } else if let Some(http_client) = http_client {
             ethers::providers::Http::new_with_client(url, http_client)
         } else {
@@ -45,10 +48,7 @@ pub fn connect_http(
         // TODO: i don't think this interval matters for our uses, but we should probably set it to like `block time / 2`
         ethers::providers::Provider::new(provider).interval(Duration::from_secs(2))
     } else {
-        return Err(anyhow::anyhow!(
-            "only http servers are supported. cannot use {}",
-            url
-        ));
+        return Err(anyhow::anyhow!("only http servers are supported. cannot use {}", url).into());
     };
 
     provider.set_interval(interval);
@@ -56,7 +56,7 @@ pub fn connect_http(
     Ok(provider)
 }
 
-pub async fn connect_ws(mut url: Url, reconnects: usize) -> anyhow::Result<EthersWsProvider> {
+pub async fn connect_ws(mut url: Url, reconnects: usize) -> Web3ProxyResult<EthersWsProvider> {
     let auth = extract_auth(&mut url);
 
     let provider = if url.scheme().starts_with("ws") {
@@ -73,7 +73,7 @@ pub async fn connect_ws(mut url: Url, reconnects: usize) -> anyhow::Result<Ether
         // TODO: i don't think this interval matters
         ethers::providers::Provider::new(provider)
     } else {
-        return Err(anyhow::anyhow!("ws servers are supported"));
+        return Err(anyhow::anyhow!("ws servers are supported").into());
     };
 
     Ok(provider)

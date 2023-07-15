@@ -277,7 +277,7 @@ pub async fn serve(
                     // method = %request.method(),
                     // path = %request.uri().path(),
                 )
-            }),
+            }), // .on_failure(|| todo!("on failure that has the request and response body so we can debug more easily")),
         )
         // 404 for any unknown routes
         .fallback(errors::handler_404);

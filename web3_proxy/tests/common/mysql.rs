@@ -8,7 +8,7 @@ use tokio::{
     time::{sleep, Instant},
 };
 use tracing::{info, trace, warn};
-use web3_proxy::relational_db::get_migrated_db;
+use web3_proxy::relational_db::{connect_db, get_migrated_db};
 
 /// on drop, the mysql docker container will be shut down
 pub struct TestMysql {
@@ -167,9 +167,7 @@ impl TestMysql {
     }
 
     pub async fn conn(&self) -> DatabaseConnection {
-        get_migrated_db(self.url.clone().unwrap(), 1, 5)
-            .await
-            .unwrap()
+        connect_db(self.url.clone().unwrap(), 1, 5).await.unwrap()
     }
 }
 

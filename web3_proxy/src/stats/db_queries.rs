@@ -1,6 +1,7 @@
 use super::StatType;
 use crate::app::Web3ProxyApp;
 use crate::errors::{Web3ProxyError, Web3ProxyResponse, Web3ProxyResult};
+use crate::globals::{global_db_conn, global_db_replica_conn};
 use crate::http_params::{
     get_chain_id_from_params, get_page_from_params, get_query_start_from_params,
     get_query_window_seconds_from_params, get_user_id_from_params,
@@ -61,13 +62,13 @@ pub async fn query_user_stats<'a>(
     params: &'a HashMap<String, String>,
     stat_response_type: StatType,
 ) -> Web3ProxyResponse {
-    let db_conn = app.db_conn()?;
-    let db_replica = app.db_replica()?;
+    let db_conn = global_db_conn().await?;
+    let db_replica = global_db_replica_conn().await?;
     let mut redis_conn = app.redis_conn().await?;
 
     // get the user id first. if it is 0, we should use a cache on the app
     let user_id =
-        get_user_id_from_params(&mut redis_conn, db_conn, db_replica, bearer, params).await?;
+        get_user_id_from_params(&mut redis_conn, &db_conn, &db_replica, bearer, params).await?;
     // get the query window seconds now so that we can pick a cache with a good TTL
     // TODO: for now though, just do one cache. its easier
     let query_window_seconds = get_query_window_seconds_from_params(params)?;

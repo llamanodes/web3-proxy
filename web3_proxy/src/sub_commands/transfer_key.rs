@@ -52,7 +52,7 @@ impl TransferKeySubCommand {
 
             uk.user_id = sea_orm::Set(new_u.id);
 
-            let _uk = uk.save(db_conn).await?;
+            uk.save(db_conn).await?;
 
             info!("changed the key's owner");
         }

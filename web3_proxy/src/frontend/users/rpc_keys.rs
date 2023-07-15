@@ -2,6 +2,7 @@
 use super::super::authorization::RpcSecretKey;
 use crate::app::Web3ProxyApp;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
+use crate::globals::{global_db_conn, global_db_replica_conn};
 use axum::headers::{Header, Origin, Referer, UserAgent};
 use axum::{
     headers::{authorization::Bearer, Authorization},
@@ -31,7 +32,7 @@ pub async fn rpc_keys_get(
 ) -> Web3ProxyResponse {
     let user = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app.db_replica()?;
+    let db_replica = global_db_replica_conn().await?;
 
     // This is basically completely copied from sea-orm. Not optimal, but it keeps the format identical to before (while adding the final key)
     // We could also pack the below stuff into it's subfield, but then we would destroy the format. Both options are fine for now though
@@ -160,7 +161,7 @@ pub async fn rpc_keys_management(
 
     let user = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = app.db_replica()?;
+    let db_replica = global_db_replica_conn().await?;
 
     let mut uk = match payload.key_id {
         Some(existing_key_id) => {
@@ -340,9 +341,9 @@ pub async fn rpc_keys_management(
     }
 
     let uk = if uk.is_changed() {
-        let db_conn = app.db_conn()?;
+        let db_conn = global_db_conn().await?;
 
-        uk.save(db_conn)
+        uk.save(&db_conn)
             .await
             .web3_context("Failed saving user key")?
     } else {

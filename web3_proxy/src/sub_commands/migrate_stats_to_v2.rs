@@ -78,7 +78,6 @@ impl MigrateStatsToV2SubCommand {
         let emitter_spawn = StatBuffer::try_spawn(
             BILLING_PERIOD_SECONDS,
             top_config.app.chain_id,
-            Some(db_conn.clone()),
             30,
             top_config.app.influxdb_bucket.clone(),
             influxdb_client.clone(),
@@ -117,8 +116,8 @@ impl MigrateStatsToV2SubCommand {
             // (2) Create request metadata objects to match the old data
             // Iterate through all old rows, and put them into the above objects.
             for x in old_records.iter() {
-                let mut authorization = Authorization::internal(None)
-                    .context("failed creating internal authorization")?;
+                let mut authorization =
+                    Authorization::internal().context("failed creating internal authorization")?;
 
                 match x.rpc_key_id {
                     Some(rpc_key_id) => {

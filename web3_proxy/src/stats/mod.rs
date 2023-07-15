@@ -94,6 +94,12 @@ pub struct RpcQueryKey {
     rpc_key_user_id: Option<NonZeroU64>,
 }
 
+impl RpcQueryKey {
+    pub fn is_registered(&self) -> bool {
+        self.rpc_key_user_id.is_some()
+    }
+}
+
 /// round the unix epoch time to the start of a period
 fn round_timestamp(timestamp: i64, period_seconds: i64) -> i64 {
     timestamp / period_seconds * period_seconds
@@ -527,7 +533,7 @@ impl RpcQueryStats {
         let mut authorization = metadata.authorization.take();
 
         if authorization.is_none() {
-            authorization = Some(Arc::new(Authorization::internal(None)?));
+            authorization = Some(Arc::new(Authorization::internal()?));
         }
 
         let authorization = authorization.expect("Authorization will always be set");

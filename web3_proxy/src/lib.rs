@@ -1,3 +1,4 @@
+#![feature(lazy_cell)]
 #![feature(let_chains)]
 #![feature(trait_alias)]
 #![forbid(unsafe_code)]
@@ -11,6 +12,7 @@ pub mod compute_units;
 pub mod config;
 pub mod errors;
 pub mod frontend;
+pub mod globals;
 pub mod http_params;
 pub mod jsonrpc;
 pub mod pagerduty;

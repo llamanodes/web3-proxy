@@ -9,6 +9,7 @@ pub mod subuser;
 
 use crate::app::Web3ProxyApp;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
+use crate::globals::global_db_transaction;
 use axum::{
     headers::{authorization::Bearer, Authorization},
     response::IntoResponse,
@@ -80,7 +81,7 @@ pub async fn user_post(
         }
     }
 
-    let txn = app.db_transaction().await?;
+    let txn = global_db_transaction().await?;
 
     // update the referral code IFF they do not already have one set
     if let Some(x) = payload.referral_code {

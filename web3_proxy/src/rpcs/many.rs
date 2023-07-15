@@ -19,25 +19,23 @@ use futures::StreamExt;
 use hashbrown::HashMap;
 use itertools::Itertools;
 use moka::future::CacheBuilder;
-use parking_lot::RwLock;
 use serde::ser::{SerializeStruct, Serializer};
-use serde::Serialize;
 use serde_json::json;
 use serde_json::value::RawValue;
+use std::borrow::Cow;
 use std::cmp::min_by_key;
 use std::fmt::{self, Display};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::select;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, watch, RwLock};
 use tokio::time::{sleep, sleep_until, Duration, Instant};
 use tracing::{debug, error, info, trace, warn};
 
 /// A collection of web3 connections. Sends requests either the current best server or all servers.
 #[derive(From)]
 pub struct Web3Rpcs {
-    /// TODO: this should be a Cow
-    pub(crate) name: String,
+    pub(crate) name: Cow<'static, str>,
     pub(crate) chain_id: u64,
     /// if watch_consensus_head_sender is some, Web3Rpc inside self will send blocks here when they get them
     pub(crate) block_sender: mpsc::UnboundedSender<(Option<Web3ProxyBlock>, Arc<Web3Rpc>)>,
@@ -69,13 +67,12 @@ pub struct Web3Rpcs {
 
 impl Web3Rpcs {
     /// Spawn durable connections to multiple Web3 providers.
-    #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         chain_id: u64,
         max_head_block_lag: Option<U64>,
         min_head_rpcs: usize,
         min_sum_soft_limit: u32,
-        name: String,
+        name: Cow<'static, str>,
         watch_consensus_head_sender: Option<watch::Sender<Option<Web3ProxyBlock>>>,
     ) -> anyhow::Result<(
         Arc<Self>,
@@ -180,7 +177,6 @@ impl Web3Rpcs {
                     return None;
                 }
 
-                let db_conn = app.db_conn().ok().cloned();
                 let http_client = app.http_client.clone();
                 let vredis_pool = app.vredis_pool.clone();
 
@@ -198,7 +194,6 @@ impl Web3Rpcs {
 
                 let handle = tokio::spawn(server_config.spawn(
                     server_name,
-                    db_conn,
                     vredis_pool,
                     chain_id,
                     block_interval,
@@ -217,7 +212,7 @@ impl Web3Rpcs {
                 Ok(Ok((new_rpc, _handle))) => {
                     // web3 connection worked
 
-                    let old_rpc = self.by_name.read().get(&new_rpc.name).map(Arc::clone);
+                    let old_rpc = self.by_name.read().await.get(&new_rpc.name).map(Arc::clone);
 
                     // clean up the old rpc if it exists
                     if let Some(old_rpc) = old_rpc {
@@ -239,7 +234,10 @@ impl Web3Rpcs {
 
                         // new rpc is synced (or old one was not synced). update the local map
                         // make sure that any new requests use the new connection
-                        self.by_name.write().insert(new_rpc.name.clone(), new_rpc);
+                        self.by_name
+                            .write()
+                            .await
+                            .insert(new_rpc.name.clone(), new_rpc);
 
                         // tell the old rpc to disconnect
                         if let Some(ref disconnect_sender) = old_rpc.disconnect_watch {
@@ -247,7 +245,10 @@ impl Web3Rpcs {
                             disconnect_sender.send_replace(true);
                         }
                     } else {
-                        self.by_name.write().insert(new_rpc.name.clone(), new_rpc);
+                        self.by_name
+                            .write()
+                            .await
+                            .insert(new_rpc.name.clone(), new_rpc);
                     }
                 }
                 Ok(Err(err)) => {
@@ -264,12 +265,12 @@ impl Web3Rpcs {
         }
 
         // TODO: remove any RPCs that were part of the config, but are now removed
-        let active_names: Vec<_> = self.by_name.read().keys().cloned().collect();
+        let active_names: Vec<_> = self.by_name.read().await.keys().cloned().collect();
         for name in active_names {
             if names_to_keep.contains(&name) {
                 continue;
             }
-            if let Some(old_rpc) = self.by_name.write().remove(&name) {
+            if let Some(old_rpc) = self.by_name.write().await.remove(&name) {
                 if let Some(ref disconnect_sender) = old_rpc.disconnect_watch {
                     debug!("telling {} to disconnect. no longer needed", old_rpc);
                     disconnect_sender.send_replace(true);
@@ -277,7 +278,7 @@ impl Web3Rpcs {
             }
         }
 
-        let num_rpcs = self.len();
+        let num_rpcs = self.len().await;
 
         if num_rpcs < self.min_synced_rpcs {
             return Err(Web3ProxyError::NotEnoughRpcs {
@@ -289,16 +290,16 @@ impl Web3Rpcs {
         Ok(())
     }
 
-    pub fn get(&self, conn_name: &str) -> Option<Arc<Web3Rpc>> {
-        self.by_name.read().get(conn_name).cloned()
+    pub async fn get(&self, conn_name: &str) -> Option<Arc<Web3Rpc>> {
+        self.by_name.read().await.get(conn_name).cloned()
     }
 
-    pub fn len(&self) -> usize {
-        self.by_name.read().len()
+    pub async fn len(&self) -> usize {
+        self.by_name.read().await.len()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.by_name.read().is_empty()
+    pub async fn is_empty(&self) -> bool {
+        self.by_name.read().await.is_empty()
     }
 
     /// TODO: rename to be consistent between "head" and "synced"
@@ -367,11 +368,11 @@ impl Web3Rpcs {
         }
 
         if let Err(e) = try_join_all(futures).await {
-            error!("subscriptions over: {:?}", self);
+            error!(?self, "subscriptions over");
             return Err(e);
         }
 
-        info!("subscriptions over: {:?}", self);
+        info!(?self, "subscriptions over");
         Ok(())
     }
 
@@ -645,7 +646,7 @@ impl Web3Rpcs {
         let mut earliest_retry_at = None;
 
         // TODO: filter the rpcs with Ranked.will_work_now
-        let mut all_rpcs: Vec<_> = self.by_name.read().values().cloned().collect();
+        let mut all_rpcs: Vec<_> = self.by_name.read().await.values().cloned().collect();
 
         let mut max_count = if let Some(max_count) = max_count {
             max_count
@@ -787,7 +788,6 @@ impl Web3Rpcs {
     }
 
     /// Make a request with stat tracking.
-    #[allow(clippy::too_many_arguments)]
     pub async fn request_with_metadata<P: JsonRpcParams, R: JsonRpcResultData>(
         &self,
         method: &str,
@@ -1055,7 +1055,7 @@ impl Web3Rpcs {
             return Err(err.into());
         }
 
-        let num_conns = self.len();
+        let num_conns = self.len().await;
         let num_skipped = skip_rpcs.len();
 
         let needed = min_block_needed.max(max_block_needed);
@@ -1297,15 +1297,15 @@ impl fmt::Debug for Web3Rpcs {
     }
 }
 
-impl Serialize for Web3Rpcs {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+impl Web3Rpcs {
+    pub async fn serialize_async<W: std::io::Write>(
+        &self,
+        mut serializer: serde_json::Serializer<W>,
+    ) -> Result<(), serde_json::Error> {
         let mut state = serializer.serialize_struct("Web3Rpcs", 5)?;
 
         {
-            let by_name = self.by_name.read();
+            let by_name = self.by_name.read().await;
             let rpcs: Vec<&Arc<Web3Rpc>> = by_name.values().collect();
             // TODO: coordinate with frontend team to rename "conns" to "rpcs"
             state.serialize_field("conns", &rpcs)?;
@@ -1526,7 +1526,7 @@ mod tests {
             block_sender: block_sender.clone(),
             by_name: RwLock::new(by_name),
             chain_id,
-            name: "test".to_string(),
+            name: "test".into(),
             watch_head_block: Some(watch_consensus_head_sender),
             watch_ranked_rpcs,
             blocks_by_hash: CacheBuilder::new(100)
@@ -1781,7 +1781,7 @@ mod tests {
             block_sender,
             by_name: RwLock::new(by_name),
             chain_id,
-            name: "test".to_string(),
+            name: "test".into(),
             watch_head_block: Some(watch_consensus_head_sender),
             watch_ranked_rpcs,
             blocks_by_hash: CacheBuilder::new(100)
@@ -1949,7 +1949,7 @@ mod tests {
             block_sender,
             by_name: RwLock::new(by_name),
             chain_id,
-            name: "test".to_string(),
+            name: "test".into(),
             watch_head_block: Some(watch_consensus_head_sender),
             watch_ranked_rpcs,
             blocks_by_hash: Cache::new(10_000),
