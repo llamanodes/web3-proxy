@@ -11,7 +11,7 @@ use futures::future::{join_all, try_join_all};
 use rust_decimal::Decimal;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::info;
+use tracing::{info, warn};
 use web3_proxy::rpcs::blockchain::ArcBlock;
 
 // #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
@@ -71,6 +71,11 @@ async fn test_multiple_proxies_stats_add_up() {
     let proxy_0_user_0_provider = Arc::new(proxy_0_user_0_provider);
     let proxy_1_user_0_provider = Arc::new(proxy_1_user_0_provider);
 
+    warn!("Created users, generated providers");
+
+    info!("Proxy 1: {:?}", proxy_0_user_0_provider);
+    info!("Proxy 2: {:?}", proxy_1_user_0_provider);
+
     for _ in 0..number_requests {
         // send 2 to proxy 0 user 0
         let proxy_0_user_0_provider_clone = proxy_0_user_0_provider.clone();
@@ -107,12 +112,16 @@ async fn test_multiple_proxies_stats_add_up() {
     // Flush all stats here
     // TODO: the test should maybe pause time so that stats definitely flush from our queries.
     let flush_0_count = x_0.flush_stats().await.unwrap();
+    info!("Counts 0 are: {:?}", flush_0_count);
     assert_eq!(flush_0_count.timeseries, 0);
     assert_eq!(flush_0_count.relational, 1);
 
     let flush_1_count = x_1.flush_stats().await.unwrap();
+    info!("Counts 1 are: {:?}", flush_1_count);
     assert_eq!(flush_1_count.timeseries, 0);
     assert_eq!(flush_1_count.relational, 1);
 
-    todo!("Need to validate all the stat accounting now");
+    // get stats now
+    // todo!("Need to validate all the stat accounting now");
+    // Get the stats from here
 }

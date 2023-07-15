@@ -8,6 +8,7 @@ pub mod create_user;
 pub mod mysql;
 pub mod referral;
 pub mod rpc_key;
+mod stats_accounting;
 pub mod user_balance;
 
 pub use self::app::TestApp;
