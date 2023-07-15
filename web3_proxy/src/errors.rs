@@ -60,7 +60,7 @@ pub enum Web3ProxyError {
     Database(DbErr),
     DatabaseArc(Arc<DbErr>),
     Decimal(DecimalError),
-    EthersHttpClient(ethers::prelude::HttpClientError),
+    EthersHttpClient(ethers::providers::HttpClientError),
     EthersProvider(ethers::prelude::ProviderError),
     EthersWsClient(ethers::prelude::WsClientError),
     GasEstimateNotU256,

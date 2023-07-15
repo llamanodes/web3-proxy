@@ -5,6 +5,7 @@ use serde::Deserialize;
 use tracing::info;
 use ulid::Ulid;
 use web3_proxy::{
+    errors::Web3ProxyResult,
     frontend::users::authentication::LoginPostResponse,
     rpcs::provider::{connect_http, EthersHttpProvider},
 };
@@ -65,7 +66,7 @@ pub async fn user_get_provider(
     x: &TestApp,
     r: &reqwest::Client,
     login_response: &LoginPostResponse,
-) -> anyhow::Result<EthersHttpProvider> {
+) -> Web3ProxyResult<EthersHttpProvider> {
     let first_key = login_response.rpc_keys.iter().next().unwrap().1;
 
     let rpc_url = format!(

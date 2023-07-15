@@ -47,7 +47,7 @@ pub async fn create_user(
         .unwrap();
     trace!(?user_login_response);
 
-    assert_eq!(user_login_response.status(), StatusCode::OK);
+    assert_eq!(user_login_response.status(), StatusCode::CREATED);
 
     let user_login_text = user_login_response.text().await.unwrap();
     trace!("user_login_text: {:#}", user_login_text);
