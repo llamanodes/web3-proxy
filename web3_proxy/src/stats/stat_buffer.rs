@@ -178,7 +178,10 @@ impl StatBuffer {
                                     approximate_balance_remaining = user_balance.remaining();
                                 }
 
-                                self.accounting_db_buffer.entry(stat.accounting_key(self.billing_period_seconds)).or_default().add(stat.clone(), approximate_balance_remaining).await;
+                                let accounting_key = stat.accounting_key(self.billing_period_seconds);
+                                if accounting_key.is_registered() {
+                                    self.accounting_db_buffer.entry(accounting_key).or_default().add(stat.clone(), approximate_balance_remaining).await;
+                                }
                             }
 
                             if self.influxdb_client.is_some() {
