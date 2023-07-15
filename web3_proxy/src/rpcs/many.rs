@@ -20,7 +20,6 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 use moka::future::CacheBuilder;
 use serde::ser::{SerializeStruct, Serializer};
-use serde::Serialize;
 use serde_json::json;
 use serde_json::value::RawValue;
 use std::cmp::min_by_key;
