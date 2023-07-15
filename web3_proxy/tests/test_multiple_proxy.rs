@@ -7,6 +7,7 @@ use crate::common::{
     admin_increases_balance::admin_increase_balance, anvil::TestAnvil,
     create_admin::create_user_as_admin, create_user::create_user, mysql::TestMysql, TestApp,
 };
+use futures::future::{join_all, try_join_all};
 use rust_decimal::Decimal;
 use std::sync::Arc;
 use std::time::Duration;
@@ -101,7 +102,10 @@ async fn test_multiple_proxies_stats_add_up() {
         }));
     }
 
+    try_join_all(handles).await.unwrap();
+
     // Flush all stats here
+    // TODO: the test should maybe pause time so that stats definitely flush from our queries.
     let flush_0_count = x_0.flush_stats().await.unwrap();
     assert_eq!(flush_0_count.timeseries, 0);
     assert_eq!(flush_0_count.relational, 1);
