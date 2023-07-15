@@ -724,7 +724,6 @@ impl Authorization {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         authorization_checks: AuthorizationChecks,
         ip: &IpAddr,

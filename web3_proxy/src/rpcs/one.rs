@@ -581,7 +581,6 @@ impl Web3Rpc {
     }
 
     /// TODO: this needs to be a subscribe_with_reconnect that does a retry with jitter and exponential backoff
-    #[allow(clippy::too_many_arguments)]
     async fn subscribe_with_reconnect(
         self: Arc<Self>,
         block_map: BlocksByHashCache,

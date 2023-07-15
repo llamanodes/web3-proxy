@@ -423,7 +423,7 @@ impl Web3ProxyApp {
             top_config.app.max_head_block_lag,
             top_config.app.min_synced_rpcs,
             top_config.app.min_sum_soft_limit,
-            "balanced rpcs".to_string(),
+            "balanced rpcs".into(),
             Some(watch_consensus_head_sender),
         )
         .await
@@ -445,7 +445,7 @@ impl Web3ProxyApp {
                 None,
                 0,
                 0,
-                "protected rpcs".to_string(),
+                "protected rpcs".into(),
                 // subscribing to new heads here won't work well. if they are fast, they might be ahead of balanced_rpcs
                 // they also often have low rate limits
                 // however, they are well connected to miners/validators. so maybe using them as a safety check would be good
@@ -474,7 +474,7 @@ impl Web3ProxyApp {
                 None,
                 0,
                 0,
-                "eip4337 rpcs".to_string(),
+                "eip4337 rpcs".into(),
                 None,
             )
             .await

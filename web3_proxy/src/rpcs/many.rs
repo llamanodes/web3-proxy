@@ -22,6 +22,7 @@ use moka::future::CacheBuilder;
 use serde::ser::{SerializeStruct, Serializer};
 use serde_json::json;
 use serde_json::value::RawValue;
+use std::borrow::Cow;
 use std::cmp::min_by_key;
 use std::fmt::{self, Display};
 use std::sync::atomic::Ordering;
@@ -34,8 +35,7 @@ use tracing::{debug, error, info, trace, warn};
 /// A collection of web3 connections. Sends requests either the current best server or all servers.
 #[derive(From)]
 pub struct Web3Rpcs {
-    /// TODO: this should be a Cow
-    pub(crate) name: String,
+    pub(crate) name: Cow<'static, str>,
     pub(crate) chain_id: u64,
     /// if watch_consensus_head_sender is some, Web3Rpc inside self will send blocks here when they get them
     pub(crate) block_sender: mpsc::UnboundedSender<(Option<Web3ProxyBlock>, Arc<Web3Rpc>)>,
@@ -67,13 +67,12 @@ pub struct Web3Rpcs {
 
 impl Web3Rpcs {
     /// Spawn durable connections to multiple Web3 providers.
-    #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         chain_id: u64,
         max_head_block_lag: Option<U64>,
         min_head_rpcs: usize,
         min_sum_soft_limit: u32,
-        name: String,
+        name: Cow<'static, str>,
         watch_consensus_head_sender: Option<watch::Sender<Option<Web3ProxyBlock>>>,
     ) -> anyhow::Result<(
         Arc<Self>,
@@ -789,7 +788,6 @@ impl Web3Rpcs {
     }
 
     /// Make a request with stat tracking.
-    #[allow(clippy::too_many_arguments)]
     pub async fn request_with_metadata<P: JsonRpcParams, R: JsonRpcResultData>(
         &self,
         method: &str,
@@ -1528,7 +1526,7 @@ mod tests {
             block_sender: block_sender.clone(),
             by_name: RwLock::new(by_name),
             chain_id,
-            name: "test".to_string(),
+            name: "test".into(),
             watch_head_block: Some(watch_consensus_head_sender),
             watch_ranked_rpcs,
             blocks_by_hash: CacheBuilder::new(100)
@@ -1783,7 +1781,7 @@ mod tests {
             block_sender,
             by_name: RwLock::new(by_name),
             chain_id,
-            name: "test".to_string(),
+            name: "test".into(),
             watch_head_block: Some(watch_consensus_head_sender),
             watch_ranked_rpcs,
             blocks_by_hash: CacheBuilder::new(100)
@@ -1951,7 +1949,7 @@ mod tests {
             block_sender,
             by_name: RwLock::new(by_name),
             chain_id,
-            name: "test".to_string(),
+            name: "test".into(),
             watch_head_block: Some(watch_consensus_head_sender),
             watch_ranked_rpcs,
             blocks_by_hash: Cache::new(10_000),
