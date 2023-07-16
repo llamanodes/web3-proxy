@@ -503,8 +503,14 @@ impl BufferedRpcQueryStats {
             .field("sum_response_millis", self.sum_response_millis as i64)
             .field("sum_response_bytes", self.sum_response_bytes as i64)
             .field(
-                "sum_credits_used",
+                "sum_incl_free_credits_used",
                 self.sum_credits_used
+                    .to_f64()
+                    .context("sum_credits_used is really (too) large")?,
+            )
+            .field(
+                "sum_credits_used",
+                self.paid_credits_used
                     .to_f64()
                     .context("sum_credits_used is really (too) large")?,
             )

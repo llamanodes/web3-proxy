@@ -71,7 +71,7 @@ pub async fn user_get_influx_stats_aggregated(
         .duration_since(UNIX_EPOCH)
         .expect("Time went backwards")
         .as_secs()
-        - 290;
+        - 1200;
     let stats_aggregated = format!(
         "{}user/stats/aggregate?query_window_seconds={}&chain_id={}&query_start={}",
         x.proxy_provider.url(),
