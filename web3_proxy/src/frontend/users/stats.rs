@@ -1,7 +1,7 @@
 //! Handle registration, logins, and managing account data.
 use crate::app::Web3ProxyApp;
 use crate::errors::{Web3ProxyErrorContext, Web3ProxyResponse};
-use crate::globals::{global_db_conn, global_db_replica_conn};
+use crate::globals::global_db_replica_conn;
 use crate::http_params::{
     get_chain_id_from_params, get_page_from_params, get_query_start_from_params,
 };
@@ -139,7 +139,6 @@ pub async fn user_influx_stats_aggregated_get(
 pub async fn user_mysql_stats_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-    Query(params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
     let user = app.bearer_is_authorized(bearer).await?;
     let db_replica = global_db_replica_conn().await?;

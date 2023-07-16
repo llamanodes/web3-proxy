@@ -16,8 +16,6 @@ use axum::headers::Origin;
 use chrono::{DateTime, Months, TimeZone, Utc};
 use derive_more::From;
 use entities::{referee, referrer, rpc_accounting_v2};
-use ethers::core::rand::prelude::StdRng;
-use ethers::core::rand::SeedableRng;
 use ethers::prelude::rand;
 use ethers::prelude::rand::distributions::Alphanumeric;
 use ethers::prelude::rand::Rng;
@@ -29,7 +27,6 @@ use migration::sea_orm::{
 };
 use migration::{Expr, LockType, OnConflict};
 use num_traits::ToPrimitive;
-use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
 use std::borrow::Cow;
 use std::mem;
@@ -37,12 +34,8 @@ use std::num::NonZeroU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tracing::{error, instrument, trace, warn};
-use url::quirks::host;
 
 pub use stat_buffer::{SpawnedStatBuffer, StatBuffer};
-
-use once_cell::sync::Lazy;
-use ulid::Ulid;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum StatType {
