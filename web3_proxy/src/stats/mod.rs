@@ -16,6 +16,9 @@ use axum::headers::Origin;
 use chrono::{DateTime, Months, TimeZone, Utc};
 use derive_more::From;
 use entities::{referee, referrer, rpc_accounting_v2};
+use ethers::prelude::rand;
+use ethers::prelude::rand::distributions::Alphanumeric;
+use ethers::prelude::rand::Rng;
 use influxdb2::models::DataPoint;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
@@ -487,6 +490,13 @@ impl BufferedRpcQueryStats {
         if let Some(rpc_secret_key_id) = key.rpc_secret_key_id {
             builder = builder.tag("rpc_secret_key_id", rpc_secret_key_id.to_string());
         }
+
+        let n1: String = rand::thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(4)
+            .map(char::from)
+            .collect();
+        builder = builder.tag("rand", n1);
 
         builder = builder.tag("method", key.method);
 
