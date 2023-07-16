@@ -179,12 +179,12 @@ impl TestInflux {
     // TODO: Check if the influx database implements any other special traits ..
 }
 
-// impl Drop for TestInflux {
-//     fn drop(&mut self) {
-//         info!(%self.container_name, "killing influx");
-//
-//         let _ = SyncCommand::new("docker")
-//             .args(["kill", "-s", "9", &self.container_name])
-//             .output();
-//     }
-// }
+impl Drop for TestInflux {
+    fn drop(&mut self) {
+        info!(%self.container_name, "killing influx");
+
+        let _ = SyncCommand::new("docker")
+            .args(["kill", "-s", "9", &self.container_name])
+            .output();
+    }
+}
