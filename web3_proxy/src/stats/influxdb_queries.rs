@@ -48,9 +48,7 @@ pub async fn query_user_influx_stats<'a>(
         ));
     }
 
-    info!("Getting db replica");
     let db_replica = global_db_replica_conn().await?;
-    info!("Getting user next");
 
     // Read the (optional) user-id from the request, this is the logic for subusers
     // If there is no bearer token, this is not allowed
@@ -58,7 +56,6 @@ pub async fn query_user_influx_stats<'a>(
         .get("user_id")
         .and_then(|x| x.parse::<u64>().ok())
         .unwrap_or_else(|| caller_user.as_ref().map(|x| x.id).unwrap_or_default());
-    info!("Make sure user is premium");
 
     // Only allow stats if the user has an active premium role
     if let Some(caller_user) = &caller_user {

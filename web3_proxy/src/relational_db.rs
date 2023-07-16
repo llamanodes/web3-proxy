@@ -42,8 +42,7 @@ pub async fn connect_db(
         .max_lifetime(Duration::from_secs(60))
         .min_connections(min_connections)
         .sqlx_logging(true)
-        // TODO: drop this back to trace before merging to devel (or figure out what to add to RUST_LOG to set it to trace now)
-        .sqlx_logging_level(tracing::log::LevelFilter::Info);
+        .sqlx_logging_level(tracing::log::LevelFilter::Trace);
 
     Database::connect(db_opt).await
 }
