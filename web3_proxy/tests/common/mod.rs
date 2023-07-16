@@ -5,10 +5,11 @@ pub mod app;
 pub mod create_admin;
 pub mod create_provider_with_rpc_key;
 pub mod create_user;
+pub mod influx;
 pub mod mysql;
 pub mod referral;
 pub mod rpc_key;
-mod stats_accounting;
+pub mod stats_accounting;
 pub mod user_balance;
 
 pub use self::app::TestApp;

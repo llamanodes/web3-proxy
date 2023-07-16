@@ -47,6 +47,7 @@ pub struct TopConfig {
     pub balanced_rpcs: HashMap<String, Web3RpcConfig>,
     pub private_rpcs: Option<HashMap<String, Web3RpcConfig>>,
     pub bundler_4337_rpcs: Option<HashMap<String, Web3RpcConfig>>,
+    // pub influxdb_client: Option<influxdb2::Client>,
     /// unknown config options get put here
     #[serde(flatten, default = "HashMap::default")]
     pub extra: HashMap<String, serde_json::Value>,

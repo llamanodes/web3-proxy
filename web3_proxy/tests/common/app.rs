@@ -1,4 +1,5 @@
 use super::{anvil::TestAnvil, mysql::TestMysql};
+use crate::common::influx::TestInflux;
 use ethers::{
     prelude::{Http, Provider},
     types::Address,
@@ -43,7 +44,11 @@ pub struct TestApp {
 }
 
 impl TestApp {
-    pub async fn spawn(anvil: &TestAnvil, db: Option<&TestMysql>) -> Self {
+    pub async fn spawn(
+        anvil: &TestAnvil,
+        db: Option<&TestMysql>,
+        influx: Option<&TestInflux>,
+    ) -> Self {
         let chain_id = anvil.instance.chain_id();
         let num_workers = 2;
 
@@ -54,12 +59,26 @@ impl TestApp {
 
         let db_url = db.map(|x| x.url.clone());
 
+        let (influx_host, influx_org, influx_token, influx_bucket) = match influx {
+            None => (None, None, None, None),
+            Some(x) => (
+                Some(x.host.clone()),
+                Some(x.org.clone()),
+                Some(x.token.clone()),
+                Some(x.bucket.clone()),
+            ),
+        };
+
         // make a test TopConfig
         // TODO: test influx
         // TODO: test redis
         let app_config: AppConfig = serde_json::from_value(json!({
             "chain_id": chain_id,
             "db_url": db_url,
+            "influxdb_host": influx_host,
+            "influxdb_org": influx_org,
+            "influxdb_token": influx_token,
+            "influxdb_bucket": influx_bucket,
             "default_user_max_requests_per_period": Some(6_000_000),
             "deposit_factory_contract": Address::from_str(
                 "4e3BC2054788De923A04936C6ADdB99A05B0Ea36",
@@ -72,6 +91,8 @@ impl TestApp {
         }))
         .unwrap();
 
+        info!("App Config is: {:?}", app_config);
+
         let top_config = TopConfig {
             app: app_config,
             balanced_rpcs: HashMap::from([(
@@ -82,6 +103,7 @@ impl TestApp {
                     ..Default::default()
                 },
             )]),
+            // influxdb_client: influx.map(|x| x.client),
             private_rpcs: None,
             bundler_4337_rpcs: None,
             extra: Default::default(),

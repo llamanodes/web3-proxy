@@ -1,7 +1,11 @@
 mod common;
 
 use crate::common::create_provider_with_rpc_key::create_provider_for_user;
+use crate::common::influx::TestInflux;
 use crate::common::rpc_key::user_get_first_rpc_key;
+use crate::common::stats_accounting::{
+    user_get_influx_stats_aggregated, user_get_influx_stats_detailed, user_get_mysql_stats,
+};
 use crate::common::user_balance::user_get_balance;
 use crate::common::{
     admin_increases_balance::admin_increase_balance, anvil::TestAnvil,
@@ -17,9 +21,12 @@ use web3_proxy::rpcs::blockchain::ArcBlock;
 // #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
 #[test_log::test(tokio::test)]
 async fn test_multiple_proxies_stats_add_up() {
-    let a = TestAnvil::spawn(999_001_999).await;
+    let chain_id = 999_001_999;
+    let a = TestAnvil::spawn(chain_id).await;
 
     let db = TestMysql::spawn().await;
+
+    let influx = TestInflux::spawn().await;
 
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
@@ -27,8 +34,8 @@ async fn test_multiple_proxies_stats_add_up() {
         .unwrap();
 
     // Since when do indices start with 1
-    let x_0 = TestApp::spawn(&a, Some(&db)).await;
-    let x_1 = TestApp::spawn(&a, Some(&db)).await;
+    let x_0 = TestApp::spawn(&a, Some(&db), Some(&influx)).await;
+    let x_1 = TestApp::spawn(&a, Some(&db), Some(&influx)).await;
 
     // make a user and give them credits
     let user_0_wallet = a.wallet(0);
@@ -113,15 +120,31 @@ async fn test_multiple_proxies_stats_add_up() {
     // TODO: the test should maybe pause time so that stats definitely flush from our queries.
     let flush_0_count = x_0.flush_stats().await.unwrap();
     info!("Counts 0 are: {:?}", flush_0_count);
-    assert_eq!(flush_0_count.timeseries, 0);
     assert_eq!(flush_0_count.relational, 1);
+    assert_eq!(flush_0_count.timeseries, 2);
 
     let flush_1_count = x_1.flush_stats().await.unwrap();
     info!("Counts 1 are: {:?}", flush_1_count);
-    assert_eq!(flush_1_count.timeseries, 0);
     assert_eq!(flush_1_count.relational, 1);
+    assert_eq!(flush_1_count.timeseries, 2);
 
     // get stats now
     // todo!("Need to validate all the stat accounting now");
     // Get the stats from here
+    let mysql_stats = user_get_mysql_stats(&x_0, &r, &user_0_login).await;
+    info!("mysql stats are: {:?}", mysql_stats);
+
+    let influx_aggregate_stats =
+        user_get_influx_stats_aggregated(&x_0, &r, &user_0_login, chain_id).await;
+    info!(
+        "influx_aggregate_stats stats are: {:?}",
+        influx_aggregate_stats
+    );
+
+    // let user_get_influx_stats_detailed =
+    //     user_get_influx_stats_detailed(&x_0, &r, &user_0_login).await;
+    // info!(
+    //     "user_get_influx_stats_detailed stats are: {:?}",
+    //     user_get_influx_stats_detailed
+    // );
 }

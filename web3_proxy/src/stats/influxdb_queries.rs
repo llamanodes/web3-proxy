@@ -23,10 +23,10 @@ use influxdb2::api::query::FluxRecord;
 use influxdb2::models::Query;
 use migration::sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::json;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 use ulid::Ulid;
 
-pub async fn query_user_stats<'a>(
+pub async fn query_user_influx_stats<'a>(
     app: &'a Web3ProxyApp,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     params: &'a HashMap<String, String>,
@@ -48,7 +48,9 @@ pub async fn query_user_stats<'a>(
         ));
     }
 
+    info!("Getting db replica");
     let db_replica = global_db_replica_conn().await?;
+    info!("Getting user next");
 
     // Read the (optional) user-id from the request, this is the logic for subusers
     // If there is no bearer token, this is not allowed
@@ -56,6 +58,7 @@ pub async fn query_user_stats<'a>(
         .get("user_id")
         .and_then(|x| x.parse::<u64>().ok())
         .unwrap_or_else(|| caller_user.as_ref().map(|x| x.id).unwrap_or_default());
+    info!("Make sure user is premium");
 
     // Only allow stats if the user has an active premium role
     if let Some(caller_user) = &caller_user {
@@ -88,8 +91,10 @@ pub async fn query_user_stats<'a>(
         ));
     }
 
+    info!("Getting influx client");
     let influxdb_client = app.influxdb_client()?;
 
+    info!("Extracting items");
     let query_window_seconds = get_query_window_seconds_from_params(params)?;
     let query_start = get_query_start_from_params(params)?.timestamp();
     let query_stop = get_query_stop_from_params(params)?.timestamp();
