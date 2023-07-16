@@ -171,10 +171,6 @@ async fn test_multiple_proxies_stats_add_up() {
         Decimal::from_str(&influx_stats["no_servers"].to_string()).unwrap()
     );
     assert_eq!(
-        Decimal::from_str(&mysql_stats["backend_requests"].to_string()).unwrap(),
-        Decimal::from_str(&influx_stats["total_backend_requests"].to_string()).unwrap()
-    );
-    assert_eq!(
         Decimal::from_str(&mysql_stats["cache_hits"].to_string()).unwrap(),
         Decimal::from_str(&influx_stats["total_cache_hits"].to_string()).unwrap()
     );
@@ -230,6 +226,10 @@ async fn test_multiple_proxies_stats_add_up() {
                 .replace('"', "")
         )
         .unwrap()
+    );
+    assert_eq!(
+        Decimal::from_str(&mysql_stats["backend_requests"].to_string()).unwrap(),
+        Decimal::from_str(&influx_stats["total_backend_requests"].to_string()).unwrap()
     );
 
     // balance with balance
