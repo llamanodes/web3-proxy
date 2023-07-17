@@ -88,10 +88,8 @@ pub async fn query_user_influx_stats<'a>(
         ));
     }
 
-    info!("Getting influx client");
     let influxdb_client = app.influxdb_client()?;
 
-    info!("Extracting items");
     let query_window_seconds = get_query_window_seconds_from_params(params)?;
     let query_start = get_query_start_from_params(params)?.timestamp();
     let query_stop = get_query_stop_from_params(params)?.timestamp();
