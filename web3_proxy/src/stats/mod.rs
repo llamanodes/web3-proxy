@@ -482,6 +482,7 @@ impl BufferedRpcQueryStats {
         measurement: &str,
         chain_id: u64,
         key: RpcQueryKey,
+        instance: &String,
     ) -> anyhow::Result<DataPoint> {
         let mut builder = DataPoint::builder(measurement);
 
@@ -491,12 +492,7 @@ impl BufferedRpcQueryStats {
             builder = builder.tag("rpc_secret_key_id", rpc_secret_key_id.to_string());
         }
 
-        let n1: String = rand::thread_rng()
-            .sample_iter(&Alphanumeric)
-            .take(2)
-            .map(char::from)
-            .collect();
-        builder = builder.tag("hash", n1.to_string());
+        builder = builder.tag("instance", instance);
 
         builder = builder.tag("method", key.method);
 

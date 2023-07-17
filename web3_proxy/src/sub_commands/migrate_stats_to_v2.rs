@@ -74,6 +74,8 @@ impl MigrateStatsToV2SubCommand {
 
         let (flush_sender, flush_receiver) = mpsc::channel(1);
 
+        let instance_hash = Ulid::new().to_string();
+
         // Spawn the stat-sender
         let emitter_spawn = StatBuffer::try_spawn(
             BILLING_PERIOD_SECONDS,
@@ -87,6 +89,7 @@ impl MigrateStatsToV2SubCommand {
             1,
             flush_sender,
             flush_receiver,
+            instance_hash,
         )
         .context("Error spawning stat buffer")?
         .context("No stat buffer spawned. Maybe missing influx or db credentials?")?;
