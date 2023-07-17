@@ -5,7 +5,7 @@ use crate::globals::global_db_replica_conn;
 use crate::http_params::{
     get_chain_id_from_params, get_page_from_params, get_query_start_from_params,
 };
-use crate::stats::influxdb_queries::query_user_stats;
+use crate::stats::influxdb_queries::query_user_influx_stats;
 use crate::stats::StatType;
 use axum::{
     extract::Query,
@@ -16,13 +16,14 @@ use axum::{
 use axum_macros::debug_handler;
 use entities;
 use entities::sea_orm_active_enums::Role;
-use entities::{revert_log, rpc_key, secondary_user};
+use entities::{revert_log, rpc_accounting_v2, rpc_key, secondary_user};
 use hashbrown::HashMap;
 use migration::sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
 use serde::Serialize;
 use serde_json::json;
 use std::collections::HashSet;
 use std::sync::Arc;
+use tracing::info;
 
 /// `GET /user/revert_logs` -- Use a bearer token to get the user's revert logs.
 #[debug_handler]
@@ -123,14 +124,40 @@ pub async fn user_revert_logs_get(
 
 /// `GET /user/stats/aggregate` -- Public endpoint for aggregate stats such as bandwidth used and methods requested.
 #[debug_handler]
-pub async fn user_stats_aggregated_get(
+pub async fn user_influx_stats_aggregated_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
-    let response = query_user_stats(&app, bearer, &params, StatType::Aggregated).await?;
+    let response = query_user_influx_stats(&app, bearer, &params, StatType::Aggregated).await?;
 
     Ok(response)
+}
+
+/// `GET /user/stats/accounting` -- Use a bearer token to get the user's revert logs.
+#[debug_handler]
+pub async fn user_mysql_stats_get(
+    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
+) -> Web3ProxyResponse {
+    let user = app.bearer_is_authorized(bearer).await?;
+    let db_replica = global_db_replica_conn().await?;
+
+    // Fetch everything from mysql, joined
+    let stats = rpc_key::Entity::find()
+        .filter(rpc_key::Column::UserId.eq(user.id))
+        .find_with_related(rpc_accounting_v2::Entity)
+        .all(db_replica.as_ref())
+        .await?;
+
+    let stats = stats.into_iter().map(|x| x.1).flatten().collect::<Vec<_>>();
+
+    let mut response = HashMap::new();
+    response.insert("stats", stats);
+
+    info!("Response is: {:?}", response);
+
+    Ok(Json(response).into_response())
 }
 
 /// `GET /user/stats/detailed` -- Use a bearer token to get the user's key stats such as bandwidth used and methods requested.
@@ -143,12 +170,12 @@ pub async fn user_stats_aggregated_get(
 ///
 /// TODO: this will change as we add better support for secondary users.
 #[debug_handler]
-pub async fn user_stats_detailed_get(
+pub async fn user_influx_stats_detailed_get(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
-    let response = query_user_stats(&app, bearer, &params, StatType::Detailed).await?;
+    let response = query_user_influx_stats(&app, bearer, &params, StatType::Detailed).await?;
 
     Ok(response)
 }

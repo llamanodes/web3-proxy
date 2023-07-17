@@ -16,6 +16,9 @@ use axum::headers::Origin;
 use chrono::{DateTime, Months, TimeZone, Utc};
 use derive_more::From;
 use entities::{referee, referrer, rpc_accounting_v2};
+use ethers::prelude::rand;
+use ethers::prelude::rand::distributions::Alphanumeric;
+use ethers::prelude::rand::Rng;
 use influxdb2::models::DataPoint;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{
@@ -479,6 +482,7 @@ impl BufferedRpcQueryStats {
         measurement: &str,
         chain_id: u64,
         key: RpcQueryKey,
+        instance: &String,
     ) -> anyhow::Result<DataPoint> {
         let mut builder = DataPoint::builder(measurement);
 
@@ -487,6 +491,8 @@ impl BufferedRpcQueryStats {
         if let Some(rpc_secret_key_id) = key.rpc_secret_key_id {
             builder = builder.tag("rpc_secret_key_id", rpc_secret_key_id.to_string());
         }
+
+        builder = builder.tag("instance", instance);
 
         builder = builder.tag("method", key.method);
 
@@ -503,8 +509,14 @@ impl BufferedRpcQueryStats {
             .field("sum_response_millis", self.sum_response_millis as i64)
             .field("sum_response_bytes", self.sum_response_bytes as i64)
             .field(
-                "sum_credits_used",
+                "sum_incl_free_credits_used",
                 self.sum_credits_used
+                    .to_f64()
+                    .context("sum_credits_used is really (too) large")?,
+            )
+            .field(
+                "sum_credits_used",
+                self.paid_credits_used
                     .to_f64()
                     .context("sum_credits_used is really (too) large")?,
             )

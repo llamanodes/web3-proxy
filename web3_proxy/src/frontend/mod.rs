@@ -213,15 +213,19 @@ pub async fn serve(
         .route("/user/revert_logs", get(users::stats::user_revert_logs_get))
         .route(
             "/user/stats/aggregate",
-            get(users::stats::user_stats_aggregated_get),
+            get(users::stats::user_influx_stats_aggregated_get),
         )
         .route(
             "/user/stats/aggregated",
-            get(users::stats::user_stats_aggregated_get),
+            get(users::stats::user_influx_stats_aggregated_get),
+        )
+        .route(
+            "/user/stats/accounting",
+            get(users::stats::user_mysql_stats_get),
         )
         .route(
             "/user/stats/detailed",
-            get(users::stats::user_stats_detailed_get),
+            get(users::stats::user_influx_stats_detailed_get),
         )
         .route(
             "/user/logout",

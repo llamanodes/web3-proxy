@@ -177,7 +177,7 @@ pub struct AppConfig {
     pub volatile_redis_url: Option<String>,
 
     /// maximum size of the connection pool for the cache
-    /// If none, the minimum * 2 is used
+    /// If none, workers * 2 is used
     pub volatile_redis_max_connections: Option<usize>,
 
     /// influxdb host for stats

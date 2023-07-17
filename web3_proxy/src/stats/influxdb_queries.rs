@@ -23,10 +23,10 @@ use influxdb2::api::query::FluxRecord;
 use influxdb2::models::Query;
 use migration::sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::json;
-use tracing::{debug, error, trace, warn};
+use tracing::{error, info, trace, warn};
 use ulid::Ulid;
 
-pub async fn query_user_stats<'a>(
+pub async fn query_user_influx_stats<'a>(
     app: &'a Web3ProxyApp,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     params: &'a HashMap<String, String>,
@@ -250,7 +250,7 @@ pub async fn query_user_stats<'a>(
                 |> filter(fn: (r) => r._measurement == "{measurement}")
                 
             cumsum = base()
-                |> filter(fn: (r) => r._field == "backend_requests" or r._field == "cache_hits" or r._field == "cache_misses" or r._field == "frontend_requests" or r._field == "no_servers" or r._field == "sum_credits_used" or r._field == "sum_request_bytes" or r._field == "sum_response_bytes" or r._field == "sum_response_millis")
+                |> filter(fn: (r) => r._field == "backend_requests" or r._field == "cache_hits" or r._field == "cache_misses" or r._field == "frontend_requests" or r._field == "no_servers" or r._field == "sum_incl_free_credits_used" or r._field == "sum_credits_used" or r._field == "sum_request_bytes" or r._field == "sum_response_bytes" or r._field == "sum_response_millis")
                 |> group(columns: {group_keys})
                 |> aggregateWindow(every: {query_window_seconds}s, fn: sum, createEmpty: false)
                 |> drop(columns: ["_start", "_stop"])
@@ -290,8 +290,7 @@ pub async fn query_user_stats<'a>(
         ));
     }
 
-    // TODO: lower log level
-    debug!("Raw query to db is: {:#}", query);
+    trace!("Raw query to db is: {:#}", query);
     let query = Query::new(query.to_string());
     trace!(?query, "influx");
 
@@ -429,6 +428,15 @@ pub async fn query_user_stats<'a>(
                         }
                         _ => {
                             error!("sum_credits_used should always be a Double!");
+                        }
+                    }
+                } else if key == "sum_incl_free_credits_used" {
+                    match value {
+                        influxdb2_structmap::value::Value::Double(inner) => {
+                            out.insert("total_incl_free_credits_used", json!(f64::from(inner)));
+                        }
+                        _ => {
+                            error!("sum_incl_free_credits_used should always be a Double!");
                         }
                     }
                 } else if key == "sum_request_bytes" {

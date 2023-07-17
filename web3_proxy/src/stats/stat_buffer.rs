@@ -56,6 +56,7 @@ pub struct StatBuffer {
     user_balance_cache: UserBalanceCache,
 
     _flush_sender: mpsc::Sender<oneshot::Sender<FlushedStats>>,
+    instance_hash: String,
 }
 
 impl StatBuffer {
@@ -72,6 +73,7 @@ impl StatBuffer {
         tsdb_save_interval_seconds: u32,
         flush_sender: mpsc::Sender<oneshot::Sender<FlushedStats>>,
         flush_receiver: mpsc::Receiver<oneshot::Sender<FlushedStats>>,
+        instance_hash: String,
     ) -> anyhow::Result<Option<SpawnedStatBuffer>> {
         if influxdb_bucket.is_none() {
             influxdb_client = None;
@@ -95,6 +97,7 @@ impl StatBuffer {
             tsdb_save_interval_seconds,
             user_balance_cache: user_balance_cache.unwrap(),
             _flush_sender: flush_sender,
+            instance_hash,
         };
 
         // any errors inside this task will cause the application to exit
@@ -323,7 +326,7 @@ impl StatBuffer {
             for (key, stat) in self.global_timeseries_buffer.drain() {
                 // TODO: i don't like passing key (which came from the stat) to the function on the stat. but it works for now
                 match stat
-                    .build_timeseries_point("global_proxy", self.chain_id, key)
+                    .build_timeseries_point("global_proxy", self.chain_id, key, &self.instance_hash)
                     .await
                 {
                     Ok(point) => {
@@ -338,7 +341,7 @@ impl StatBuffer {
             for (key, stat) in self.opt_in_timeseries_buffer.drain() {
                 // TODO: i don't like passing key (which came from the stat) to the function on the stat. but it works for now
                 match stat
-                    .build_timeseries_point("opt_in_proxy", self.chain_id, key)
+                    .build_timeseries_point("opt_in_proxy", self.chain_id, key, &self.instance_hash)
                     .await
                 {
                     Ok(point) => {

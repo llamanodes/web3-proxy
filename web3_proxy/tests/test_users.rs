@@ -42,7 +42,7 @@ async fn test_log_in_and_out() {
 
     let db = TestMysql::spawn().await;
 
-    let x = TestApp::spawn(&a, Some(&db)).await;
+    let x = TestApp::spawn(&a, Some(&db), None).await;
 
     let r = reqwest::Client::new();
 
@@ -103,7 +103,7 @@ async fn test_admin_balance_increase() {
 
     let db = TestMysql::spawn().await;
 
-    let x = TestApp::spawn(&a, Some(&db)).await;
+    let x = TestApp::spawn(&a, Some(&db), None).await;
 
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
@@ -156,7 +156,7 @@ async fn test_user_balance_decreases() {
 
     let db = TestMysql::spawn().await;
 
-    let x = TestApp::spawn(&a, Some(&db)).await;
+    let x = TestApp::spawn(&a, Some(&db), None).await;
 
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
@@ -264,7 +264,7 @@ async fn test_referral_bonus_non_concurrent() {
 
     let db = TestMysql::spawn().await;
 
-    let x = TestApp::spawn(&a, Some(&db)).await;
+    let x = TestApp::spawn(&a, Some(&db), None).await;
 
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
@@ -413,7 +413,7 @@ async fn test_referral_bonus_concurrent_referrer_only() {
 
     let db = TestMysql::spawn().await;
 
-    let x = TestApp::spawn(&a, Some(&db)).await;
+    let x = TestApp::spawn(&a, Some(&db), None).await;
 
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
@@ -573,7 +573,7 @@ async fn test_referral_bonus_concurrent_referrer_and_user() {
 
     let db = TestMysql::spawn().await;
 
-    let x = TestApp::spawn(&a, Some(&db)).await;
+    let x = TestApp::spawn(&a, Some(&db), None).await;
 
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))

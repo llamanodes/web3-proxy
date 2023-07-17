@@ -19,7 +19,7 @@ async fn test_sum_credits_used() {
 
     let db = TestMysql::spawn().await;
 
-    let x = TestApp::spawn(&a, Some(&db)).await;
+    let x = TestApp::spawn(&a, Some(&db), None).await;
 
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
@@ -78,7 +78,8 @@ async fn test_sum_credits_used() {
 
     // flush stats
     let flushed = x.flush_stats().await.unwrap();
-    assert_eq!(flushed.relational, 2, "relational");
+    // TODO: this was 2 when we flushed stats for anon users. that was temporarily disabled. it should be turned back on once indexes are fixed
+    assert_eq!(flushed.relational, 1, "relational");
     assert_eq!(flushed.timeseries, 0, "timeseries");
 
     // Give user wallet $1000
