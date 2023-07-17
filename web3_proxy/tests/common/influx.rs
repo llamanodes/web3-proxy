@@ -25,15 +25,13 @@ pub struct TestInflux {
 impl TestInflux {
     #[allow(unused)]
     pub async fn spawn() -> Self {
-        // sqlite doesn't seem to work. our migrations are written for mysql
-        // so lets use docker to start mysql
         let random: String = rand::thread_rng()
             .sample_iter(&Alphanumeric)
             .take(8)
             .map(char::from)
             .collect();
 
-        let db_container_name = format!("web3-proxy-test-{}", random);
+        let db_container_name = format!("web3-proxy-test-influx-{}", random);
 
         info!(%db_container_name);
 
@@ -88,7 +86,6 @@ impl TestInflux {
         // TODO: wait until docker says it is healthy
         sleep(Duration::from_secs(1)).await;
 
-        // TODO: why is this always empty?!
         let docker_inspect_output = AsyncCommand::new("docker")
             .args(["inspect", &db_container_name])
             .output()
@@ -151,7 +148,7 @@ impl TestInflux {
         };
 
         let start = Instant::now();
-        let max_wait = Duration::from_secs(1);
+        let max_wait = Duration::from_secs(5);
         loop {
             if start.elapsed() > max_wait {
                 panic!("db took too long to start");
@@ -168,15 +165,12 @@ impl TestInflux {
             sleep(Duration::from_secs(1)).await;
         }
 
-        // TODO: make sure mysql is actually ready for connections
         sleep(Duration::from_secs(1)).await;
 
         info!(?test_influx, elapsed=%start.elapsed().as_secs_f32(), "influx post is open. Migrating now...");
 
         test_influx
     }
-
-    // TODO: Check if the influx database implements any other special traits ..
 }
 
 impl Drop for TestInflux {

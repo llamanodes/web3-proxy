@@ -20,7 +20,7 @@ use tokio::time::sleep;
 use tracing::{info, warn};
 use web3_proxy::rpcs::blockchain::ArcBlock;
 
-// #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
+#[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
 #[test_log::test(tokio::test)]
 async fn test_multiple_proxies_stats_add_up() {
     let chain_id = 999_001_999;
@@ -232,7 +232,6 @@ async fn test_multiple_proxies_stats_add_up() {
         Decimal::from_str(&influx_stats["total_backend_requests"].to_string()).unwrap()
     );
 
-    // balance with balance
     // We don't have gauges so we cant really fix this in influx. will get back to this later
     // assert_eq!(
     //     Decimal::from(user_0_balance_post.remaining()),

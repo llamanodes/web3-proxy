@@ -6,7 +6,7 @@ use web3_proxy::frontend::users::authentication::LoginPostResponse;
 
 /// Get the user stats accounting
 
-/// Helper function to get the user's influx stats
+/// Helper function to get the user's mysql (rpc_accounting_v2) stats
 #[allow(unused)]
 pub async fn user_get_mysql_stats(
     x: &TestApp,

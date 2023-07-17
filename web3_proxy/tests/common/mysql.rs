@@ -19,8 +19,6 @@ pub struct TestMysql {
 impl TestMysql {
     #[allow(unused)]
     pub async fn spawn() -> Self {
-        // sqlite doesn't seem to work. our migrations are written for mysql
-        // so lets use docker to start mysql
         let password: String = rand::thread_rng()
             .sample_iter(&Alphanumeric)
             .take(16)
@@ -67,7 +65,6 @@ impl TestMysql {
         // TODO: wait until docker says it is healthy
         sleep(Duration::from_secs(1)).await;
 
-        // TODO: why is this always empty?!
         let docker_inspect_output = AsyncCommand::new("docker")
             .args(["inspect", &db_container_name])
             .output()
