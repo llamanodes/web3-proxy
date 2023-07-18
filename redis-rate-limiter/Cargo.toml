@@ -5,7 +5,7 @@ authors = ["Bryan Stitt <bryan@stitthappens.com>"]
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.71"
+anyhow = "1.0.72"
 chrono = "0.4.26"
 deadpool-redis = { version = "0.12.0", features = ["rt_tokio_1", "serde"] }
 tokio = "1.29.1"

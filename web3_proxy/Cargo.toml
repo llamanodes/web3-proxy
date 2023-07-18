@@ -35,14 +35,14 @@ siwe = { git = "https://github.com/llamanodes/siwe-rs", rev = "013be5204ff1c8577
 # TODO: import chrono from sea-orm so we always have the same version
 # TODO: make sure this time version matches siwe. PR to put this in their prelude
 
-anyhow = { version = "1.0.71", features = ["backtrace"] }
+anyhow = { version = "1.0.72", features = ["backtrace"] }
 arc-swap = { version = "1.6.0" }
 argh = "0.1.10"
 async-stripe = { version = "0.22.2", default-features = false, features = ["billing", "checkout", "connect", "runtime-tokio-hyper-rustls", "webhook-events"] }
 async-trait = "0.1.71"
-axum = { version = "0.6.18", features = ["headers", "tracing", "ws"] }
+axum = { version = "0.6.19", features = ["headers", "tracing", "ws"] }
 axum-client-ip = "0.4.1"
-axum-macros = "0.3.7"
+axum-macros = "0.3.8"
 base64 = "0.21.2"
 check-if-email-exists = "0.9.0"
 chrono = { version = "0.4.26" }
@@ -50,7 +50,7 @@ console-subscriber = { version = "0.1.10", features = ["env-filter", "parking_lo
 counter = "0.5.7"
 derive_more = { version = "0.99.17", features = ["nightly"] }
 ethbloom = { version = "0.13.0" }
-ethers = { version = "2.0.7", default-features = false, features = ["rustls", "ws"] }
+ethers = { version = "2.0.8", default-features = false, features = ["rustls", "ws"] }
 fdlimit = "0.2.1"
 fstrings = "0.2"
 futures = { version = "0.3.28" }
@@ -83,7 +83,7 @@ rust_decimal = { version = "1.30.0", features = ["maths"] }
 sentry = { version = "0.31.5", default-features = false, features = ["anyhow", "backtrace", "contexts", "panic", "reqwest", "rustls", "serde_json", "tracing"] }
 sentry-tracing = "0.31.5"
 serde = { version = "1.0.171" }
-serde_json = { version = "1.0.102", default-features = false, features = ["raw_value"] }
+serde_json = { version = "1.0.103", default-features = false, features = ["raw_value"] }
 serde_prometheus = "0.2.3"
 strum = { version = "0.25.0", features = ["derive"] }
 time_01 = { package = "time", version = "0.1.45" }
@@ -98,7 +98,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ulid = { version = "1.0.0", features = ["rand", "uuid", "serde"] }
 url = { version = "2.4.0" }
-uuid = { version = "1.4.0", default-features = false, features = ["fast-rng", "v4", "zerocopy"] }
+uuid = { version = "1.4.1", default-features = false, features = ["fast-rng", "v4", "zerocopy"] }
 
 # TODO: why doesn't this work in dev-dependencies
 test-log = { version = "0.2.12", default-features = false, features = ["trace"] }
