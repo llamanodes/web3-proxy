@@ -150,7 +150,7 @@ pub async fn user_mysql_stats_get(
         .all(db_replica.as_ref())
         .await?;
 
-    let stats = stats.into_iter().map(|x| x.1).flatten().collect::<Vec<_>>();
+    let stats = stats.into_iter().flat_map(|x| x.1).collect::<Vec<_>>();
 
     let mut response = HashMap::new();
     response.insert("stats", stats);

@@ -23,7 +23,7 @@ use influxdb2::api::query::FluxRecord;
 use influxdb2::models::Query;
 use migration::sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::json;
-use tracing::{error, info, trace, warn};
+use tracing::{error, trace, warn};
 use ulid::Ulid;
 
 pub async fn query_user_influx_stats<'a>(

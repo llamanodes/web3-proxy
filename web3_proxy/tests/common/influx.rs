@@ -1,6 +1,5 @@
 use ethers::prelude::rand::{self, distributions::Alphanumeric, Rng};
 use influxdb2::Client;
-use migration::sea_orm::DatabaseConnection;
 use std::process::Command as SyncCommand;
 use std::time::Duration;
 use tokio::{
@@ -8,8 +7,7 @@ use tokio::{
     process::Command as AsyncCommand,
     time::{sleep, Instant},
 };
-use tracing::{info, trace, warn};
-use web3_proxy::relational_db::{connect_db, get_migrated_db};
+use tracing::{info, trace};
 
 /// on drop, the mysql docker container will be shut down
 #[derive(Debug)]
@@ -31,9 +29,9 @@ impl TestInflux {
             .map(char::from)
             .collect();
 
-        let db_container_name = format!("web3-proxy-test-influx-{}", random);
+        let container_name = format!("web3-proxy-test-influx-{}", random);
 
-        info!(%db_container_name);
+        info!(%container_name);
 
         // docker run -d -p 8086:8086 \
         // --name influxdb2 \
@@ -56,7 +54,7 @@ impl TestInflux {
             .args([
                 "run",
                 "--name",
-                &db_container_name,
+                &container_name,
                 "--rm",
                 "-d",
                 "-e",
@@ -87,7 +85,7 @@ impl TestInflux {
         sleep(Duration::from_secs(1)).await;
 
         let docker_inspect_output = AsyncCommand::new("docker")
-            .args(["inspect", &db_container_name])
+            .args(["inspect", &container_name])
             .output()
             .await
             .unwrap();
@@ -127,23 +125,23 @@ impl TestInflux {
             .get("HostIp")
             .and_then(|x| x.as_str())
             .expect("unable to determine influx ip");
-        info!("Influx IP is: {:?}", influx_ip);
 
         // let host = "http://localhost:8086";
-        let host = format!("http://{}:{}", influx_ip, influx_port);
+        let influx_host = format!("http://{}:{}", influx_ip, influx_port);
+        info!(%influx_host);
 
         // Create the client ...
-        let influxdb_client = influxdb2::Client::new(host.clone(), org, admin_token);
+        let influxdb_client = influxdb2::Client::new(influx_host.clone(), org, admin_token);
         info!("Influx client is: {:?}", influxdb_client);
 
-        // create the db_data as soon as the url is known
-        // when this is dropped, the db will be stopped
+        // create the TestInflux as soon as the url is known
+        // when this is dropped, the docker container will be stopped
         let mut test_influx = Self {
-            host: host.to_string(),
+            host: influx_host,
             org: org.to_string(),
             token: admin_token.to_string(),
             bucket: init_bucket.to_string(),
-            container_name: db_container_name.clone(),
+            container_name: container_name.clone(),
             client: influxdb_client,
         };
 
@@ -166,6 +164,8 @@ impl TestInflux {
         }
 
         sleep(Duration::from_secs(1)).await;
+
+        // TODO: try to use the influx client
 
         info!(?test_influx, elapsed=%start.elapsed().as_secs_f32(), "influx post is open. Migrating now...");
 

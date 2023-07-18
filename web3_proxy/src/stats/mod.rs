@@ -16,9 +16,6 @@ use axum::headers::Origin;
 use chrono::{DateTime, Months, TimeZone, Utc};
 use derive_more::From;
 use entities::{referee, referrer, rpc_accounting_v2};
-use ethers::prelude::rand;
-use ethers::prelude::rand::distributions::Alphanumeric;
-use ethers::prelude::rand::Rng;
 use influxdb2::models::DataPoint;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{

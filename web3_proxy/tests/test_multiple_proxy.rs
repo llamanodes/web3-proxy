@@ -3,15 +3,13 @@ mod common;
 use crate::common::create_provider_with_rpc_key::create_provider_for_user;
 use crate::common::influx::TestInflux;
 use crate::common::rpc_key::user_get_first_rpc_key;
-use crate::common::stats_accounting::{
-    user_get_influx_stats_aggregated, user_get_influx_stats_detailed, user_get_mysql_stats,
-};
+use crate::common::stats_accounting::{user_get_influx_stats_aggregated, user_get_mysql_stats};
 use crate::common::user_balance::user_get_balance;
 use crate::common::{
     admin_increases_balance::admin_increase_balance, anvil::TestAnvil,
     create_admin::create_user_as_admin, create_user::create_user, mysql::TestMysql, TestApp,
 };
-use futures::future::{join_all, try_join_all};
+use futures::future::try_join_all;
 use rust_decimal::Decimal;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -149,6 +147,11 @@ async fn test_multiple_proxies_stats_add_up() {
     let user_0_balance_post = user_get_balance(&x_0, &r, &user_0_login).await;
     let influx_stats = influx_aggregate_stats["result"].get(0).unwrap();
     let mysql_stats = mysql_stats["stats"].get(0).unwrap();
+
+    assert_eq!(
+        user_0_balance_post.total_frontend_requests,
+        number_requests * 3
+    );
 
     info!("Influx and mysql stats are");
     info!(?influx_stats);
