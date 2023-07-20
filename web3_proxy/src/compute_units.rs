@@ -121,6 +121,7 @@ impl ComputeUnit {
                 (_, "trace_replayBlockTransactions") => 2983,
                 (_, "trace_replayTransaction") => 2983,
                 (_, "trace_transaction") => 26,
+                (_, "invalid_method") => 100,
                 (_, "web3_clientVersion") => 15,
                 (_, "web3_sha3") => 15,
                 (_, method) => {

@@ -10,7 +10,6 @@ use crate::{
     errors::Web3ProxyResult,
     jsonrpc::{JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest},
 };
-use anyhow::Context;
 use axum::headers::{Origin, Referer, UserAgent};
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
@@ -30,6 +29,7 @@ use handlebars::Handlebars;
 use hashbrown::HashMap;
 use http::{HeaderMap, StatusCode};
 use serde_json::json;
+use serde_json::value::RawValue;
 use std::net::IpAddr;
 use std::str::from_utf8_mut;
 use std::sync::atomic::AtomicU64;
@@ -305,12 +305,102 @@ async fn proxy_web3_socket(
     // split the websocket so we can read and write concurrently
     let (ws_tx, ws_rx) = socket.split();
 
+    let buffer = authorization.checks.max_concurrent_requests.unwrap_or(2048) as usize;
+
     // create a channel for our reader and writer can communicate. todo: benchmark different channels
     // TODO: this should be bounded. async blocking on too many messages would be fine
-    let (response_sender, response_receiver) = mpsc::unbounded_channel::<Message>();
+    let (response_sender, response_receiver) = mpsc::channel::<Message>(buffer);
 
     tokio::spawn(write_web3_socket(response_receiver, ws_tx));
     tokio::spawn(read_web3_socket(app, authorization, ws_rx, response_sender));
+}
+
+async fn websocket_proxy_web3_rpc(
+    app: Arc<Web3ProxyApp>,
+    authorization: Arc<Authorization>,
+    json_request: JsonRpcRequest,
+    response_sender: &mpsc::Sender<Message>,
+    subscription_count: &AtomicU64,
+    subscriptions: &AsyncRwLock<HashMap<U64, AbortHandle>>,
+) -> (Box<RawValue>, Web3ProxyResult<JsonRpcForwardedResponseEnum>) {
+    let response_id = json_request.id.clone();
+
+    // TODO: move this to a seperate function so we can use the try operator
+    let response: Web3ProxyResult<JsonRpcForwardedResponseEnum> = match &json_request.method[..] {
+        "eth_subscribe" => {
+            // TODO: how can we subscribe with proxy_mode?
+            match app
+                .eth_subscribe(
+                    authorization,
+                    json_request,
+                    subscription_count,
+                    response_sender.clone(),
+                )
+                .await
+            {
+                Ok((handle, response)) => {
+                    if let Some(subscription_id) = response.result.clone() {
+                        let mut x = subscriptions.write().await;
+
+                        let key: U64 = serde_json::from_str(subscription_id.get()).unwrap();
+
+                        x.insert(key, handle);
+                    }
+
+                    Ok(response.into())
+                }
+                Err(err) => Err(err),
+            }
+        }
+        "eth_unsubscribe" => {
+            let request_metadata =
+                RequestMetadata::new(&app, authorization, &json_request, None).await;
+
+            let maybe_id = json_request
+                .params
+                .get(0)
+                .cloned()
+                .unwrap_or(json_request.params);
+
+            let subscription_id: U64 = match serde_json::from_value::<U64>(maybe_id) {
+                Ok(x) => x,
+                Err(err) => {
+                    return (
+                        response_id,
+                        Err(Web3ProxyError::BadRequest(
+                            format!("unexpected params given for eth_unsubscribe: {:?}", err)
+                                .into(),
+                        )),
+                    )
+                }
+            };
+
+            // TODO: is this the right response?
+            let partial_response = {
+                let mut x = subscriptions.write().await;
+                match x.remove(&subscription_id) {
+                    None => false,
+                    Some(handle) => {
+                        handle.abort();
+                        true
+                    }
+                }
+            };
+
+            let response =
+                JsonRpcForwardedResponse::from_value(json!(partial_response), response_id.clone());
+
+            request_metadata.add_response(&response);
+
+            Ok(response.into())
+        }
+        _ => app
+            .proxy_web3_rpc(authorization, json_request.into())
+            .await
+            .map(|(_, response, _)| response),
+    };
+
+    (response_id, response)
 }
 
 /// websockets support a few more methods than http clients
@@ -318,7 +408,7 @@ async fn handle_socket_payload(
     app: Arc<Web3ProxyApp>,
     authorization: &Arc<Authorization>,
     payload: &str,
-    response_sender: &mpsc::UnboundedSender<Message>,
+    response_sender: &mpsc::Sender<Message>,
     subscription_count: &AtomicU64,
     subscriptions: Arc<AsyncRwLock<HashMap<U64, AbortHandle>>>,
 ) -> Web3ProxyResult<(Message, Option<OwnedSemaphorePermit>)> {
@@ -327,89 +417,21 @@ async fn handle_socket_payload(
     // TODO: handle batched requests
     let (response_id, response) = match serde_json::from_str::<JsonRpcRequest>(payload) {
         Ok(json_request) => {
-            let response_id = json_request.id.clone();
+            // // TODO: move tarpit code to an invidual request, or change this to handle enums
+            // json_request
+            //     .tarpit_invalid(&app, &authorization, Duration::from_secs(2))
+            //     .await?;
 
             // TODO: move this to a seperate function so we can use the try operator
-            let response: Web3ProxyResult<JsonRpcForwardedResponseEnum> = match &json_request.method
-                [..]
-            {
-                "eth_subscribe" => {
-                    // TODO: how can we subscribe with proxy_mode?
-                    match app
-                        .eth_subscribe(
-                            authorization.clone(),
-                            json_request,
-                            subscription_count,
-                            response_sender.clone(),
-                        )
-                        .await
-                    {
-                        Ok((handle, response)) => {
-                            if let Some(subscription_id) = response.result.clone() {
-                                let mut x = subscriptions.write().await;
-
-                                let key: U64 = serde_json::from_str(subscription_id.get()).unwrap();
-
-                                x.insert(key, handle);
-                            }
-
-                            Ok(response.into())
-                        }
-                        Err(err) => Err(err),
-                    }
-                }
-                "eth_unsubscribe" => {
-                    let request_metadata =
-                        RequestMetadata::new(&app, authorization.clone(), &json_request, None)
-                            .await;
-
-                    let subscription_id: U64 =
-                        if let Some(param) = json_request.params.get(0).cloned() {
-                            serde_json::from_value(param)
-                                .context("failed parsing [subscription_id] as a U64")?
-                        } else {
-                            match serde_json::from_value::<U64>(json_request.params) {
-                                Ok(x) => x,
-                                Err(err) => {
-                                    return Err(Web3ProxyError::BadRequest(
-                                        format!(
-                                            "unexpected params given for eth_unsubscribe: {:?}",
-                                            err
-                                        )
-                                        .into(),
-                                    ))
-                                }
-                            }
-                        };
-
-                    // TODO: is this the right response?
-                    let partial_response = {
-                        let mut x = subscriptions.write().await;
-                        match x.remove(&subscription_id) {
-                            None => false,
-                            Some(handle) => {
-                                handle.abort();
-                                true
-                            }
-                        }
-                    };
-
-                    let response = JsonRpcForwardedResponse::from_value(
-                        json!(partial_response),
-                        response_id.clone(),
-                    );
-
-                    request_metadata.add_response(&response);
-
-                    Ok(response.into())
-                }
-                _ => app
-                    .proxy_web3_rpc(authorization.clone(), json_request.into())
-                    .await
-                    .map(|(_, response, _)| response),
-            };
-
-            (response_id, response)
+            websocket_proxy_web3_rpc(
+                app,
+                authorization.clone(),
+                json_request,
+                response_sender,
+                subscription_count,
+                &subscriptions,
+            )
+            .await
         }
         Err(err) => {
             let id = JsonRpcId::None.to_raw_value();
@@ -435,7 +457,7 @@ async fn read_web3_socket(
     app: Arc<Web3ProxyApp>,
     authorization: Arc<Authorization>,
     mut ws_rx: SplitStream<WebSocket>,
-    response_sender: mpsc::UnboundedSender<Message>,
+    response_sender: mpsc::Sender<Message>,
 ) {
     let subscriptions = Arc::new(AsyncRwLock::new(HashMap::new()));
     let subscription_count = Arc::new(AtomicU64::new(1));
@@ -520,7 +542,7 @@ async fn read_web3_socket(
                             }
                         };
 
-                        if response_sender.send(response_msg).is_err() {
+                        if response_sender.send(response_msg).await.is_err() {
                             let _ = close_sender.send(true);
                         };
                     };
@@ -538,7 +560,7 @@ async fn read_web3_socket(
 }
 
 async fn write_web3_socket(
-    mut response_rx: mpsc::UnboundedReceiver<Message>,
+    mut response_rx: mpsc::Receiver<Message>,
     mut ws_tx: SplitSink<WebSocket, Message>,
 ) {
     // TODO: increment counter for open websockets

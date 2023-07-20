@@ -15,6 +15,7 @@ use http::HeaderMap;
 use itertools::Itertools;
 use std::net::IpAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 /// POST /rpc -- Public entrypoint for HTTP JSON-RPC requests. Web3 wallets use this.
 /// Defaults to rate limiting by IP address, but can also read the Authorization header for a bearer token.
@@ -65,6 +66,10 @@ async fn _proxy_web3_rpc(
         .map_err(|e| e.into_response_with_id(first_id.clone()))?;
 
     let authorization = Arc::new(authorization);
+
+    payload
+        .tarpit_invalid(&app, &authorization, Duration::from_secs(5))
+        .await?;
 
     // TODO: calculate payload bytes here (before turning into serde_json::Value). that will save serializing later
 
@@ -253,6 +258,10 @@ async fn _proxy_web3_rpc_with_key(
             .map_err(|e| e.into_response_with_id(first_id.clone()))?;
 
     let authorization = Arc::new(authorization);
+
+    payload
+        .tarpit_invalid(&app, &authorization, Duration::from_secs(2))
+        .await?;
 
     let rpc_secret_key_id = authorization.checks.rpc_secret_key_id;
 

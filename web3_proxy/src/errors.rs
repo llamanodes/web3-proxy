@@ -902,7 +902,7 @@ impl Web3ProxyError {
                 (
                     StatusCode::UNAUTHORIZED,
                     JsonRpcErrorData {
-                        message: format!("siwe verification error: {}", err.to_string()).into(),
+                        message: format!("siwe verification error: {}", err).into(),
                         code: StatusCode::UNAUTHORIZED.as_u16().into(),
                         data: None,
                     },

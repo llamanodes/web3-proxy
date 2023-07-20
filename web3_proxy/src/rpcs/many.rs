@@ -411,7 +411,7 @@ impl Web3Rpcs {
                 count_map.insert(s.clone(), partial_response);
             }
 
-            counts.update([s].into_iter());
+            counts.update([s]);
         }
 
         // return the most_common success if any. otherwise return the most_common error

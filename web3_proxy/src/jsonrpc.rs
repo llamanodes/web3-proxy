@@ -1,4 +1,8 @@
+use crate::app::Web3ProxyApp;
+use crate::errors::Web3ProxyError;
+use crate::frontend::authorization::{Authorization, RequestMetadata, RequestOrMethod};
 use crate::response_cache::JsonRpcResponseEnum;
+use axum::response::Response;
 use derive_more::From;
 use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
@@ -6,7 +10,9 @@ use serde_json::json;
 use serde_json::value::{to_raw_value, RawValue};
 use std::borrow::Cow;
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{atomic, Arc};
+use std::time::Duration;
+use tokio::time::sleep;
 
 pub trait JsonRpcParams = fmt::Debug + serde::Serialize + Send + Sync + 'static;
 pub trait JsonRpcResultData = serde::Serialize + serde::de::DeserializeOwned + fmt::Debug + Send;
@@ -44,6 +50,7 @@ impl JsonRpcId {
 }
 
 impl JsonRpcRequest {
+    // TODO: Web3ProxyResult? can this even fail?
     pub fn new(id: JsonRpcId, method: String, params: serde_json::Value) -> anyhow::Result<Self> {
         let x = Self {
             jsonrpc: "2.0".to_string(),
@@ -53,6 +60,12 @@ impl JsonRpcRequest {
         };
 
         Ok(x)
+    }
+
+    pub fn validate_method(&self) -> bool {
+        self.method
+            .chars()
+            .all(|x| x.is_ascii_alphanumeric() || x == '_' || x == '(' || x == ')')
     }
 }
 
@@ -69,7 +82,7 @@ impl fmt::Debug for JsonRpcRequest {
 }
 
 /// Requests can come in multiple formats
-#[derive(Debug, From)]
+#[derive(Debug, From, Serialize)]
 pub enum JsonRpcRequestEnum {
     Batch(Vec<JsonRpcRequest>),
     Single(JsonRpcRequest),
@@ -81,6 +94,62 @@ impl JsonRpcRequestEnum {
             Self::Batch(x) => x.first().map(|x| x.id.clone()),
             Self::Single(x) => Some(x.id.clone()),
         }
+    }
+
+    /// returns the id of the first invalid result (if any). None is good
+    pub fn validate(&self) -> Option<Box<RawValue>> {
+        match self {
+            Self::Batch(x) => x
+                .iter()
+                .find_map(|x| (!x.validate_method()).then_some(x.id.clone())),
+            Self::Single(x) => {
+                if x.validate_method() {
+                    None
+                } else {
+                    Some(x.id.clone())
+                }
+            }
+        }
+    }
+
+    /// returns the id of the first invalid result (if any). None is good
+    pub async fn tarpit_invalid(
+        &self,
+        app: &Web3ProxyApp,
+        authorization: &Arc<Authorization>,
+        duration: Duration,
+    ) -> Result<(), Response> {
+        let err_id = match self.validate() {
+            None => return Ok(()),
+            Some(x) => x,
+        };
+
+        let size = serde_json::to_string(&self)
+            .expect("JsonRpcRequestEnum should always serialize")
+            .len();
+
+        let request = RequestOrMethod::Method("invalid_method", size);
+
+        // TODO: create a stat so we can penalize
+        // TODO: what request size
+        let metadata = RequestMetadata::new(app, authorization.clone(), request, None).await;
+
+        metadata
+            .user_error_response
+            .store(true, atomic::Ordering::Release);
+
+        let response = Web3ProxyError::BadRequest("request failed validation".into());
+
+        metadata.add_response(&response);
+
+        let response = response.into_response_with_id(Some(err_id));
+
+        // TODO: variable duration depending on the IP
+        sleep(duration).await;
+
+        let _ = metadata.try_send_arc_stat();
+
+        Err(response)
     }
 }
 

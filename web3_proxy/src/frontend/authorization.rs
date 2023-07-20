@@ -445,6 +445,7 @@ impl<'a> From<&'a str> for RequestOrMethod<'a> {
 pub enum ResponseOrBytes<'a> {
     Json(&'a serde_json::Value),
     Response(&'a JsonRpcForwardedResponse),
+    Error(&'a Web3ProxyError),
     Bytes(usize),
 }
 
@@ -464,6 +465,11 @@ impl ResponseOrBytes<'_> {
                 .expect("this should always serialize")
                 .len(),
             Self::Bytes(num_bytes) => *num_bytes,
+            Self::Error(x) => {
+                let (_, x) = x.as_response_parts::<()>();
+
+                x.num_bytes() as usize
+            }
         }
     }
 }

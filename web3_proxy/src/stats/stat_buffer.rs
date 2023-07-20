@@ -437,3 +437,11 @@ impl StatBuffer {
         count
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_something() {
+        panic!()
+    }
+}
