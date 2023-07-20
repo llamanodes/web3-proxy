@@ -13,8 +13,9 @@ pub mod users;
 use crate::app::Web3ProxyApp;
 use crate::errors::Web3ProxyResult;
 use axum::{
+    error_handling::HandleErrorLayer,
     routing::{get, post},
-    Extension, Router,
+    BoxError, Extension, Router,
 };
 use http::{header::AUTHORIZATION, Request, StatusCode};
 use hyper::Body;
@@ -25,6 +26,8 @@ use std::{iter::once, time::Duration};
 use std::{net::SocketAddr, sync::atomic::Ordering};
 use strum::{EnumCount, EnumIter};
 use tokio::sync::broadcast;
+use tower::timeout::TimeoutLayer;
+use tower::ServiceBuilder;
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{error_span, info};
@@ -261,6 +264,17 @@ pub async fn serve(
         .layer(Extension(app.clone()))
         // frontend caches
         .layer(Extension(Arc::new(response_cache)))
+        // request timeout
+        .layer(
+            ServiceBuilder::new()
+                // this middleware goes above `TimeoutLayer` because it will receive
+                // errors returned by `TimeoutLayer`
+                // TODO: JsonRPC error response
+                .layer(HandleErrorLayer::new(|_: BoxError| async {
+                    StatusCode::REQUEST_TIMEOUT
+                }))
+                .layer(TimeoutLayer::new(Duration::from_secs(5 * 60))),
+        )
         // request id
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &Request<Body>| {
