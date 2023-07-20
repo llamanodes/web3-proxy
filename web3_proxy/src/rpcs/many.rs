@@ -19,7 +19,9 @@ use futures::StreamExt;
 use hashbrown::HashMap;
 use itertools::Itertools;
 use moka::future::CacheBuilder;
+use parking_lot::RwLock;
 use serde::ser::{SerializeStruct, Serializer};
+use serde::Serialize;
 use serde_json::json;
 use serde_json::value::RawValue;
 use std::borrow::Cow;
@@ -28,7 +30,7 @@ use std::fmt::{self, Display};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::select;
-use tokio::sync::{mpsc, watch, RwLock};
+use tokio::sync::{mpsc, watch};
 use tokio::time::{sleep, sleep_until, Duration, Instant};
 use tracing::{debug, error, info, trace, warn};
 
@@ -212,7 +214,7 @@ impl Web3Rpcs {
                 Ok(Ok((new_rpc, _handle))) => {
                     // web3 connection worked
 
-                    let old_rpc = self.by_name.read().await.get(&new_rpc.name).map(Arc::clone);
+                    let old_rpc = self.by_name.read().get(&new_rpc.name).map(Arc::clone);
 
                     // clean up the old rpc if it exists
                     if let Some(old_rpc) = old_rpc {
@@ -234,10 +236,7 @@ impl Web3Rpcs {
 
                         // new rpc is synced (or old one was not synced). update the local map
                         // make sure that any new requests use the new connection
-                        self.by_name
-                            .write()
-                            .await
-                            .insert(new_rpc.name.clone(), new_rpc);
+                        self.by_name.write().insert(new_rpc.name.clone(), new_rpc);
 
                         // tell the old rpc to disconnect
                         if let Some(ref disconnect_sender) = old_rpc.disconnect_watch {
@@ -245,10 +244,7 @@ impl Web3Rpcs {
                             disconnect_sender.send_replace(true);
                         }
                     } else {
-                        self.by_name
-                            .write()
-                            .await
-                            .insert(new_rpc.name.clone(), new_rpc);
+                        self.by_name.write().insert(new_rpc.name.clone(), new_rpc);
                     }
                 }
                 Ok(Err(err)) => {
@@ -265,12 +261,12 @@ impl Web3Rpcs {
         }
 
         // TODO: remove any RPCs that were part of the config, but are now removed
-        let active_names: Vec<_> = self.by_name.read().await.keys().cloned().collect();
+        let active_names: Vec<_> = self.by_name.read().keys().cloned().collect();
         for name in active_names {
             if names_to_keep.contains(&name) {
                 continue;
             }
-            if let Some(old_rpc) = self.by_name.write().await.remove(&name) {
+            if let Some(old_rpc) = self.by_name.write().remove(&name) {
                 if let Some(ref disconnect_sender) = old_rpc.disconnect_watch {
                     debug!("telling {} to disconnect. no longer needed", old_rpc);
                     disconnect_sender.send_replace(true);
@@ -278,7 +274,7 @@ impl Web3Rpcs {
             }
         }
 
-        let num_rpcs = self.len().await;
+        let num_rpcs = self.len();
 
         if num_rpcs < self.min_synced_rpcs {
             return Err(Web3ProxyError::NotEnoughRpcs {
@@ -290,16 +286,16 @@ impl Web3Rpcs {
         Ok(())
     }
 
-    pub async fn get(&self, conn_name: &str) -> Option<Arc<Web3Rpc>> {
-        self.by_name.read().await.get(conn_name).cloned()
+    pub fn get(&self, conn_name: &str) -> Option<Arc<Web3Rpc>> {
+        self.by_name.read().get(conn_name).cloned()
     }
 
-    pub async fn len(&self) -> usize {
-        self.by_name.read().await.len()
+    pub fn len(&self) -> usize {
+        self.by_name.read().len()
     }
 
-    pub async fn is_empty(&self) -> bool {
-        self.by_name.read().await.is_empty()
+    pub fn is_empty(&self) -> bool {
+        self.by_name.read().is_empty()
     }
 
     /// TODO: rename to be consistent between "head" and "synced"
@@ -646,7 +642,7 @@ impl Web3Rpcs {
         let mut earliest_retry_at = None;
 
         // TODO: filter the rpcs with Ranked.will_work_now
-        let mut all_rpcs: Vec<_> = self.by_name.read().await.values().cloned().collect();
+        let mut all_rpcs: Vec<_> = self.by_name.read().values().cloned().collect();
 
         let mut max_count = if let Some(max_count) = max_count {
             max_count
@@ -1055,7 +1051,7 @@ impl Web3Rpcs {
             return Err(err.into());
         }
 
-        let num_conns = self.len().await;
+        let num_conns = self.len();
         let num_skipped = skip_rpcs.len();
 
         let needed = min_block_needed.max(max_block_needed);
@@ -1297,15 +1293,15 @@ impl fmt::Debug for Web3Rpcs {
     }
 }
 
-impl Web3Rpcs {
-    pub async fn serialize_async<W: std::io::Write>(
-        &self,
-        mut serializer: serde_json::Serializer<W>,
-    ) -> Result<(), serde_json::Error> {
+impl Serialize for Web3Rpcs {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
         let mut state = serializer.serialize_struct("Web3Rpcs", 5)?;
 
         {
-            let by_name = self.by_name.read().await;
+            let by_name = self.by_name.read();
             let rpcs: Vec<&Arc<Web3Rpc>> = by_name.values().collect();
             // TODO: coordinate with frontend team to rename "conns" to "rpcs"
             state.serialize_field("conns", &rpcs)?;

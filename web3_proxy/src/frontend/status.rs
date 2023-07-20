@@ -21,7 +21,7 @@ use http::HeaderMap;
 use moka::future::Cache;
 use once_cell::sync::Lazy;
 use serde::{ser::SerializeStruct, Serialize};
-use serde_json::{json, value::RawValue};
+use serde_json::json;
 use std::{sync::Arc, time::Duration};
 use tokio::time::timeout;
 use tracing::trace;
@@ -190,48 +190,11 @@ async fn _status(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, Bytes) {
     // TODO: get out of app.balanced_rpcs instead?
     let head_block = app.watch_consensus_head_receiver.borrow().clone();
 
-    let balanced_rpcs = {
-        let mut buf = Vec::<u8>::new();
-        let ser = serde_json::Serializer::new(&mut buf);
-        app.balanced_rpcs
-            .serialize_async(ser)
-            .await
-            .expect("TODO: can this fail?");
-        let strbuf = String::from(std::str::from_utf8(&buf).expect("TODO: can this fail?"));
-        RawValue::from_string(strbuf).expect("TODO: can this fail?")
-    };
-
-    let bundler_4337_rpcs = match &app.bundler_4337_rpcs {
-        Some(rpcs) => {
-            let mut buf = Vec::<u8>::new();
-            let ser = serde_json::Serializer::new(&mut buf);
-            rpcs.serialize_async(ser)
-                .await
-                .expect("TODO: can this fail?");
-            let strbuf = String::from(std::str::from_utf8(&buf).expect("TODO: can this fail?"));
-            Some(RawValue::from_string(strbuf).expect("TODO: can this fail?"))
-        }
-        None => None,
-    };
-
-    let private_rpcs = match &app.private_rpcs {
-        Some(rpcs) => {
-            let mut buf = Vec::<u8>::new();
-            let ser = serde_json::Serializer::new(&mut buf);
-            rpcs.serialize_async(ser)
-                .await
-                .expect("TODO: can this fail?");
-            let strbuf = String::from(std::str::from_utf8(&buf).expect("TODO: can this fail?"));
-            Some(RawValue::from_string(strbuf).expect("TODO: can this fail?"))
-        }
-        None => None,
-    };
-
     // TODO: what else should we include? uptime, cache hit rates, cpu load, memory used
     // TODO: the hostname is probably not going to change. only get once at the start?
     let body = json!({
-        "balanced_rpcs": balanced_rpcs,
-        "bundler_4337_rpcs": bundler_4337_rpcs,
+        "balanced_rpcs": app.balanced_rpcs,
+        "bundler_4337_rpcs": app.bundler_4337_rpcs,
         "caches": [
             MokaCacheSerializer(&app.ip_semaphores),
             MokaCacheSerializer(&app.jsonrpc_response_cache),
@@ -244,7 +207,7 @@ async fn _status(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, Bytes) {
         "head_block_hash": head_block.as_ref().map(|x| x.hash()),
         "hostname": app.hostname,
         "payment_factory_address": app.config.deposit_factory_contract,
-        "private_rpcs": private_rpcs,
+        "private_rpcs": app.private_rpcs,
         "version": APP_USER_AGENT,
     });
 

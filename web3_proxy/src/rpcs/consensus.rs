@@ -442,7 +442,7 @@ impl ConsensusFinder {
         let consensus_head_block = new_ranked_rpcs.head_block.clone();
         let num_consensus_rpcs = new_ranked_rpcs.num_active_rpcs();
         let num_active_rpcs = self.len();
-        let total_rpcs = web3_rpcs.len().await;
+        let total_rpcs = web3_rpcs.len();
 
         let new_ranked_rpcs = Arc::new(new_ranked_rpcs);
 
