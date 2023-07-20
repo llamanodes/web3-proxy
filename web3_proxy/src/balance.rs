@@ -1,11 +1,12 @@
-use crate::errors::{Web3ProxyErrorContext, Web3ProxyResult};
+use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
+use crate::premium::get_user_and_tier_from_id;
 use entities::{
     admin_increase_balance_receipt, increase_on_chain_balance_receipt, referee, referrer,
     rpc_accounting_v2, rpc_key, stripe_increase_balance_receipt,
 };
 use migration::sea_orm::prelude::Decimal;
-use migration::sea_orm::DbConn;
 use migration::sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
+use migration::sea_orm::{DbConn, TransactionTrait};
 use migration::{Func, SimpleExpr};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
@@ -27,6 +28,8 @@ pub struct Balance {
     pub total_spent: Decimal,
     pub total_spent_paid_credits: Decimal,
     pub user_id: u64,
+    pub user_tier_id: u64,
+    pub downgrade_tier_id: Option<u64>,
 }
 
 impl Serialize for Balance {
@@ -46,6 +49,8 @@ impl Serialize for Balance {
         state.serialize_field("total_spent", &self.total_spent)?;
         state.serialize_field("total_spent_paid_credits", &self.total_spent_paid_credits)?;
         state.serialize_field("user_id", &self.user_id)?;
+        state.serialize_field("user_tier_id", &self.user_tier_id)?;
+        state.serialize_field("downgrade_tier_id", &self.downgrade_tier_id)?;
 
         state.serialize_field("active_premium", &self.active_premium())?;
         state.serialize_field("was_ever_premium", &self.was_ever_premium())?;
@@ -58,13 +63,16 @@ impl Serialize for Balance {
 
 impl Balance {
     pub fn active_premium(&self) -> bool {
-        self.was_ever_premium() && self.total_deposits() > self.total_spent_paid_credits
+        self.was_ever_premium()
+            && (self.total_deposits() > self.total_spent_paid_credits
+                || self.downgrade_tier_id.is_none())
     }
 
     pub fn was_ever_premium(&self) -> bool {
         // TODO: technically we should also check that user_tier.downgrade_tier_id.is_some()
         // but now we set premium automatically on deposit, so its fine for now
-        self.user_id != 0 && self.total_deposits() >= Decimal::from(10)
+        self.user_id != 0
+            && (self.total_deposits() >= Decimal::from(10) || self.downgrade_tier_id.is_none())
     }
 
     pub fn remaining(&self) -> Decimal {
@@ -85,6 +93,22 @@ impl Balance {
         if user_id == 0 {
             return Ok(None);
         }
+
+        let txn = db_conn.begin().await?;
+
+        // TODO: we probably already have the user and their tier, but this is easy
+        let (_, user_tier_entry) =
+            get_user_and_tier_from_id(user_id, &txn)
+                .await?
+                .ok_or(Web3ProxyError::BadRequest(
+                    format!("No user found with id {}", user_id).into(),
+                ))?;
+
+        txn.commit().await?;
+
+        let user_tier_entry = user_tier_entry.ok_or(Web3ProxyError::BadRequest(
+            format!("No user tier found for user id {}", user_id).into(),
+        ))?;
 
         let (admin_deposits,) = admin_increase_balance_receipt::Entity::find()
             .select_only()
@@ -218,6 +242,8 @@ impl Balance {
             total_spent,
             total_spent_paid_credits,
             user_id,
+            user_tier_id: user_tier_entry.id,
+            downgrade_tier_id: user_tier_entry.downgrade_tier_id,
         };
 
         trace!("balance: {:#}", json!(&balance));
