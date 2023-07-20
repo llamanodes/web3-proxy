@@ -10,11 +10,113 @@ pub use payment_sweeper::*;
     non_camel_case_types,
 )]
 pub mod payment_sweeper {
-    #[rustfmt::skip]
-    const __ABI: &str = "[\n    {\n        \"stateMutability\": \"nonpayable\",\n        \"type\": \"constructor\",\n        \"inputs\": [\n            {\n                \"name\": \"_factory\",\n                \"type\": \"address\"\n            }\n        ],\n        \"outputs\": []\n    },\n    {\n        \"stateMutability\": \"nonpayable\",\n        \"type\": \"function\",\n        \"name\": \"send_token\",\n        \"inputs\": [\n            {\n                \"name\": \"_token\",\n                \"type\": \"address\"\n            },\n            {\n                \"name\": \"_amount\",\n                \"type\": \"uint256\"\n            }\n        ],\n        \"outputs\": []\n    },\n    {\n        \"stateMutability\": \"nonpayable\",\n        \"type\": \"function\",\n        \"name\": \"sweep_token_balance\",\n        \"inputs\": [\n            {\n                \"name\": \"_token\",\n                \"type\": \"address\"\n            }\n        ],\n        \"outputs\": []\n    },\n    {\n        \"stateMutability\": \"nonpayable\",\n        \"type\": \"function\",\n        \"name\": \"recover_token_balance\",\n        \"inputs\": [\n            {\n                \"name\": \"_token\",\n                \"type\": \"address\"\n            }\n        ],\n        \"outputs\": []\n    },\n    {\n        \"stateMutability\": \"view\",\n        \"type\": \"function\",\n        \"name\": \"FACTORY\",\n        \"inputs\": [],\n        \"outputs\": [\n            {\n                \"name\": \"\",\n                \"type\": \"address\"\n            }\n        ]\n    }\n]";
+    #[allow(deprecated)]
+    fn __abi() -> ::ethers::core::abi::Abi {
+        ::ethers::core::abi::ethabi::Contract {
+            constructor: ::core::option::Option::Some(::ethers::core::abi::ethabi::Constructor {
+                inputs: ::std::vec![
+                    ::ethers::core::abi::ethabi::Param {
+                        name: ::std::borrow::ToOwned::to_owned("_factory"),
+                        kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                        internal_type: ::core::option::Option::None,
+                    },
+                ],
+            }),
+            functions: ::core::convert::From::from([
+                (
+                    ::std::borrow::ToOwned::to_owned("FACTORY"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("FACTORY"),
+                            inputs: ::std::vec![],
+                            outputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::string::String::new(),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                    internal_type: ::core::option::Option::None,
+                                },
+                            ],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("recover_token_balance"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned(
+                                "recover_token_balance",
+                            ),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("_token"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                    internal_type: ::core::option::Option::None,
+                                },
+                            ],
+                            outputs: ::std::vec![],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("send_token"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("send_token"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("_token"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                    internal_type: ::core::option::Option::None,
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("_amount"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::None,
+                                },
+                            ],
+                            outputs: ::std::vec![],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("sweep_token_balance"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned(
+                                "sweep_token_balance",
+                            ),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("_token"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                    internal_type: ::core::option::Option::None,
+                                },
+                            ],
+                            outputs: ::std::vec![],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                        },
+                    ],
+                ),
+            ]),
+            events: ::std::collections::BTreeMap::new(),
+            errors: ::std::collections::BTreeMap::new(),
+            receive: false,
+            fallback: false,
+        }
+    }
     ///The parsed JSON ABI of the contract.
-    pub static PAYMENTSWEEPER_ABI: ::ethers::contract::Lazy<::ethers::core::abi::Abi> = ::ethers::contract::Lazy::new(||
-    ::ethers::core::utils::__serde_json::from_str(__ABI).expect("ABI is always valid"));
+    pub static PAYMENTSWEEPER_ABI: ::ethers::contract::Lazy<::ethers::core::abi::Abi> = ::ethers::contract::Lazy::new(
+        __abi,
+    );
     pub struct PaymentSweeper<M>(::ethers::contract::Contract<M>);
     impl<M> ::core::clone::Clone for PaymentSweeper<M> {
         fn clone(&self) -> Self {
@@ -34,7 +136,9 @@ pub mod payment_sweeper {
     }
     impl<M> ::core::fmt::Debug for PaymentSweeper<M> {
         fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-            f.debug_tuple(stringify!(PaymentSweeper)).field(&self.address()).finish()
+            f.debug_tuple(::core::stringify!(PaymentSweeper))
+                .field(&self.address())
+                .finish()
         }
     }
     impl<M: ::ethers::providers::Middleware> PaymentSweeper<M> {
