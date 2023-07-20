@@ -10,8 +10,8 @@ pub mod rpc_proxy_ws;
 pub mod status;
 pub mod users;
 
-use crate::app::Web3ProxyApp;
 use crate::errors::Web3ProxyResult;
+use crate::{app::Web3ProxyApp, errors::Web3ProxyError};
 use axum::{
     error_handling::HandleErrorLayer,
     routing::{get, post},
@@ -269,9 +269,8 @@ pub async fn serve(
             ServiceBuilder::new()
                 // this middleware goes above `TimeoutLayer` because it will receive
                 // errors returned by `TimeoutLayer`
-                // TODO: JsonRPC error response
                 .layer(HandleErrorLayer::new(|_: BoxError| async {
-                    StatusCode::REQUEST_TIMEOUT
+                    Web3ProxyError::Timeout(Some(Duration::from_secs(5 * 60)))
                 }))
                 .layer(TimeoutLayer::new(Duration::from_secs(5 * 60))),
         )

@@ -568,7 +568,6 @@ pub async fn query_user_influx_stats<'a>(
                 }
             });
 
-            // datapoints.insert(out.get("time"), out);
             json!(out)
         })
         .collect::<Vec<_>>();

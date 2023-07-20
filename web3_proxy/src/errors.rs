@@ -26,6 +26,7 @@ use serde::Serialize;
 use serde_json::value::RawValue;
 use siwe::VerificationError;
 use std::sync::Arc;
+use std::time::Duration;
 use std::{borrow::Cow, net::IpAddr};
 use tokio::{sync::AcquireError, task::JoinError, time::Instant};
 use tracing::{debug, error, trace, warn};
@@ -148,7 +149,7 @@ pub enum Web3ProxyError {
     /// TODO: what should be attached to the timout?
     #[display(fmt = "{:?}", _0)]
     #[error(ignore)]
-    Timeout(Option<tokio::time::error::Elapsed>),
+    Timeout(Option<Duration>),
     UlidDecode(ulid::DecodeError),
     #[error(ignore)]
     UnknownBlockHash(H256),
@@ -1128,8 +1129,8 @@ impl From<ethers::types::ParseBytesError> for Web3ProxyError {
 }
 
 impl From<tokio::time::error::Elapsed> for Web3ProxyError {
-    fn from(err: tokio::time::error::Elapsed) -> Self {
-        Self::Timeout(Some(err))
+    fn from(_: tokio::time::error::Elapsed) -> Self {
+        Self::Timeout(None)
     }
 }
 

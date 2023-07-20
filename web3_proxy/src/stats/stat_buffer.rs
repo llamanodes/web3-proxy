@@ -50,6 +50,7 @@ pub struct StatBuffer {
     global_timeseries_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
     influxdb_bucket: Option<String>,
     influxdb_client: Option<influxdb2::Client>,
+    instance_hash: String,
     opt_in_timeseries_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
     rpc_secret_key_cache: RpcSecretKeyCache,
     timestamp_precision: TimestampPrecision,
@@ -57,7 +58,6 @@ pub struct StatBuffer {
     user_balance_cache: UserBalanceCache,
 
     _flush_sender: mpsc::Sender<oneshot::Sender<FlushedStats>>,
-    instance_hash: String,
 }
 
 impl StatBuffer {
@@ -92,13 +92,14 @@ impl StatBuffer {
             global_timeseries_buffer: Default::default(),
             influxdb_bucket,
             influxdb_client,
+            instance_hash,
             opt_in_timeseries_buffer: Default::default(),
             rpc_secret_key_cache: rpc_secret_key_cache.unwrap(),
             timestamp_precision,
             tsdb_save_interval_seconds,
             user_balance_cache: user_balance_cache.unwrap(),
+
             _flush_sender: flush_sender,
-            instance_hash,
         };
 
         // any errors inside this task will cause the application to exit
@@ -149,20 +150,8 @@ impl StatBuffer {
                 x = flush_receiver.recv() => {
                     match x {
                         Some(x) => {
-                            trace!("flush");
+                            let flushed_stats = self._flush(&mut stat_receiver).await?;
 
-                            // fill the buffer
-                            while let Ok(stat) = stat_receiver.try_recv() {
-                                self._buffer_app_stat(stat).await?;
-                            }
-
-                            // flush the buffers
-                            let tsdb_count = self.save_tsdb_stats().await;
-                            let relational_count = self.save_relational_stats().await;
-
-                            // notify
-                            let flushed_stats = FlushedStats{ timeseries: tsdb_count, relational: relational_count};
-                            trace!(?flushed_stats);
                             if let Err(err) = x.send(flushed_stats) {
                                 error!(?flushed_stats, ?err, "unable to notify about flushed stats");
                             }
@@ -201,13 +190,7 @@ impl StatBuffer {
         //     sleep(Duration::from_millis(10)).await;
         // }
 
-        let saved_relational = self.save_relational_stats().await;
-
-        info!("saved {} pending relational stat(s)", saved_relational);
-
-        let saved_tsdb = self.save_tsdb_stats().await;
-
-        info!("saved {} pending tsdb stat(s)", saved_tsdb);
+        self._flush(&mut stat_receiver).await?;
 
         info!("accounting and stat save loop complete");
 
@@ -318,6 +301,32 @@ impl StatBuffer {
         }
 
         Ok(())
+    }
+
+    async fn _flush(
+        &mut self,
+        stat_receiver: &mut mpsc::UnboundedReceiver<AppStat>,
+    ) -> Web3ProxyResult<FlushedStats> {
+        trace!("flush");
+
+        // fill the buffer
+        while let Ok(stat) = stat_receiver.try_recv() {
+            self._buffer_app_stat(stat).await?;
+        }
+
+        // flush the buffers
+        let tsdb_count = self.save_tsdb_stats().await;
+        let relational_count = self.save_relational_stats().await;
+
+        // notify
+        let flushed_stats = FlushedStats {
+            timeseries: tsdb_count,
+            relational: relational_count,
+        };
+
+        trace!(?flushed_stats);
+
+        Ok(flushed_stats)
     }
 
     async fn save_relational_stats(&mut self) -> usize {

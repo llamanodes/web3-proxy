@@ -131,7 +131,7 @@ async fn test_multiple_proxies_stats_add_up() {
     assert_eq!(flush_1_count_0.relational, 1);
     assert_eq!(flush_1_count_0.timeseries, 2);
 
-    // // no more stats should arrive
+    // no more stats should arrive
     let flush_0_count_1 = x_0.flush_stats().await.unwrap();
     let flush_1_count_1 = x_1.flush_stats().await.unwrap();
     info!("Counts 0 are: {:?}", flush_0_count_1);

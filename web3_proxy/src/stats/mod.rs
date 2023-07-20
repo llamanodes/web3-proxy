@@ -479,37 +479,29 @@ impl BufferedRpcQueryStats {
         measurement: &str,
         chain_id: u64,
         key: RpcQueryKey,
-        instance: &String,
+        instance: &str,
     ) -> anyhow::Result<DataPoint> {
-        let mut builder = DataPoint::builder(measurement);
-
-        builder = builder.tag("chain_id", chain_id.to_string());
-
-        if let Some(rpc_secret_key_id) = key.rpc_secret_key_id {
-            builder = builder.tag("rpc_secret_key_id", rpc_secret_key_id.to_string());
-        }
-
-        builder = builder.tag("instance", instance);
-
-        builder = builder.tag("method", key.method);
-
-        builder = builder
+        let mut builder = DataPoint::builder(measurement)
             .tag("archive_needed", key.archive_needed.to_string())
+            .tag("chain_id", chain_id.to_string())
             .tag("error_response", key.error_response.to_string())
+            .tag("instance", instance)
+            .tag("method", key.method)
             .tag("user_error_response", key.user_error_response.to_string())
-            .field("frontend_requests", self.frontend_requests as i64)
+            .timestamp(key.response_timestamp)
             .field("backend_requests", self.backend_requests as i64)
-            .field("no_servers", self.no_servers as i64)
-            .field("cache_misses", self.cache_misses as i64)
             .field("cache_hits", self.cache_hits as i64)
+            .field("cache_misses", self.cache_misses as i64)
+            .field("frontend_requests", self.frontend_requests as i64)
+            .field("no_servers", self.no_servers as i64)
             .field("sum_request_bytes", self.sum_request_bytes as i64)
-            .field("sum_response_millis", self.sum_response_millis as i64)
             .field("sum_response_bytes", self.sum_response_bytes as i64)
+            .field("sum_response_millis", self.sum_response_millis as i64)
             .field(
-                "sum_incl_free_credits_used",
-                self.sum_credits_used
+                "balance",
+                self.approximate_balance_remaining
                     .to_f64()
-                    .context("sum_credits_used is really (too) large")?,
+                    .context("balance is really (too) large")?,
             )
             .field(
                 "sum_credits_used",
@@ -518,13 +510,16 @@ impl BufferedRpcQueryStats {
                     .context("sum_credits_used is really (too) large")?,
             )
             .field(
-                "balance",
-                self.approximate_balance_remaining
+                "sum_incl_free_credits_used",
+                self.sum_credits_used
                     .to_f64()
-                    .context("balance is really (too) large")?,
+                    .context("sum_credits_used is really (too) large")?,
             );
 
-        builder = builder.timestamp(key.response_timestamp);
+        // TODO: set the rpc_secret_key_id tag to 0 when anon? will that make other queries easier?
+        if let Some(rpc_secret_key_id) = key.rpc_secret_key_id {
+            builder = builder.tag("rpc_secret_key_id", rpc_secret_key_id.to_string());
+        }
 
         let point = builder.build()?;
 

@@ -320,7 +320,7 @@ impl Web3ProxyApp {
             .build()
             .into();
 
-        // Generate the instance name (hostname + random hash)
+        // Generate the instance name
         let instance_hash = Ulid::new().to_string();
 
         // create a channel for receiving stats
