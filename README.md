@@ -178,8 +178,8 @@ Test the proxy:
 
     wrk -t12 -c400 -d30s --latency http://127.0.0.1:8544/health
     wrk -t12 -c400 -d30s --latency http://127.0.0.1:8544/status
-    wrk -s ./wrk/getBlockNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8544/u/$API_KEY
-    wrk -s ./wrk/getLatestBlockByNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8544/u/$API_KEY
+    wrk -s ./wrk/getBlockNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8544/rpc/$API_KEY
+    wrk -s ./wrk/getLatestBlockByNumber.lua -t12 -c400 -d30s --latency http://127.0.0.1:8544/rpc/$API_KEY
 
 Test geth (assuming it is on 8545):
 
@@ -197,4 +197,4 @@ Run [ethspam](https://github.com/INFURA/versus) and [versus](https://github.com/
 
     ethspam --rpc http://127.0.0.1:8544 | versus --concurrency=10 --stop-after=1000 http://127.0.0.1:8544
 
-    ethspam --rpc http://127.0.0.1:8544/u/$API_KEY | versus --concurrency=100 --stop-after=10000 http://127.0.0.1:8544/u/$API_KEY
+    ethspam --rpc http://127.0.0.1:8544/rpc/$API_KEY | versus --concurrency=100 --stop-after=10000 http://127.0.0.1:8544/rpc/$API_KEY
