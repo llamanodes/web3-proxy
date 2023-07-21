@@ -182,6 +182,10 @@ impl Web3ProxyApp {
             watch::channel(top_config.clone());
         new_top_config_receiver.borrow_and_update();
 
+        // TODO: take this from config
+        // TODO: how should we handle hitting this max?
+        let max_users = 20_000;
+
         // safety checks on the config
         // while i would prefer this to be in a "apply_top_config" function, that is a larger refactor
         // TODO: maybe don't spawn with a config at all. have all config updates come through an apply_top_config call
@@ -307,13 +311,13 @@ impl Web3ProxyApp {
         // if there is no database of users, there will be no keys and so this will be empty
         // TODO: max_capacity from config
         // TODO: ttl from config
-        let rpc_secret_key_cache = Cache::builder()
+        let rpc_secret_key_cache = CacheBuilder::new(max_users)
             .name("rpc_secret_key")
             .time_to_live(Duration::from_secs(600))
             .build();
 
         // TODO: TTL left low, this could also be a solution instead of modifiying the cache, that may be disgusting across threads / slow anyways
-        let user_balance_cache: UserBalanceCache = Cache::builder()
+        let user_balance_cache: UserBalanceCache = CacheBuilder::new(max_users)
             .name("user_balance")
             .time_to_live(Duration::from_secs(600))
             .build()
@@ -406,9 +410,6 @@ impl Web3ProxyApp {
                 .time_to_idle(Duration::from_secs(3600))
                 .weigher(move |k, v| jsonrpc_weigher.weigh(k, v))
                 .build();
-
-        // TODO: how should we handle hitting this max?
-        let max_users = 20_000;
 
         // create semaphores for concurrent connection limits
         // TODO: time-to-idle on these. need to make sure the arcs aren't anywhere though. so maybe arc isn't correct and it should be refs
