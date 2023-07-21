@@ -257,16 +257,18 @@ impl StatBuffer {
                 } else if user_balance.active_premium() {
                     active_premium = true;
 
-                    // paid credits were not used, but now we have active premium. invalidate the caches
-                    // TODO: this seems unliekly. should we warn if this happens so we can investigate?
-                    if let Err(err) = self
-                        .user_balance_cache
-                        .invalidate(&user_balance.user_id, &db_conn, &self.rpc_secret_key_cache)
-                        .await
-                    {
-                        // was premium, but isn't anymore due to paying for this query. clear the cache
-                        // TODO: stop at <$0.000001 instead of negative?
-                        warn!(?err, "unable to clear caches");
+                    if user_balance.downgrade_tier_id.is_some() {
+                        // paid credits were not used, but now we have active premium. invalidate the caches
+                        // TODO: this seems unliekly. should we warn if this happens so we can investigate?
+                        if let Err(err) = self
+                            .user_balance_cache
+                            .invalidate(&user_balance.user_id, &db_conn, &self.rpc_secret_key_cache)
+                            .await
+                        {
+                            // was premium, but isn't anymore due to paying for this query. clear the cache
+                            // TODO: stop at <$0.000001 instead of negative?
+                            warn!(?err, "unable to clear caches");
+                        }
                     }
                 }
 
@@ -284,16 +286,12 @@ impl StatBuffer {
         }
 
         if self.influxdb_client.is_some() {
-            // TODO: round the timestamp at all?
-
-            if active_premium {
-                if let Some(opt_in_timeseries_key) = stat.owned_timeseries_key() {
-                    self.opt_in_timeseries_buffer
-                        .entry(opt_in_timeseries_key)
-                        .or_default()
-                        .add(stat.clone(), approximate_balance_remaining)
-                        .await;
-                }
+            if let Some(opt_in_timeseries_key) = stat.owned_timeseries_key(active_premium) {
+                self.opt_in_timeseries_buffer
+                    .entry(opt_in_timeseries_key)
+                    .or_default()
+                    .add(stat.clone(), approximate_balance_remaining)
+                    .await;
             }
 
             let global_timeseries_key = stat.global_timeseries_key();

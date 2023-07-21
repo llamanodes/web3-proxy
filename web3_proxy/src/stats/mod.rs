@@ -162,8 +162,8 @@ impl RpcQueryStats {
     }
 
     /// stats for a single key
-    fn owned_timeseries_key(&self) -> Option<RpcQueryKey> {
-        if !self.paid_credits_used {
+    fn owned_timeseries_key(&self, active_premium: bool) -> Option<RpcQueryKey> {
+        if !active_premium {
             return None;
         }
 
