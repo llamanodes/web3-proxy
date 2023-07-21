@@ -13,7 +13,7 @@ use migration::sea_orm::prelude::Decimal;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::time::{interval, sleep};
-use tracing::{error, info, trace, warn, Instrument};
+use tracing::{debug, error, info, trace, warn, Instrument};
 use ulid::Ulid;
 
 #[derive(Debug, Default)]
@@ -144,7 +144,7 @@ impl StatBuffer {
                     let (count, new_frontend_requests) = self.save_relational_stats().await;
                     if count > 0 {
                         db_frontend_requests += new_frontend_requests;
-                        trace!("Saved {} stats for {} requests to the relational db", count, new_frontend_requests);
+                        debug!("Saved {} stats for {} requests to the relational db", count, new_frontend_requests);
                     }
                 }
                 _ = tsdb_save_interval.tick() => {
@@ -152,7 +152,7 @@ impl StatBuffer {
                     let (count, new_frontend_requests)  = self.save_tsdb_stats().await;
                     if count > 0 {
                         tsdb_frontend_requests += new_frontend_requests;
-                        trace!("Saved {} stats for {} requests to the tsdb", count, new_frontend_requests);
+                        debug!("Saved {} stats for {} requests to the tsdb", count, new_frontend_requests);
                     }
                 }
                 x = flush_receiver.recv() => {

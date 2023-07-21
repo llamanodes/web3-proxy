@@ -82,13 +82,13 @@ impl MigrateStatsToV2SubCommand {
         let emitter_spawn = StatBuffer::try_spawn(
             BILLING_PERIOD_SECONDS,
             top_config.app.chain_id,
-            30,
+            60,
             top_config.app.influxdb_bucket.clone(),
             influxdb_client.clone(),
             rpc_secret_key_cache,
             user_balance_cache,
             rpc_account_shutdown_recevier,
-            1,
+            30,
             flush_sender,
             flush_receiver,
         )

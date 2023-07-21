@@ -335,7 +335,7 @@ impl Web3ProxyApp {
             rpc_secret_key_cache.clone(),
             user_balance_cache.clone(),
             stat_buffer_shutdown_receiver,
-            1,
+            30,
             flush_stat_buffer_sender.clone(),
             flush_stat_buffer_receiver,
         )? {
