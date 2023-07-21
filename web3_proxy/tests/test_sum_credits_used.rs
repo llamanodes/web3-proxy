@@ -2,13 +2,11 @@ mod common;
 
 use crate::common::{
     admin_increases_balance::admin_increase_balance,
-    anvil::TestAnvil,
     create_admin::create_user_as_admin,
     create_user::{create_user, set_user_tier},
-    mysql::TestMysql,
     rpc_key::user_get_provider,
     user_balance::user_get_balance,
-    TestApp,
+    TestAnvil, TestApp, TestInflux, TestMysql,
 };
 use ethers::prelude::U64;
 use migration::sea_orm::prelude::Decimal;
@@ -23,10 +21,11 @@ async fn test_sum_credits_used() {
     let a = TestAnvil::spawn(999_001_999).await;
 
     let db = TestMysql::spawn().await;
+    let i = TestInflux::spawn().await;
 
     let db_conn = db.conn().await;
 
-    let x = TestApp::spawn(&a, Some(&db), None).await;
+    let x = TestApp::spawn(&a, Some(&db), Some(&i)).await;
 
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
@@ -95,7 +94,8 @@ async fn test_sum_credits_used() {
     let flushed = x.flush_stats().await.unwrap();
     // TODO: this was 2 when we flushed stats for anon users. that was temporarily disabled. it should be turned back on once indexes are fixed
     assert_eq!(flushed.relational, 1, "relational");
-    assert_eq!(flushed.timeseries, 0, "timeseries");
+    // TODO: how many should this actually be?
+    assert_eq!(flushed.timeseries, 1, "timeseries");
 
     // Give user wallet $1000
     admin_increase_balance(&x, &r, &admin_login_response, &user_wallet, 1000.into()).await;
@@ -126,6 +126,7 @@ async fn test_sum_credits_used() {
     // flush stats
     let flushed = x.flush_stats().await.unwrap();
     assert_eq!(flushed.relational, 1);
+    assert_eq!(flushed.timeseries, 2);
 
     // check balance
     let balance: Balance = user_get_balance(&x, &r, &user_login_response).await;
@@ -162,6 +163,7 @@ async fn test_sum_credits_used() {
     // flush stats
     let flushed = x.flush_stats().await.unwrap();
     assert_eq!(flushed.relational, 1);
+    assert_eq!(flushed.timeseries, 2);
 
     // check balance
     info!("checking the final balance");
