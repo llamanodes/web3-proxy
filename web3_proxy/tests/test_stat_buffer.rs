@@ -5,6 +5,7 @@ use moka::future::Cache;
 use tokio::sync::{broadcast, mpsc};
 use web3_proxy::{caches::UserBalanceCache, stats::StatBuffer};
 
+#[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
 #[test_log::test(tokio::test)]
 async fn test_two_buffers() {
     let i = TestInflux::spawn().await;
