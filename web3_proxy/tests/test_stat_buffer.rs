@@ -16,7 +16,7 @@ async fn test_two_buffers() {
     let influxdb_bucket = Some(i.bucket.clone());
     let influxdb_client = Some(i.client.clone());
     let rpc_secret_key_cache = Cache::builder().build();
-    let tsdb_save_interval_seconds = 1;
+    let tsdb_save_interval_seconds = 30;
     let user_balance_cache: UserBalanceCache = Cache::builder().build().into();
 
     let (shutdown_sender, shutdown_receiver_1) = broadcast::channel(1);

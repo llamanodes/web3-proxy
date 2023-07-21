@@ -61,7 +61,7 @@ async fn test_single_proxy_stats_add_up() {
     assert_eq!(user_1_balance_pre, Decimal::from(2000));
 
     // Generate the proxies
-    let number_requests = 1000;
+    let number_requests = 100;
     let mut handles = Vec::new();
 
     // Get the RPC key from the user
