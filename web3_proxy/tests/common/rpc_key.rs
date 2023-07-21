@@ -1,7 +1,6 @@
-use std::time::Duration;
-
-use crate::TestApp;
+use super::TestApp;
 use serde::Deserialize;
+use std::time::Duration;
 use tracing::info;
 use ulid::Ulid;
 use web3_proxy::{

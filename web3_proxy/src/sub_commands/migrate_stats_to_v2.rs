@@ -13,6 +13,7 @@ use migration::sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect, UpdateResult,
 };
 use migration::{Expr, Value};
+use moka::future::Cache;
 use parking_lot::Mutex;
 use std::num::NonZeroU64;
 use std::sync::Arc;
@@ -74,7 +75,8 @@ impl MigrateStatsToV2SubCommand {
 
         let (flush_sender, flush_receiver) = mpsc::channel(1);
 
-        let instance_hash = Ulid::new().to_string();
+        let rpc_secret_key_cache = Cache::builder().build();
+        let user_balance_cache = Cache::builder().build().into();
 
         // Spawn the stat-sender
         let emitter_spawn = StatBuffer::try_spawn(
@@ -83,13 +85,12 @@ impl MigrateStatsToV2SubCommand {
             30,
             top_config.app.influxdb_bucket.clone(),
             influxdb_client.clone(),
-            None,
-            None,
+            rpc_secret_key_cache,
+            user_balance_cache,
             rpc_account_shutdown_recevier,
             1,
             flush_sender,
             flush_receiver,
-            instance_hash,
         )
         .context("Error spawning stat buffer")?
         .context("No stat buffer spawned. Maybe missing influx or db credentials?")?;

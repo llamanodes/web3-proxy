@@ -2,7 +2,7 @@
 /// Includes
 ///     - get referral link
 ///     - getting code for referral (shared and used)
-use crate::TestApp;
+use super::TestApp;
 use tracing::info;
 use ulid::Ulid;
 use web3_proxy::frontend::users::authentication::LoginPostResponse;

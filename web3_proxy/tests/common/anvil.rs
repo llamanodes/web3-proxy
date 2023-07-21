@@ -15,6 +15,7 @@ pub struct TestAnvil {
 }
 
 impl TestAnvil {
+    #[allow(unused)]
     pub async fn spawn(chain_id: u64) -> Self {
         info!(?chain_id);
 

@@ -14,6 +14,7 @@ use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::time::{interval, sleep};
 use tracing::{error, info, trace, warn};
+use ulid::Ulid;
 
 #[derive(Debug, Default)]
 pub struct BufferedRpcQueryStats {
@@ -68,13 +69,12 @@ impl StatBuffer {
         db_save_interval_seconds: u32,
         influxdb_bucket: Option<String>,
         mut influxdb_client: Option<influxdb2::Client>,
-        rpc_secret_key_cache: Option<RpcSecretKeyCache>,
-        user_balance_cache: Option<UserBalanceCache>,
+        rpc_secret_key_cache: RpcSecretKeyCache,
+        user_balance_cache: UserBalanceCache,
         shutdown_receiver: broadcast::Receiver<()>,
         tsdb_save_interval_seconds: u32,
         flush_sender: mpsc::Sender<oneshot::Sender<FlushedStats>>,
         flush_receiver: mpsc::Receiver<oneshot::Sender<FlushedStats>>,
-        instance_hash: String,
     ) -> anyhow::Result<Option<SpawnedStatBuffer>> {
         if influxdb_bucket.is_none() {
             influxdb_client = None;
@@ -83,6 +83,8 @@ impl StatBuffer {
         let (stat_sender, stat_receiver) = mpsc::unbounded_channel();
 
         let timestamp_precision = TimestampPrecision::Seconds;
+
+        let instance_hash = Ulid::new().to_string();
 
         let mut new = Self {
             accounting_db_buffer: Default::default(),
@@ -94,10 +96,10 @@ impl StatBuffer {
             influxdb_client,
             instance_hash,
             opt_in_timeseries_buffer: Default::default(),
-            rpc_secret_key_cache: rpc_secret_key_cache.unwrap(),
+            rpc_secret_key_cache,
             timestamp_precision,
             tsdb_save_interval_seconds,
-            user_balance_cache: user_balance_cache.unwrap(),
+            user_balance_cache,
 
             _flush_sender: flush_sender,
         };
@@ -435,13 +437,5 @@ impl StatBuffer {
         }
 
         count
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_something() {
-        panic!()
     }
 }

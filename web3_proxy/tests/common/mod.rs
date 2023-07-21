@@ -12,4 +12,7 @@ pub mod rpc_key;
 pub mod stats_accounting;
 pub mod user_balance;
 
+pub use self::anvil::TestAnvil;
 pub use self::app::TestApp;
+pub use self::influx::TestInflux;
+pub use self::mysql::TestMysql;

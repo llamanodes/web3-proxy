@@ -44,6 +44,7 @@ pub struct TestApp {
 }
 
 impl TestApp {
+    #[allow(unused)]
     pub async fn spawn(
         anvil: &TestAnvil,
         db: Option<&TestMysql>,

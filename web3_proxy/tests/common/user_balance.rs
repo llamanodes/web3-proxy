@@ -1,4 +1,4 @@
-use crate::TestApp;
+use super::TestApp;
 use serde_json::json;
 use tracing::{info, trace};
 use web3_proxy::balance::Balance;

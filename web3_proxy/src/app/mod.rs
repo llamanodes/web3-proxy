@@ -55,7 +55,6 @@ use tokio::sync::{broadcast, mpsc, oneshot, watch, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, timeout};
 use tracing::{error, info, trace, warn, Level};
-use ulid::Ulid;
 
 // TODO: make this customizable?
 // TODO: include GIT_REF in here. i had trouble getting https://docs.rs/vergen/latest/vergen/ to work with a workspace. also .git is in .dockerignore
@@ -320,9 +319,6 @@ impl Web3ProxyApp {
             .build()
             .into();
 
-        // Generate the instance name
-        let instance_hash = Ulid::new().to_string();
-
         // create a channel for receiving stats
         // we do this in a channel so we don't slow down our response to the users
         // stats can be saved in mysql, influxdb, both, or none
@@ -332,13 +328,12 @@ impl Web3ProxyApp {
             60,
             top_config.app.influxdb_bucket.clone(),
             influxdb_client.clone(),
-            Some(rpc_secret_key_cache.clone()),
-            Some(user_balance_cache.clone()),
+            rpc_secret_key_cache.clone(),
+            user_balance_cache.clone(),
             stat_buffer_shutdown_receiver,
             1,
             flush_stat_buffer_sender.clone(),
             flush_stat_buffer_receiver,
-            instance_hash,
         )? {
             // since the database entries are used for accounting, we want to be sure everything is saved before exiting
             important_background_handles.push(spawned_stat_buffer.background_handle);
