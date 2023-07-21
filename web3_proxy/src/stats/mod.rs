@@ -12,6 +12,7 @@ use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::rpcs::one::Web3Rpc;
 use anyhow::{anyhow, Context};
+use axum::headers::Origin;
 use chrono::{DateTime, Months, TimeZone, Utc};
 use derive_more::From;
 use entities::{referee, referrer, rpc_accounting_v2};
@@ -85,6 +86,8 @@ pub struct RpcQueryKey {
     user_error_response: bool,
     /// the rpc method used.
     method: Cow<'static, str>,
+    /// origin tracking **was** opt-in. Now, it is always "None"
+    origin: Option<Origin>,
     /// None if the public url was used.
     rpc_secret_key_id: Option<NonZeroU64>,
     /// None if the public url was used.
@@ -110,10 +113,13 @@ impl RpcQueryStats {
     fn accounting_key(&self, period_seconds: i64) -> RpcQueryKey {
         let response_timestamp = round_timestamp(self.response_timestamp, period_seconds);
 
+        // TODO: change this to use 0 for anonymous queries
         let rpc_secret_key_id = self.authorization.checks.rpc_secret_key_id;
-        let rpc_key_user_id = self.authorization.checks.user_id.try_into().ok();
 
         let method = self.method.clone();
+
+        // we used to optionally store origin, but wallets don't set it, so its almost always None
+        let origin = None;
 
         // user_error_response is always set to false because we don't bother tracking this in the database
         let user_error_response = false;
@@ -121,12 +127,13 @@ impl RpcQueryStats {
         // Depending on method, add some arithmetic around calculating credits_used
         // I think balance should not go here, this looks more like a key thingy
         RpcQueryKey {
+            response_timestamp,
             archive_needed: self.archive_request,
             error_response: self.error_response,
             method,
-            response_timestamp,
-            rpc_key_user_id,
             rpc_secret_key_id,
+            rpc_key_user_id: self.authorization.checks.user_id.try_into().ok(),
+            origin,
             user_error_response,
         }
     }
@@ -136,6 +143,8 @@ impl RpcQueryStats {
     fn global_timeseries_key(&self) -> RpcQueryKey {
         // we include the method because that can be helpful for predicting load
         let method = self.method.clone();
+        // we don't store origin in the timeseries db. its only used for optional accounting
+        let origin = None;
         // everyone gets grouped together
         let rpc_secret_key_id = None;
         let rpc_key_user_id = None;
@@ -148,6 +157,7 @@ impl RpcQueryStats {
             rpc_secret_key_id,
             rpc_key_user_id,
             user_error_response: self.user_error_response,
+            origin,
         }
     }
 
@@ -156,6 +166,9 @@ impl RpcQueryStats {
         if !active_premium {
             return None;
         }
+
+        // we don't store origin in the timeseries db. its only optionaly used for accounting
+        let origin = None;
 
         let method = self.method.clone();
 
@@ -167,6 +180,7 @@ impl RpcQueryStats {
             rpc_secret_key_id: self.authorization.checks.rpc_secret_key_id,
             rpc_key_user_id: self.authorization.checks.user_id.try_into().ok(),
             user_error_response: self.user_error_response,
+            origin,
         };
 
         Some(key)
