@@ -1,9 +1,14 @@
 mod common;
 
 use crate::common::{
-    admin_increases_balance::admin_increase_balance, anvil::TestAnvil,
-    create_admin::create_user_as_admin, create_user::create_user, mysql::TestMysql,
-    rpc_key::user_get_provider, user_balance::user_get_balance, TestApp,
+    admin_increases_balance::admin_increase_balance,
+    anvil::TestAnvil,
+    create_admin::create_user_as_admin,
+    create_user::{create_user, set_user_tier},
+    mysql::TestMysql,
+    rpc_key::user_get_provider,
+    user_balance::user_get_balance,
+    TestApp,
 };
 use ethers::prelude::U64;
 use migration::sea_orm::prelude::Decimal;
@@ -19,6 +24,8 @@ async fn test_sum_credits_used() {
 
     let db = TestMysql::spawn().await;
 
+    let db_conn = db.conn().await;
+
     let x = TestApp::spawn(&a, Some(&db), None).await;
 
     let r = reqwest::Client::builder()
@@ -33,6 +40,14 @@ async fn test_sum_credits_used() {
     // log in to create users
     let admin_login_response = create_user_as_admin(&x, &db, &r, &admin_wallet).await;
     let user_login_response = create_user(&x, &r, &user_wallet, None).await;
+
+    // make the admin and user "Premium" users (this will eventually be the default, but is not yet)
+    set_user_tier(&x, &db_conn, user_login_response.user.clone(), "Premium")
+        .await
+        .unwrap();
+    set_user_tier(&x, &db_conn, admin_login_response.user.clone(), "Premium")
+        .await
+        .unwrap();
 
     info!("starting balance");
     let balance: Balance = user_get_balance(&x, &r, &user_login_response).await;
