@@ -51,7 +51,7 @@ impl TestApp {
         influx: Option<&TestInflux>,
     ) -> Self {
         let chain_id = anvil.instance.chain_id();
-        let num_workers = 2;
+        let num_workers = 4;
 
         // TODO: move basic setup into a test fixture
         let path = env::var("PATH").unwrap();
@@ -128,7 +128,7 @@ impl TestApp {
             thread::spawn(move || {
                 let runtime = Builder::new_multi_thread()
                     .enable_all()
-                    .worker_threads(2)
+                    .worker_threads(num_workers)
                     .build()
                     .unwrap();
 
