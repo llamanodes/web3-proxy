@@ -401,12 +401,20 @@ impl StatBuffer {
             // TODO: use stream::iter properly to avoid allocating this Vec
             let mut points = vec![];
 
+            let now = chrono::Utc::now().to_rfc3339();
+
             for (key, stat) in self.global_timeseries_buffer.drain() {
                 // TODO: i don't like passing key (which came from the stat) to the function on the stat. but it works for now
                 let new_frontend_requests = stat.frontend_requests;
 
                 match stat
-                    .build_timeseries_point("global_proxy", self.chain_id, key, &self.instance_hash)
+                    .build_timeseries_point(
+                        "global_proxy",
+                        self.chain_id,
+                        key,
+                        &self.instance_hash,
+                        &now,
+                    )
                     .await
                 {
                     Ok(point) => {
@@ -423,7 +431,13 @@ impl StatBuffer {
             for (key, stat) in self.opt_in_timeseries_buffer.drain() {
                 // TODO: i don't like passing key (which came from the stat) to the function on the stat. but it works for now
                 match stat
-                    .build_timeseries_point("opt_in_proxy", self.chain_id, key, &self.instance_hash)
+                    .build_timeseries_point(
+                        "opt_in_proxy",
+                        self.chain_id,
+                        key,
+                        &self.instance_hash,
+                        &now,
+                    )
                     .await
                 {
                     Ok(point) => {

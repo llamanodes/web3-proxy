@@ -88,7 +88,7 @@ impl MigrateStatsToV2SubCommand {
             rpc_secret_key_cache,
             user_balance_cache,
             rpc_account_shutdown_recevier,
-            30,
+            60,
             flush_sender,
             flush_receiver,
         )

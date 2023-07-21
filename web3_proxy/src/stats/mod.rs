@@ -481,6 +481,7 @@ impl BufferedRpcQueryStats {
         chain_id: u64,
         key: RpcQueryKey,
         instance: &str,
+        now: &str,
     ) -> anyhow::Result<DataPoint> {
         let mut builder = DataPoint::builder(measurement)
             .tag("archive_needed", key.archive_needed.to_string())
@@ -489,6 +490,7 @@ impl BufferedRpcQueryStats {
             .tag("instance", instance)
             .tag("method", key.method)
             .tag("user_error_response", key.user_error_response.to_string())
+            .tag("save_time", now)
             .timestamp(key.response_timestamp)
             .field("backend_requests", self.backend_requests as i64)
             .field("cache_hits", self.cache_hits as i64)
