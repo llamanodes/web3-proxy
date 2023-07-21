@@ -68,7 +68,7 @@ mimalloc = { version = "0.1.37", optional = true}
 moka = { version = "0.11.2", default-features = false, features = ["atomic64", "future", "parking_lot", "quanta", "triomphe"] }
 nanorand = { version = "0.7.0", default-features = false, features = ["std", "tls", "wyrand"] }
 num = { version = "0.4.1" }
-num-traits = "0.2.15"
+num-traits = "0.2.16"
 once_cell = { version = "1.18.0" }
 ordered-float = {version = "3.7.0" }
 pagerduty-rs = { version = "0.1.6", default-features = false, features = ["async", "rustls", "sync"] }
@@ -93,7 +93,7 @@ tokio-console = { version = "0.1.9", optional = true }
 tokio-stream = { version = "0.1.14", features = ["sync"] }
 toml = "0.7.6"
 tower = { version = "0.4.13", features = ["timeout", "tracing"] }
-tower-http = { version = "0.4.2", features = ["cors", "sensitive-headers", "trace"] }
+tower-http = { version = "0.4.3", features = ["cors", "sensitive-headers", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ulid = { version = "1.0.0", features = ["rand", "uuid", "serde"] }
