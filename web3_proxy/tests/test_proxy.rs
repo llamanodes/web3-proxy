@@ -20,6 +20,9 @@ async fn it_migrates_the_db() {
 
     // we call flush stats more to be sure it works than because we expect it to save any stats
     x.flush_stats().await.unwrap();
+
+    // drop x first to avoid spurious warnings about anvil/influx/mysql shutting down before the app
+    drop(x);
 }
 
 #[test_log::test(tokio::test)]

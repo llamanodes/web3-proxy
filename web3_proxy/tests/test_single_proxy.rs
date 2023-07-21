@@ -232,7 +232,8 @@ async fn test_single_proxy_stats_add_up() {
     //     user_get_influx_stats_detailed
     // );
 
-    // drop x before the other things so that we don't get spurious errors
+
+    // drop x first to avoid spurious warnings about anvil/influx/mysql shutting down before the app
     drop(x);
 }
 

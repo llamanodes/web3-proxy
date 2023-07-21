@@ -562,6 +562,9 @@ async fn test_referral_bonus_concurrent_referrer_only() {
         referrer_balance_pre + difference / Decimal::from(10),
         referrer_balance_post
     );
+
+    // drop x first to avoid spurious warnings about anvil/influx/mysql shutting down before the app
+    drop(x);
 }
 
 #[cfg_attr(not(feature = "tests-needing-docker"), ignore)]
@@ -747,4 +750,7 @@ async fn test_referral_bonus_concurrent_referrer_and_user() {
         (referrer_balance_pre - user_difference + user_difference / Decimal::from(10)),
         referrer_balance_post
     );
+
+    // drop x first to avoid spurious warnings about anvil/influx/mysql shutting down before the app
+    drop(x);
 }

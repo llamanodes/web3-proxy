@@ -264,6 +264,10 @@ async fn test_multiple_proxies_stats_add_up() {
     //     "user_get_influx_stats_detailed stats are: {:?}",
     //     user_get_influx_stats_detailed
     // );
+
+    // drop x first to avoid spurious warnings about anvil/influx/mysql shutting down before the app
+    drop(x_0);
+    drop(x_1);
 }
 
 // Gotta compare stats with influx:

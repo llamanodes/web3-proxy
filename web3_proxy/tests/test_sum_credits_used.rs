@@ -215,4 +215,7 @@ async fn test_sum_credits_used() {
     assert_eq!(admin_balance.remaining(), 0.into(), "remaining");
 
     // TODO: query "user 0" to get the public counts
+
+    // drop x first to avoid spurious warnings about anvil/influx/mysql shutting down before the app
+    drop(x);
 }
