@@ -299,6 +299,8 @@ pub async fn serve(
         // 404 for any unknown routes
         .fallback(errors::handler_404);
 
+    // TODO: https://docs.rs/tower-http/latest/tower_http/propagate_header/index.html
+
     let server_builder = if let Some(listener) = ListenFd::from_env().take_tcp_listener(0)? {
         // use systemd socket magic for no downtime deploys
         let addr = listener.local_addr()?;

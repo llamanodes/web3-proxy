@@ -307,13 +307,13 @@ impl Web3ProxyApp {
         // if there is no database of users, there will be no keys and so this will be empty
         // TODO: max_capacity from config
         // TODO: ttl from config
-        let rpc_secret_key_cache = CacheBuilder::new(10_000)
+        let rpc_secret_key_cache = Cache::builder()
             .name("rpc_secret_key")
             .time_to_live(Duration::from_secs(600))
             .build();
 
         // TODO: TTL left low, this could also be a solution instead of modifiying the cache, that may be disgusting across threads / slow anyways
-        let user_balance_cache: UserBalanceCache = CacheBuilder::new(10_000)
+        let user_balance_cache: UserBalanceCache = Cache::builder()
             .name("user_balance")
             .time_to_live(Duration::from_secs(600))
             .build()
