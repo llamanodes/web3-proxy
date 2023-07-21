@@ -499,7 +499,7 @@ async fn test_referral_bonus_concurrent_referrer_only() {
     let number_requests = 100;
     // Spin up concurrent requests ...
     let mut handles = Vec::with_capacity(number_requests);
-    for _ in 1..number_requests {
+    for _ in 0..number_requests {
         let url = x.proxy_provider.url().clone();
         let secret_key = rpc_keys.secret_key;
 

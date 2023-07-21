@@ -441,7 +441,7 @@ impl StatBuffer {
             if count > 0 {
                 // TODO: put max_batch_size in config?
                 // TODO: i think the real limit is the byte size of the http request. so, a simple line count won't work very well
-                let max_batch_size = 100;
+                let max_batch_size = 1000;
 
                 let mut num_left = count;
 
