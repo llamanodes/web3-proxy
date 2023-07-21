@@ -29,7 +29,7 @@ use tokio::sync::broadcast;
 use tower::timeout::TimeoutLayer;
 use tower::ServiceBuilder;
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tower_http::{cors::CorsLayer, normalize_path::NormalizePathLayer, trace::TraceLayer};
 use tracing::{error_span, info};
 use ulid::Ulid;
 
@@ -77,32 +77,17 @@ pub async fn serve(
         )
         // authenticated with and without trailing slash
         .route(
-            "/rpc/:rpc_key/",
-            post(rpc_proxy_http::proxy_web3_rpc_with_key)
-                .get(rpc_proxy_ws::websocket_handler_with_key),
-        )
-        .route(
             "/rpc/:rpc_key",
             post(rpc_proxy_http::proxy_web3_rpc_with_key)
                 .get(rpc_proxy_ws::websocket_handler_with_key),
         )
-        // authenticated debug route with and without trailing slash
-        .route(
-            "/debug/:rpc_key/",
-            post(rpc_proxy_http::debug_proxy_web3_rpc_with_key)
-                .get(rpc_proxy_ws::debug_websocket_handler_with_key),
-        )
+        // authenticated debug route
         .route(
             "/debug/:rpc_key",
             post(rpc_proxy_http::debug_proxy_web3_rpc_with_key)
                 .get(rpc_proxy_ws::debug_websocket_handler_with_key),
         )
-        // public fastest with and without trailing slash
-        .route(
-            "/fastest/",
-            post(rpc_proxy_http::fastest_proxy_web3_rpc)
-                .get(rpc_proxy_ws::fastest_websocket_handler),
-        )
+        // public fastest
         .route(
             "/fastest",
             post(rpc_proxy_http::fastest_proxy_web3_rpc)
@@ -110,30 +95,16 @@ pub async fn serve(
         )
         // authenticated fastest with and without trailing slash
         .route(
-            "/fastest/:rpc_key/",
-            post(rpc_proxy_http::fastest_proxy_web3_rpc_with_key)
-                .get(rpc_proxy_ws::fastest_websocket_handler_with_key),
-        )
-        .route(
             "/fastest/:rpc_key",
             post(rpc_proxy_http::fastest_proxy_web3_rpc_with_key)
                 .get(rpc_proxy_ws::fastest_websocket_handler_with_key),
         )
         // public versus
         .route(
-            "/versus/",
-            post(rpc_proxy_http::versus_proxy_web3_rpc).get(rpc_proxy_ws::versus_websocket_handler),
-        )
-        .route(
             "/versus",
             post(rpc_proxy_http::versus_proxy_web3_rpc).get(rpc_proxy_ws::versus_websocket_handler),
         )
-        // authenticated versus with and without trailing slash
-        .route(
-            "/versus/:rpc_key/",
-            post(rpc_proxy_http::versus_proxy_web3_rpc_with_key)
-                .get(rpc_proxy_ws::versus_websocket_handler_with_key),
-        )
+        // authenticated versus
         .route(
             "/versus/:rpc_key",
             post(rpc_proxy_http::versus_proxy_web3_rpc_with_key)
@@ -256,6 +227,8 @@ pub async fn serve(
         // layers are ordered bottom up
         // the last layer is first for requests and last for responses
         //
+        // Remove trailing slashes
+        .layer(NormalizePathLayer::trim_trailing_slash())
         // Mark the `Authorization` request header as sensitive so it doesn't show in logs
         .layer(SetSensitiveRequestHeadersLayer::new(once(AUTHORIZATION)))
         // handle cors
