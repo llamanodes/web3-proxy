@@ -678,10 +678,12 @@ impl Web3Rpc {
             };
 
             futures.push(flatten_handle(tokio::spawn(f)));
+        } else {
+            unimplemented!("there should always be a disconnect watch!");
         }
 
         // health check that runs if there haven't been any recent requests
-        {
+        if block_and_rpc_sender.is_some() {
             // TODO: move this into a proper function
             let rpc = self.clone();
 
