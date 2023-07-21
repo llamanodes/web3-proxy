@@ -147,6 +147,7 @@ impl RpcQueryStats {
         let origin = None;
         // everyone gets grouped together
         let rpc_secret_key_id = None;
+        let rpc_key_user_id = None;
 
         RpcQueryKey {
             response_timestamp: self.response_timestamp,
@@ -154,7 +155,7 @@ impl RpcQueryStats {
             error_response: self.error_response,
             method,
             rpc_secret_key_id,
-            rpc_key_user_id: self.authorization.checks.user_id.try_into().ok(),
+            rpc_key_user_id,
             user_error_response: self.user_error_response,
             origin,
         }
