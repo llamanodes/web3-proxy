@@ -13,7 +13,7 @@ use migration::sea_orm::prelude::Decimal;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::time::{interval, sleep};
-use tracing::{error, info, trace, warn};
+use tracing::{error, info, trace, warn, Instrument};
 use ulid::Ulid;
 
 #[derive(Debug, Default)]
@@ -277,29 +277,46 @@ impl StatBuffer {
 
             let accounting_key = stat.accounting_key(self.billing_period_seconds);
             if accounting_key.is_registered() {
+                let span = tracing::trace_span!(
+                    "accounting",
+                    key = tracing::field::debug(&accounting_key)
+                )
+                .or_current();
                 self.accounting_db_buffer
                     .entry(accounting_key)
                     .or_default()
                     .add(stat.clone(), approximate_balance_remaining)
+                    .instrument(span)
                     .await;
             }
         }
 
         if self.influxdb_client.is_some() {
             if let Some(opt_in_timeseries_key) = stat.owned_timeseries_key(active_premium) {
+                let span = tracing::trace_span!(
+                    "owned_timeseries",
+                    key = tracing::field::debug(&opt_in_timeseries_key)
+                )
+                .or_current();
                 self.opt_in_timeseries_buffer
                     .entry(opt_in_timeseries_key)
                     .or_default()
                     .add(stat.clone(), approximate_balance_remaining)
+                    .instrument(span)
                     .await;
             }
 
             let global_timeseries_key = stat.global_timeseries_key();
-
+            let span = tracing::trace_span!(
+                "global_timeseries",
+                key = tracing::field::debug(&global_timeseries_key)
+            )
+            .or_current();
             self.global_timeseries_buffer
                 .entry(global_timeseries_key)
                 .or_default()
                 .add(stat, approximate_balance_remaining)
+                .instrument(span)
                 .await;
         }
 

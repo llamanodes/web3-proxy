@@ -48,6 +48,7 @@ check-if-email-exists = "0.9.0"
 chrono = { version = "0.4.26" }
 console-subscriber = { version = "0.1.10", features = ["env-filter", "parking_lot"], optional = true }
 counter = "0.5.7"
+derivative = "2.2.0"
 derive_more = { version = "0.99.17", features = ["nightly"] }
 ethbloom = { version = "0.13.0" }
 ethers = { version = "2.0.8", default-features = false, features = ["rustls", "ws"] }
@@ -83,6 +84,7 @@ rust_decimal = { version = "1.30.0", features = ["maths"] }
 sentry = { version = "0.31.5", default-features = false, features = ["anyhow", "backtrace", "contexts", "panic", "reqwest", "rustls", "serde_json", "tracing"] }
 sentry-tracing = "0.31.5"
 serde = { version = "1.0.173" }
+serde-inline-default = "0.1.1"
 serde_json = { version = "1.0.103", default-features = false, features = ["raw_value"] }
 serde_prometheus = "0.2.3"
 strum = { version = "0.25.0", features = ["derive"] }
@@ -102,8 +104,6 @@ uuid = { version = "1.4.1", default-features = false, features = ["fast-rng", "v
 
 # TODO: why doesn't this work in dev-dependencies
 test-log = { version = "0.2.12", default-features = false, features = ["trace"] }
-serde-inline-default = "0.1.1"
-derivative = "2.2.0"
 
 [dev-dependencies]
 env_logger = "0.10"
