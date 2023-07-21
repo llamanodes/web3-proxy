@@ -164,7 +164,7 @@ impl TestMysql {
     }
 
     pub async fn conn(&self) -> DatabaseConnection {
-        connect_db(self.url.clone().unwrap(), 1, 5).await.unwrap()
+        connect_db(self.url.clone().unwrap(), 1, 99).await.unwrap()
     }
 }
 

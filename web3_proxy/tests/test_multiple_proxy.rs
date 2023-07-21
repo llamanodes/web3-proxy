@@ -121,12 +121,12 @@ async fn test_multiple_proxies_stats_add_up() {
     let flush_0_count_0 = x_0.flush_stats().await.unwrap();
     let flush_1_count_0 = x_1.flush_stats().await.unwrap();
 
-    // Wait a bit
-    // TODO: instead of waiting a bit, make flush_stats wait until all stats are handled before returning
-    sleep(Duration::from_secs(5)).await;
     info!("Counts 0 are: {:?}", flush_0_count_0);
     assert_eq!(flush_0_count_0.relational, 1);
     assert_eq!(flush_0_count_0.timeseries, 2);
+
+    // Wait a bit. TODO: instead of waiting. make flush stats more robust
+    sleep(Duration::from_secs(5)).await;
     info!("Counts 1 are: {:?}", flush_1_count_0);
     assert_eq!(flush_1_count_0.relational, 1);
     assert_eq!(flush_1_count_0.timeseries, 2);

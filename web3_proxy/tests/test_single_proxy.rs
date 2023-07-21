@@ -100,14 +100,12 @@ async fn test_single_proxy_stats_add_up() {
     // TODO: the test should maybe pause time so that stats definitely flush from our queries.
     let flush_0_count_0 = x.flush_stats().await.unwrap();
 
-    // Wait a bit
-    // TODO: instead of waiting a bit, make flush_stats wait until all stats are handled before returning
-    sleep(Duration::from_secs(5)).await;
     warn!("Counts 0 are: {:?}", flush_0_count_0);
     assert_eq!(flush_0_count_0.relational, 1);
     assert_eq!(flush_0_count_0.timeseries, 2);
 
-    // no more stats should arrive
+    // Wait a bit. TODO: instead of waiting. make flush stats more robust
+    sleep(Duration::from_secs(5)).await;
     let flush_0_count_1 = x.flush_stats().await.unwrap();
     warn!("Counts 0 are: {:?}", flush_0_count_1);
     assert_eq!(flush_0_count_1.relational, 0);
@@ -233,6 +231,9 @@ async fn test_single_proxy_stats_add_up() {
     //     "user_get_influx_stats_detailed stats are: {:?}",
     //     user_get_influx_stats_detailed
     // );
+
+    // drop x before the other things so that we don't get spurious errors
+    drop(x);
 }
 
 // Gotta compare stats with influx:
