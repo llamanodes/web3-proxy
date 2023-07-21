@@ -123,8 +123,10 @@ impl ProxydSubCommand {
                                     // TODO: print the differences
                                     // TODO: first run seems to always see differences. why?
                                     info!("config @ {:?} changed", top_config_path);
-                                    config_sender.send(new_top_config.clone()).unwrap();
-                                    current_config = new_top_config;
+                                    match config_sender.send(new_top_config.clone()) {
+                                        Ok(()) => current_config = new_top_config,
+                                        Err(err) => error!(?err, "unable to apply new config"),
+                                    }
                                 }
                             }
                             Err(err) => {
