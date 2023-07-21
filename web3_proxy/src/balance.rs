@@ -11,10 +11,11 @@ use migration::{Func, SimpleExpr};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::fmt::Debug;
 use tracing::trace;
 
 /// Implements the balance getter which combines data from several tables
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 pub struct Balance {
     pub admin_deposits: Decimal,
     pub chain_deposits: Decimal,
@@ -30,6 +31,32 @@ pub struct Balance {
     pub user_id: u64,
     pub user_tier_id: u64,
     pub downgrade_tier_id: Option<u64>,
+}
+
+impl Debug for Balance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Balance")
+            // normal fields
+            .field("admin_deposits", &self.admin_deposits)
+            .field("chain_deposits", &self.chain_deposits)
+            .field("one_time_referee_bonus", &self.one_time_referee_bonus)
+            .field("referal_bonus", &self.referal_bonus)
+            .field("stripe_deposits", &self.stripe_deposits)
+            .field("total_cache_misses", &self.total_cache_misses)
+            .field("total_frontend_requests", &self.total_frontend_requests)
+            .field("total_spent", &self.total_spent)
+            .field("total_spent_paid_credits", &self.total_spent_paid_credits)
+            .field("user_id", &self.user_id)
+            .field("user_tier_id", &self.user_tier_id)
+            .field("downgrade_tier_id", &self.downgrade_tier_id)
+            // extra things
+            .field("active_premium", &self.active_premium())
+            .field("was_ever_premium", &self.was_ever_premium())
+            .field("balance", &self.remaining())
+            .field("total_deposits", &self.total_deposits())
+            // done
+            .finish()
+    }
 }
 
 impl Serialize for Balance {
