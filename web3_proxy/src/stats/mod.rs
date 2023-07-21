@@ -45,7 +45,10 @@ pub type BackendRequests = Mutex<Vec<Arc<Web3Rpc>>>;
 #[derive(Copy, Clone, Debug)]
 pub struct FlushedStats {
     pub relational: usize,
+    pub relational_frontend_requests: u64,
     pub timeseries: usize,
+    /// the number of global frontend requests saved to influx
+    pub timeseries_frontend_requests: u64,
 }
 
 /// TODO: better name? RpcQueryStatBuilder?

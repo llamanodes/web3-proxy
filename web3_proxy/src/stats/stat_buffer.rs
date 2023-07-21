@@ -160,6 +160,9 @@ impl StatBuffer {
                         Some(x) => {
                             let flushed_stats = self._flush(&mut stat_receiver).await?;
 
+                            tsdb_frontend_requests += flushed_stats.timeseries_frontend_requests;
+                            db_frontend_requests += flushed_stats.relational_frontend_requests;
+
                             if let Err(err) = x.send(flushed_stats) {
                                 error!(?flushed_stats, ?err, "unable to notify about flushed stats");
                             }
@@ -198,7 +201,10 @@ impl StatBuffer {
         //     sleep(Duration::from_millis(10)).await;
         // }
 
-        self._flush(&mut stat_receiver).await?;
+        let flushed_stats = self._flush(&mut stat_receiver).await?;
+
+        tsdb_frontend_requests += flushed_stats.timeseries_frontend_requests;
+        db_frontend_requests += flushed_stats.relational_frontend_requests;
 
         // TODO: if these totals don't match, something is wrong!
         info!(%total_frontend_requests, %tsdb_frontend_requests, %db_frontend_requests, "accounting and stat save loop complete");
@@ -341,13 +347,15 @@ impl StatBuffer {
 
         // flush the buffers
         // TODO: include frontend counts here
-        let (tsdb_count, _) = self.save_tsdb_stats().await;
-        let (relational_count, _) = self.save_relational_stats().await;
+        let (tsdb_count, tsdb_frontend_requests) = self.save_tsdb_stats().await;
+        let (relational_count, relational_frontend_requests) = self.save_relational_stats().await;
 
         // notify
         let flushed_stats = FlushedStats {
             timeseries: tsdb_count,
+            timeseries_frontend_requests: tsdb_frontend_requests,
             relational: relational_count,
+            relational_frontend_requests,
         };
 
         trace!(?flushed_stats);
