@@ -219,9 +219,7 @@ impl StatBuffer {
         // update the latest balance
         // do this BEFORE emitting any stats
         let mut approximate_balance_remaining = 0.into();
-
-        // TODO: re-enable this once I know its not the cause of Polygon W3P crashing all the time
-        // TODO: we want to do this even if the db is down. we need to buffer if there is an outage!
+        let mut active_premium = false;
         if let Ok(db_conn) = global_db_conn().await {
             let user_id = stat.authorization.checks.user_id;
 
@@ -246,6 +244,7 @@ impl StatBuffer {
                     // check if they still have premium
                     if user_balance.active_premium() {
                         // TODO: referall credits here? i think in the save_db section still makes sense for those
+                        active_premium = true;
                     } else if let Err(err) = self
                         .user_balance_cache
                         .invalidate(&user_balance.user_id, &db_conn, &self.rpc_secret_key_cache)
@@ -256,6 +255,8 @@ impl StatBuffer {
                         warn!(?err, "unable to clear caches");
                     }
                 } else if user_balance.active_premium() {
+                    active_premium = true;
+
                     // paid credits were not used, but now we have active premium. invalidate the caches
                     // TODO: this seems unliekly. should we warn if this happens so we can investigate?
                     if let Err(err) = self
@@ -285,12 +286,14 @@ impl StatBuffer {
         if self.influxdb_client.is_some() {
             // TODO: round the timestamp at all?
 
-            if let Some(opt_in_timeseries_key) = stat.owned_timeseries_key() {
-                self.opt_in_timeseries_buffer
-                    .entry(opt_in_timeseries_key)
-                    .or_default()
-                    .add(stat.clone(), approximate_balance_remaining)
-                    .await;
+            if active_premium {
+                if let Some(opt_in_timeseries_key) = stat.owned_timeseries_key() {
+                    self.opt_in_timeseries_buffer
+                        .entry(opt_in_timeseries_key)
+                        .or_default()
+                        .add(stat.clone(), approximate_balance_remaining)
+                        .await;
+                }
             }
 
             let global_timeseries_key = stat.global_timeseries_key();
@@ -349,6 +352,7 @@ impl StatBuffer {
                     )
                     .await
                 {
+                    // TODO: save the stat and retry later!
                     error!(?err, "unable to save accounting entry!");
                 };
             }
@@ -380,6 +384,7 @@ impl StatBuffer {
                         points.push(point);
                     }
                     Err(err) => {
+                        // TODO: what can cause this?
                         error!(?err, "unable to build global stat!");
                     }
                 };
@@ -395,8 +400,8 @@ impl StatBuffer {
                         points.push(point);
                     }
                     Err(err) => {
-                        // TODO: if this errors, we throw away some of the pending stats! we should probably buffer them somewhere to be tried again
-                        error!("unable to build opt-in stat! err={:?}", err);
+                        // TODO: what can cause this?
+                        error!(?err, "unable to build opt-in stat!");
                     }
                 };
             }
@@ -426,7 +431,7 @@ impl StatBuffer {
                         )
                         .await
                     {
-                        // TODO: if this errors, we throw away some of the pending stats! we should probably buffer them somewhere to be tried again
+                        // TODO: if this errors, we throw away some of the pending stats! retry any failures! (but not successes. it can have partial successes!)
                         error!(?err, batch_size, "unable to save tsdb stats!");
                         // TODO: we should probably wait a second to give errors a chance to settle
                     }
