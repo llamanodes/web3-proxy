@@ -503,9 +503,10 @@ impl BufferedRpcQueryStats {
             builder = builder.tag("rpc_secret_key_id", rpc_secret_key_id.to_string());
         }
 
-        // [add "uniq" to the timstamp](https://docs.influxdata.com/influxdb/v2.0/write-data/best-practices/duplicate-points/#increment-the-timestamp)
+        // [add "uniq" to the timestamp](https://docs.influxdata.com/influxdb/v2.0/write-data/best-practices/duplicate-points/#increment-the-timestamp)
         // i64 timestamps get us to Friday, April 11, 2262
-        let timestamp_ns: i64 = key.response_timestamp * 1_000_000_000 + uniq % 1_000_000_000;
+        assert!(uniq < 1_000_000_000, "uniq is way too big");
+        let timestamp_ns: i64 = key.response_timestamp * 1_000_000_000 + uniq;
         builder = builder.timestamp(timestamp_ns);
 
         let point = builder.build()?;

@@ -162,7 +162,7 @@ impl StatBuffer {
                     let (count, new_frontend_requests) = self.save_tsdb_stats().await;
                     if count > 0 {
                         tsdb_frontend_requests += new_frontend_requests;
-                        debug!("Saved {} stats for {} requests to the tsdb", count, new_frontend_requests);
+                        debug!("Saved {} stats for {} requests to the tsdb @ {}/{}", count, new_frontend_requests, self.tsdb_window, self.num_tsdb_windows);
                     }
                 }
                 x = flush_receiver.recv() => {
@@ -411,7 +411,7 @@ impl StatBuffer {
         let mut frontend_requests = 0;
 
         if let Some(influxdb_client) = self.influxdb_client.as_ref() {
-            // every time we save, we increment the ts_db_window. this is used to ensure that stats don't overwrite others because the keys match
+            // every time we save, we increment the tsdb_window. this is used to ensure that stats don't overwrite others because the keys match
             // this has to be done carefully or cardinality becomes a problem!
             // https://docs.influxdata.com/influxdb/v2.0/write-data/best-practices/duplicate-points/
             self.tsdb_window += 1;
