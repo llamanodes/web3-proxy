@@ -338,6 +338,7 @@ impl Web3ProxyApp {
             10,
             flush_stat_buffer_sender.clone(),
             flush_stat_buffer_receiver,
+            top_config.app.influxdb_id.to_string(),
         )? {
             // since the database entries are used for accounting, we want to be sure everything is saved before exiting
             important_background_handles.push(spawned_stat_buffer.background_handle);

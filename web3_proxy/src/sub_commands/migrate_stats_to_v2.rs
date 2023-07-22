@@ -78,6 +78,8 @@ impl MigrateStatsToV2SubCommand {
         let rpc_secret_key_cache = Cache::builder().build();
         let user_balance_cache = Cache::builder().build().into();
 
+        let instance = Ulid::new().to_string();
+
         // Spawn the stat-sender
         let emitter_spawn = StatBuffer::try_spawn(
             BILLING_PERIOD_SECONDS,
@@ -91,6 +93,7 @@ impl MigrateStatsToV2SubCommand {
             60,
             flush_sender,
             flush_receiver,
+            instance,
         )
         .context("Error spawning stat buffer")?
         .context("No stat buffer spawned. Maybe missing influx or db credentials?")?;

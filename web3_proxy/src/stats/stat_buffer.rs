@@ -13,7 +13,6 @@ use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::time::{interval, sleep};
 use tracing::{debug, error, info, trace, warn, Instrument};
-use ulid::Ulid;
 
 #[derive(Debug, Default)]
 pub struct BufferedRpcQueryStats {
@@ -50,7 +49,9 @@ pub struct StatBuffer {
     global_timeseries_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
     influxdb_bucket: Option<String>,
     influxdb_client: Option<influxdb2::Client>,
-    instance_hash: String,
+    /// a globally unique name
+    /// instance names can be re-used but they MUST only ever be used by a single server at a time!
+    instance: String,
     opt_in_timeseries_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
     rpc_secret_key_cache: RpcSecretKeyCache,
     tsdb_save_interval_seconds: u32,
@@ -75,17 +76,13 @@ impl StatBuffer {
         tsdb_save_interval_seconds: u32,
         flush_sender: mpsc::Sender<oneshot::Sender<FlushedStats>>,
         flush_receiver: mpsc::Receiver<oneshot::Sender<FlushedStats>>,
+        instance: String,
     ) -> anyhow::Result<Option<SpawnedStatBuffer>> {
         if influxdb_bucket.is_none() {
             influxdb_client = None;
         }
 
         let (stat_sender, stat_receiver) = mpsc::unbounded_channel();
-
-        // TODO: this has no chance of being re-used. we will eventually hit issues with cardinatility
-        // would be best to use `private_ip:frontend_port`. then it has a chance of being re-used (but never by 2 instances at the same time)
-        // even better would be `aws_auto_scaling_group_id:frontend_port`
-        let instance = Ulid::new().to_string();
 
         // TODO: get the frontend request timeout and add a minute buffer instead of hard coding `(5 + 1)`
         let num_tsdb_windows = ((5 + 1) * 60) / tsdb_save_interval_seconds as i64;
@@ -104,7 +101,7 @@ impl StatBuffer {
             global_timeseries_buffer: Default::default(),
             influxdb_bucket,
             influxdb_client,
-            instance_hash: instance,
+            instance,
             num_tsdb_windows,
             opt_in_timeseries_buffer: Default::default(),
             rpc_secret_key_cache,
@@ -437,7 +434,7 @@ impl StatBuffer {
                         "global_proxy",
                         self.chain_id,
                         key,
-                        &self.instance_hash,
+                        &self.instance,
                         self.tsdb_window,
                     )
                     .await
@@ -460,7 +457,7 @@ impl StatBuffer {
                         "opt_in_proxy",
                         self.chain_id,
                         key,
-                        &self.instance_hash,
+                        &self.instance,
                         self.tsdb_window,
                     )
                     .await

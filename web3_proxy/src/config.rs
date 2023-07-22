@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::warn;
+use ulid::Ulid;
 
 pub type BlockAndRpc = (Option<Web3ProxyBlock>, Arc<Web3Rpc>);
 pub type TxHashAndRpc = (TxHash, Arc<Web3Rpc>);
@@ -192,9 +193,34 @@ pub struct AppConfig {
     /// influxdb bucket to use for stats
     pub influxdb_bucket: Option<String>,
 
+    /// influxdb id to use to keep stats from different servers being seen as duplicates of eachother
+    /// be careful about this. don't let cardinality get too high!
+    /// <https://docs.influxdata.com/influxdb/v2.0/write-data/best-practices/duplicate-points/#add-an-arbitrary-tag>
+    #[serde(default = "default_influxdb_id")]
+    pub influxdb_id: String,
+
     /// unknown config options get put here
     #[serde(flatten, default = "HashMap::default")]
     pub extra: HashMap<String, serde_json::Value>,
+}
+
+fn default_influxdb_id() -> String {
+    match hostname::get() {
+        Ok(x) => x.into_string().unwrap_or_else(|hostname| {
+            warn!(
+                ?hostname,
+                "hostname could not be converted to string. Using ULID for default influxdb_id"
+            );
+            Ulid::new().to_string()
+        }),
+        Err(err) => {
+            warn!(
+                ?err,
+                "no hostname for default influxdb_id. Using ULID for default influxdb_id"
+            );
+            Ulid::new().to_string()
+        }
+    }
 }
 
 impl Default for AppConfig {

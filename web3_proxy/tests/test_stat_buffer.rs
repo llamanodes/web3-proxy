@@ -37,6 +37,7 @@ async fn test_two_buffers() {
         tsdb_save_interval_seconds,
         flush_sender_1,
         flush_receiver_1,
+        "buffer_1".to_string(),
     )
     .unwrap()
     .unwrap();
@@ -53,6 +54,7 @@ async fn test_two_buffers() {
         tsdb_save_interval_seconds,
         flush_sender_2,
         flush_receiver_2,
+        "buffer_2".to_string(),
     )
     .unwrap()
     .unwrap();
