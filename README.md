@@ -57,6 +57,10 @@ RUST_LOG=web3_proxy=trace,info cargo nextest run --features tests-needing-docker
 
 Be sure to set `innodb_rollback_on_timeout=1`
 
+## Influx
+
+If running multiple web3-proxies connected to the same influxdb bucket, you **must** set `app.influxdb_id` to a globally unique value for each server!
+
 ## Common commands
 
 Create a user:
