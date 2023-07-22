@@ -55,9 +55,11 @@ RUN --mount=type=cache,target=/root/.cargo/git \
 # sccache
 RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/root/.cache/sccache \
     set -eux; \
     \
-    cargo binstall -y sccache
+    cargo binstall -y sccache; \
+    sccache -s
 
 ENV RUSTC_WRAPPER "/root/.cargo/bin/sccache"
 
@@ -78,7 +80,8 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cache/sccache \
     set -eux; \
     \
-    curl -L https://foundry.paradigm.xyz | bash && foundryup
+    curl -L https://foundry.paradigm.xyz | bash && foundryup; \
+    sccache -s
 
 FROM rust as rust_with_env
 
@@ -120,6 +123,7 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     nextest run \
     --features "$WEB3_PROXY_FEATURES" --no-default-features \
     ; \
+    sccache -s; \
     touch /test_success
 
 FROM rust_with_env as build_app
@@ -143,6 +147,7 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     --root /usr/local \
     --verbose \
     ; \
+    sccache -s; \
     /usr/local/bin/web3_proxy_cli --help | grep 'Usage: web3_proxy_cli'
 
 # copy this file so that docker actually creates the build_tests container
