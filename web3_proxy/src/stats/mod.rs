@@ -12,7 +12,6 @@ use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::rpcs::one::Web3Rpc;
 use anyhow::{anyhow, Context};
-use axum::headers::Origin;
 use chrono::{DateTime, Months, TimeZone, Utc};
 use derive_more::From;
 use entities::{referee, referrer, rpc_accounting_v2};
@@ -89,8 +88,6 @@ pub struct RpcQueryKey {
     user_error_response: bool,
     /// the rpc method used.
     method: Cow<'static, str>,
-    /// origin tracking **was** opt-in. Now, it is always "None"
-    origin: Option<Origin>,
     /// None if the public url was used.
     rpc_secret_key_id: Option<NonZeroU64>,
     /// None if the public url was used.
@@ -121,9 +118,6 @@ impl RpcQueryStats {
 
         let method = self.method.clone();
 
-        // we used to optionally store origin, but wallets don't set it, so its almost always None
-        let origin = None;
-
         // user_error_response is always set to false because we don't bother tracking this in the database
         let user_error_response = false;
 
@@ -136,7 +130,6 @@ impl RpcQueryStats {
             method,
             rpc_secret_key_id,
             rpc_key_user_id: self.authorization.checks.user_id.try_into().ok(),
-            origin,
             user_error_response,
         }
     }
@@ -146,8 +139,7 @@ impl RpcQueryStats {
     fn global_timeseries_key(&self) -> RpcQueryKey {
         // we include the method because that can be helpful for predicting load
         let method = self.method.clone();
-        // we don't store origin in the timeseries db. its only used for optional accounting
-        let origin = None;
+
         // everyone gets grouped together
         let rpc_secret_key_id = None;
         let rpc_key_user_id = None;
@@ -160,7 +152,6 @@ impl RpcQueryStats {
             rpc_secret_key_id,
             rpc_key_user_id,
             user_error_response: self.user_error_response,
-            origin,
         }
     }
 
@@ -169,9 +160,6 @@ impl RpcQueryStats {
         if !active_premium {
             return None;
         }
-
-        // we don't store origin in the timeseries db. its only optionaly used for accounting
-        let origin = None;
 
         let method = self.method.clone();
 
@@ -183,21 +171,11 @@ impl RpcQueryStats {
             rpc_secret_key_id: self.authorization.checks.rpc_secret_key_id,
             rpc_key_user_id: self.authorization.checks.user_id.try_into().ok(),
             user_error_response: self.user_error_response,
-            origin,
         };
 
         Some(key)
     }
 }
-
-// #[derive(Debug, Default)]
-// struct Deltas {
-//     balance_spent_including_free_credits: Decimal,
-//     balance_spent_excluding_free_credits: Decimal,
-//     apply_usage_bonus_to_request_sender: bool,
-//     usage_bonus_to_request_sender_through_referral: Decimal,
-//     bonus_to_referrer: Decimal,
-// }
 
 /// A stat that we aggregate and then store in a database.
 /// For now there is just one, but I think there might be others later
