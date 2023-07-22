@@ -49,6 +49,7 @@ impl TestApp {
         anvil: &TestAnvil,
         db: Option<&TestMysql>,
         influx: Option<&TestInflux>,
+        influx_id: Option<String>,
     ) -> Self {
         let chain_id = anvil.instance.chain_id();
         let num_workers = 4;
@@ -80,6 +81,7 @@ impl TestApp {
             "influxdb_org": influx_org,
             "influxdb_token": influx_token,
             "influxdb_bucket": influx_bucket,
+            "influx_id": influx_id,
             "default_user_max_requests_per_period": Some(6_000_000),
             "deposit_factory_contract": Address::from_str(
                 "4e3BC2054788De923A04936C6ADdB99A05B0Ea36",

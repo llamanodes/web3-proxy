@@ -342,7 +342,10 @@ mod tests {
 
         assert_eq!(a.min_synced_rpcs, 1);
 
-        let b: AppConfig = Default::default();
+        let mut b: AppConfig = Default::default();
+
+        // influxdb_id is randomized
+        b.influxdb_id = a.influxdb_id.clone();
 
         assert_eq!(b.min_synced_rpcs, 1);
 

@@ -33,8 +33,7 @@ async fn test_single_proxy_stats_add_up() {
         .build()
         .unwrap();
 
-    // Since when do indices start with 1
-    let x = TestApp::spawn(&a, Some(&db), Some(&influx)).await;
+    let x = TestApp::spawn(&a, Some(&db), Some(&influx), None).await;
 
     // make a user and give them credits
     let user_0_wallet = a.wallet(0);
@@ -79,8 +78,8 @@ async fn test_single_proxy_stats_add_up() {
 
     warn!("Created users, generated providers");
 
-    info!("Proxy 1: {:?}", proxy_0_user_0_provider);
-    info!("Proxy 2: {:?}", proxy_1_user_0_provider);
+    info!("Proxy 0: {:?}", proxy_0_user_0_provider);
+    info!("Proxy 1: {:?}", proxy_1_user_0_provider);
 
     for _ in 0..number_requests {
         // send 2 to proxy 0 user 0
@@ -95,6 +94,10 @@ async fn test_single_proxy_stats_add_up() {
     }
 
     try_join_all(handles).await.unwrap();
+
+    // give stats time to get into the channel
+    // TODO: do this better
+    sleep(Duration::from_secs(10)).await;
 
     // Flush all stats here
     // TODO: the test should maybe pause time so that stats definitely flush from our queries.
@@ -115,12 +118,12 @@ async fn test_single_proxy_stats_add_up() {
     // todo!("Need to validate all the stat accounting now");
     // Get the stats from here
     let mysql_stats = user_get_mysql_stats(&x, &r, &user_0_login).await;
-    info!("mysql stats are: {:?}", mysql_stats);
+    info!("mysql stats are: {:#?}", mysql_stats);
 
     let influx_aggregate_stats =
         user_get_influx_stats_aggregated(&x, &r, &user_0_login, chain_id).await;
     info!(
-        "influx_aggregate_stats stats are: {:?}",
+        "influx_aggregate_stats stats are: {:#?}",
         influx_aggregate_stats
     );
 
@@ -231,7 +234,6 @@ async fn test_single_proxy_stats_add_up() {
     //     "user_get_influx_stats_detailed stats are: {:?}",
     //     user_get_influx_stats_detailed
     // );
-
 
     // drop x first to avoid spurious warnings about anvil/influx/mysql shutting down before the app
     drop(x);

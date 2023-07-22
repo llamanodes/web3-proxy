@@ -25,7 +25,7 @@ async fn test_sum_credits_used() {
 
     let db_conn = db.conn().await;
 
-    let x = TestApp::spawn(&a, Some(&db), Some(&i)).await;
+    let x = TestApp::spawn(&a, Some(&db), Some(&i), None).await;
 
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))

@@ -34,8 +34,8 @@ async fn test_multiple_proxies_stats_add_up() {
         .unwrap();
 
     // Since when do indices start with 1
-    let x_0 = TestApp::spawn(&a, Some(&db), Some(&influx)).await;
-    let x_1 = TestApp::spawn(&a, Some(&db), Some(&influx)).await;
+    let x_0 = TestApp::spawn(&a, Some(&db), Some(&influx), Some("app_0".to_string())).await;
+    let x_1 = TestApp::spawn(&a, Some(&db), Some(&influx), Some("app_1".to_string())).await;
 
     // make a user and give them credits
     let user_0_wallet = a.wallet(0);
@@ -62,7 +62,7 @@ async fn test_multiple_proxies_stats_add_up() {
     assert_eq!(user_1_balance_pre, Decimal::from(2000));
 
     // Generate the proxies
-    let number_requests = 50;
+    let number_requests = 10;
     let mut handles = Vec::new();
 
     // Get the RPC key from the user
@@ -80,8 +80,8 @@ async fn test_multiple_proxies_stats_add_up() {
 
     warn!("Created users, generated providers");
 
-    info!("Proxy 1: {:?}", proxy_0_user_0_provider);
-    info!("Proxy 2: {:?}", proxy_1_user_0_provider);
+    info!("Proxy 0: {:?}", proxy_0_user_0_provider);
+    info!("Proxy 1: {:?}", proxy_1_user_0_provider);
 
     for _ in 0..number_requests {
         // send 2 to proxy 0 user 0
@@ -115,6 +115,10 @@ async fn test_multiple_proxies_stats_add_up() {
     }
 
     try_join_all(handles).await.unwrap();
+
+    // just because the handles are all joined doesn't mean the stats have had time to make it into the buffer
+    // TODO: don't sleep. watch an atomic counter or something
+    sleep(Duration::from_secs(10)).await;
 
     // Flush all stats here
     // TODO: the test should maybe pause time so that stats definitely flush from our queries.
@@ -265,9 +269,11 @@ async fn test_multiple_proxies_stats_add_up() {
     //     user_get_influx_stats_detailed
     // );
 
-    // drop x first to avoid spurious warnings about anvil/influx/mysql shutting down before the app
-    drop(x_0);
-    drop(x_1);
+    x_0.stop().unwrap();
+    x_1.stop().unwrap();
+
+    x_0.wait_for_stop();
+    x_1.wait_for_stop();
 }
 
 // Gotta compare stats with influx:

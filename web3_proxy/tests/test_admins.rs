@@ -29,7 +29,7 @@ async fn test_admin_grant_credits() {
 
     let db = TestMysql::spawn().await;
 
-    let x = TestApp::spawn(&a, Some(&db), None).await;
+    let x = TestApp::spawn(&a, Some(&db), None, None).await;
 
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))

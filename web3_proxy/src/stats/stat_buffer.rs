@@ -141,7 +141,9 @@ impl StatBuffer {
             tokio::select! {
                 stat = stat_receiver.recv() => {
                     if let Some(stat) = stat {
-                        total_frontend_requests += self._buffer_app_stat(stat).await?
+                        total_frontend_requests += self._buffer_app_stat(stat).await?;
+
+                        // TODO: if buffers are big, flush now?
                     } else {
                         break;
                     }
