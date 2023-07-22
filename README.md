@@ -61,6 +61,8 @@ Be sure to set `innodb_rollback_on_timeout=1`
 
 If running multiple web3-proxies connected to the same influxdb bucket, you **must** set `app.influxdb_id` to a globally unique value for each server!
 
+`app.influxdb_id` defaults to the hostname. If the hostname cannot be parsed as a String, it defaults to a ULID. ULIDs aren't great for cardinality though!
+
 ## Common commands
 
 Create a user:
