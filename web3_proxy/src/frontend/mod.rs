@@ -231,7 +231,7 @@ pub async fn serve(
         .layer(NormalizePathLayer::trim_trailing_slash())
         // Mark the `Authorization` request header as sensitive so it doesn't show in logs
         .layer(SetSensitiveRequestHeadersLayer::new(once(AUTHORIZATION)))
-        // handle cors
+        // handle cors. we expect queries from all sorts of places
         .layer(CorsLayer::very_permissive())
         // application state
         .layer(Extension(app.clone()))
@@ -261,10 +261,12 @@ pub async fn serve(
                     .unwrap_or_else(|| Ulid::new().to_string());
 
                 // And then we put it along with other information into the `request` span
+                // TODO: what other info should we attach? how can we attach an error and a tracing span here?
                 error_span!(
                     "request",
                     id = %request_id,
                     // method = %request.method(),
+                    // // don't log the path. it often includes the RPC key!
                     // path = %request.uri().path(),
                 )
             }), // .on_failure(|| todo!("on failure that has the request and response body so we can debug more easily")),
