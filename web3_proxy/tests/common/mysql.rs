@@ -115,10 +115,10 @@ impl TestMysql {
         test_mysql.url = Some(db_url.clone());
 
         let start = Instant::now();
-        let max_wait = Duration::from_secs(30);
+        let max_wait = Duration::from_secs(60);
         loop {
             if start.elapsed() > max_wait {
-                panic!("db took too long to start");
+                panic!("db container took too long to start");
             }
 
             if TcpStream::connect(format!("{}:{}", mysql_ip, mysql_port))
@@ -139,10 +139,10 @@ impl TestMysql {
 
         // try to migrate
         let start = Instant::now();
-        let max_wait = Duration::from_secs(30);
+        let max_wait = Duration::from_secs(60);
         loop {
             if start.elapsed() > max_wait {
-                panic!("db took too long to start");
+                panic!("db took too long to migrate");
             }
 
             match get_migrated_db(db_url.clone(), 1, 1).await {

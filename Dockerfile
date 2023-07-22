@@ -59,7 +59,6 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     \
     cargo binstall -y sccache
 
-# TODO: full path
 ENV RUSTC_WRAPPER "/root/.cargo/bin/sccache"
 
 # nextest runs tests in parallel (done its in own FROM so that it can run in parallel)

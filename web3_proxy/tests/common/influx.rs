@@ -146,10 +146,10 @@ impl TestInflux {
         };
 
         let start = Instant::now();
-        let max_wait = Duration::from_secs(5);
+        let max_wait = Duration::from_secs(30);
         loop {
             if start.elapsed() > max_wait {
-                panic!("db took too long to start");
+                panic!("influx took too long to start");
             }
 
             if TcpStream::connect(format!("{}:{}", influx_ip, influx_port))
@@ -167,7 +167,7 @@ impl TestInflux {
 
         // TODO: try to use the influx client
 
-        info!(?test_influx, elapsed=%start.elapsed().as_secs_f32(), "influx post is open. Migrating now...");
+        info!(?test_influx, elapsed=%start.elapsed().as_secs_f32(), "influx port is open");
 
         test_influx
     }
