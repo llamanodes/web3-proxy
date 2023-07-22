@@ -82,7 +82,7 @@ impl TestApp {
             "influxdb_org": influx_org,
             "influxdb_token": influx_token,
             "influxdb_bucket": influx_bucket,
-            "influxdb_id": influx_id.unwrap_or_else(Ulid::new),
+            "influxdb_id": influx_id.unwrap_or_else(|| Ulid::new().to_string()),
             "default_user_max_requests_per_period": Some(6_000_000),
             "deposit_factory_contract": Address::from_str(
                 "4e3BC2054788De923A04936C6ADdB99A05B0Ea36",
