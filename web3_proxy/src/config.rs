@@ -335,6 +335,7 @@ mod tests {
 
     #[test]
     fn expected_app_defaults() {
+        // a is from serde
         let a: AppConfig = serde_json::from_value(json!({
             "chain_id": 1,
         }))
@@ -342,10 +343,12 @@ mod tests {
 
         assert_eq!(a.min_synced_rpcs, 1);
 
-        let mut b: AppConfig = Default::default();
-
-        // influxdb_id is randomized
-        b.influxdb_id = a.influxdb_id.clone();
+        // b is from Default
+        let mut b: AppConfig = AppConfig {
+            // influxdb_id is randomized, so we clone it
+            influxdb_id: a.influxdb_id.clone(),
+            ..Default::default()
+        };
 
         assert_eq!(b.min_synced_rpcs, 1);
 
