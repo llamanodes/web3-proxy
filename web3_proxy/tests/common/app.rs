@@ -22,6 +22,7 @@ use tokio::{
     time::{sleep, Instant},
 };
 use tracing::info;
+use ulid::Ulid;
 use web3_proxy::{
     config::{AppConfig, TopConfig, Web3RpcConfig},
     stats::FlushedStats,
@@ -81,7 +82,7 @@ impl TestApp {
             "influxdb_org": influx_org,
             "influxdb_token": influx_token,
             "influxdb_bucket": influx_bucket,
-            "influx_id": influx_id,
+            "influxdb_id": influx_id.unwrap_or_else(Ulid::new),
             "default_user_max_requests_per_period": Some(6_000_000),
             "deposit_factory_contract": Address::from_str(
                 "4e3BC2054788De923A04936C6ADdB99A05B0Ea36",
