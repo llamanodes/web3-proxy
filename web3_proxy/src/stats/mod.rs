@@ -77,7 +77,7 @@ pub struct RpcQueryStats {
 
 #[derive(Clone, Debug, From, Hash, PartialEq, Eq)]
 pub struct RpcQueryKey {
-    /// unix epoch time.
+    /// unix epoch time in seconds.
     /// for the time series db, this is (close to) the time that the response was sent.
     /// for the account database, this is rounded to the week.
     response_timestamp: i64,
@@ -484,7 +484,7 @@ impl BufferedRpcQueryStats {
         chain_id: u64,
         key: RpcQueryKey,
         instance: &str,
-        now: &str,
+        uniq: i64,
     ) -> anyhow::Result<DataPoint> {
         let mut builder = DataPoint::builder(measurement)
             .tag("archive_needed", key.archive_needed.to_string())
@@ -493,8 +493,6 @@ impl BufferedRpcQueryStats {
             .tag("instance", instance)
             .tag("method", key.method)
             .tag("user_error_response", key.user_error_response.to_string())
-            .tag("save_time", now)
-            .timestamp(key.response_timestamp)
             .field("backend_requests", self.backend_requests as i64)
             .field("cache_hits", self.cache_hits as i64)
             .field("cache_misses", self.cache_misses as i64)
@@ -526,6 +524,11 @@ impl BufferedRpcQueryStats {
         if let Some(rpc_secret_key_id) = key.rpc_secret_key_id {
             builder = builder.tag("rpc_secret_key_id", rpc_secret_key_id.to_string());
         }
+
+        // [add "uniq" to the timstamp](https://docs.influxdata.com/influxdb/v2.0/write-data/best-practices/duplicate-points/#increment-the-timestamp)
+        // i64 timestamps get us to Friday, April 11, 2262
+        let timestamp_ns: i64 = key.response_timestamp * 1_000_000_000 + uniq % 1_000_000_000;
+        builder = builder.timestamp(timestamp_ns);
 
         let point = builder.build()?;
 
