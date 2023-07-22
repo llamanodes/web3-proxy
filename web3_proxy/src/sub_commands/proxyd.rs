@@ -12,9 +12,10 @@ use std::sync::atomic::AtomicU16;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{fs, thread};
-use tokio::select;
+use tokio::signal::unix::SignalKind;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::time::{sleep_until, Instant};
+use tokio::{select, signal};
 use tracing::{error, info, trace, warn};
 
 /// start the main proxy daemon
@@ -140,6 +141,7 @@ impl ProxydSubCommand {
                         }
                     }
 
+                    // TODO: wait for SIGHUP instead?
                     thread::sleep(Duration::from_secs(10));
                 });
             }
@@ -188,6 +190,8 @@ impl ProxydSubCommand {
 
         let frontend_handle = flatten_handle(frontend_handle);
 
+        let mut terminate_stream = signal::unix::signal(SignalKind::terminate())?;
+
         // if everything is working, these should all run forever
         let mut exited_with_err = false;
         let mut frontend_exited = false;
@@ -227,6 +231,16 @@ impl ProxydSubCommand {
                     Err(e) => {
                         // TODO: i don't think this is possible
                         error!("error quiting from ctrl-c: {:#?}", e);
+                        exited_with_err = true;
+                    }
+                }
+            }
+            x = terminate_stream.recv() => {
+                match x {
+                    Some(_) => info!("quiting from SIGTERM"),
+                    None => {
+                        // TODO: i don't think this is possible
+                        error!("error quiting from SIGTERM");
                         exited_with_err = true;
                     }
                 }
