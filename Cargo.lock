@@ -3333,6 +3333,7 @@ name = "migration"
 version = "0.36.0"
 dependencies = [
  "chrono",
+ "sea-orm",
  "sea-orm-migration",
  "tokio",
 ]
