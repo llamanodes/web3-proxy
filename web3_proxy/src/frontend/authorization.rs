@@ -830,7 +830,7 @@ pub async fn ip_is_authorized(
         x => unimplemented!("rate_limit_by_ip shouldn't ever see these: {:?}", x),
     };
 
-    // in the background, add the ip to a recent_users map
+    // in the background, add the hashed ip to a recent_users map
     if app.config.public_recent_ips_salt.is_some() {
         let app = app.clone();
         let ip = *ip;

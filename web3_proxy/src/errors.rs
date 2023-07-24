@@ -4,6 +4,7 @@ use crate::frontend::authorization::Authorization;
 use crate::jsonrpc::{JsonRpcErrorData, JsonRpcForwardedResponse};
 use crate::response_cache::JsonRpcResponseEnum;
 use crate::rpcs::provider::EthersHttpProvider;
+use axum::extract::rejection::JsonRejection;
 use axum::extract::ws::Message;
 use axum::{
     headers,
@@ -23,6 +24,7 @@ use redis_rate_limiter::RedisPoolError;
 use reqwest::header::ToStrError;
 use rust_decimal::Error as DecimalError;
 use serde::Serialize;
+use serde_json::json;
 use serde_json::value::RawValue;
 use siwe::VerificationError;
 use std::sync::Arc;
@@ -92,6 +94,7 @@ pub enum Web3ProxyError {
     #[from(ignore)]
     IpNotAllowed(IpAddr),
     JoinError(JoinError),
+    JsonRejection(JsonRejection),
     #[display(fmt = "{:?}", _0)]
     #[error(ignore)]
     JsonRpcErrorData(JsonRpcErrorData),
@@ -174,6 +177,8 @@ pub enum Web3ProxyError {
 }
 
 impl Web3ProxyError {
+    /// turn the error into an axum response.
+    /// <https://www.jsonrpc.org/specification#error_object>
     pub fn as_response_parts<R: Serialize>(&self) -> (StatusCode, JsonRpcResponseEnum<R>) {
         // TODO: include a unique request id in the data
         let (code, err): (StatusCode, JsonRpcErrorData) = match self {
@@ -182,9 +187,9 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: err.to_string().into(),
+                        message: "abi error".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -208,7 +213,7 @@ impl Web3ProxyError {
                         // TODO: is it safe to expose all of our anyhow strings?
                         message: "INTERNAL SERVER ERROR".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -221,9 +226,9 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: format!("bad request: {}", err).into(),
+                        message: "bad request".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -233,9 +238,9 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: format!("bad response: {}", err).into(),
+                        message: "bad response".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -255,9 +260,9 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: format!("contract error: {}", err).into(),
+                        message: "contract error".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -268,7 +273,7 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "database error!".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -279,7 +284,7 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "database (arc) error!".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -288,9 +293,9 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: format!("decimal error: {}", err).into(),
+                        message: "decimal error".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -305,7 +310,7 @@ impl Web3ProxyError {
                         JsonRpcErrorData {
                             message: "ethers http client error".into(),
                             code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                            data: None,
+                            data: Some(serde_json::Value::String(err.to_string())),
                         },
                     )
                 }
@@ -321,7 +326,7 @@ impl Web3ProxyError {
                         JsonRpcErrorData {
                             message: "ethers provider error".into(),
                             code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                            data: None,
+                            data: Some(serde_json::Value::String(err.to_string())),
                         },
                     )
                 }
@@ -337,7 +342,7 @@ impl Web3ProxyError {
                         JsonRpcErrorData {
                             message: "ethers ws client error".into(),
                             code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                            data: None,
+                            data: Some(serde_json::Value::String(err.to_string())),
                         },
                     )
                 }
@@ -359,9 +364,9 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: err.to_string().into(),
+                        message: "hdr record error".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -370,9 +375,9 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: err.to_string().into(),
+                        message: "headers error".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -381,9 +386,9 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: err.to_string().into(),
+                        message: "header to string error".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -394,7 +399,7 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: err.to_string().into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -406,7 +411,7 @@ impl Web3ProxyError {
                         // TODO: is it safe to expose these error strings?
                         message: err.to_string().into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -418,7 +423,7 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "influxdb2 error!".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -427,13 +432,12 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: format!(
-                            "Invalid blocks bounds requested. min ({}) > max ({})",
-                            min, max
-                        )
-                        .into(),
+                        message: "Invalid blocks bounds requested".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
-                        data: None,
+                        data: Some(json!({
+                            "min": min,
+                            "max": max,
+                        })),
                     },
                 )
             }
@@ -453,9 +457,9 @@ impl Web3ProxyError {
                 (
                     StatusCode::FORBIDDEN,
                     JsonRpcErrorData {
-                        message: format!("IP ({}) is not allowed!", ip).into(),
+                        message: "IP is not allowed!".into(),
                         code: StatusCode::FORBIDDEN.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(ip.to_string())),
                     },
                 )
             }
@@ -464,9 +468,9 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: err.to_string().into(),
+                        message: "invalid header value".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -497,10 +501,10 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        // TODO: is it safe to expose our io error strings?
-                        message: format!("std io error: {}", err).into(),
+                        message: "std io".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
+                        // TODO: is it safe to expose our io error strings?
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -574,7 +578,32 @@ impl Web3ProxyError {
                         // TODO: different messages of cancelled or not?
                         message: "Unable to complete request".into(),
                         code: code.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
+                    },
+                )
+            }
+            Self::JsonRejection(err) => {
+                trace!(?err, "JsonRejection");
+
+                let (message, code): (&str, _) = match err {
+                    JsonRejection::JsonDataError(_) => ("Invalid Request", -32600),
+                    JsonRejection::JsonSyntaxError(_) => ("Parse error", -32700),
+                    JsonRejection::MissingJsonContentType(_) => ("Invalid Request", -32600),
+                    JsonRejection::BytesRejection(_) => ("Invalid Request", -32600),
+                    x => {
+                        warn!(?x, "what? isn't that all of them?");
+                        // TODO: what code should this be?
+                        ("Parse error", -32700)
+                    }
+                };
+
+                // TODO: i feel like this should be a 401, but the spec seems to say its a 200
+                (
+                    StatusCode::OK,
+                    JsonRpcErrorData {
+                        message: message.into(),
+                        code: code.into(),
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -587,9 +616,9 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: format!("msgpack encode error: {}", err).into(),
+                        message: "msgpack encode error".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -694,13 +723,12 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_GATEWAY,
                     JsonRpcErrorData {
-                        message: format!(
-                            "not enough soft limit available {}/{}",
-                            available, needed
-                        )
-                        .into(),
+                        message: "not enough soft limit available".into(),
                         code: StatusCode::BAD_GATEWAY.as_u16().into(),
-                        data: None,
+                        data: Some(json!({
+                            "available": available,
+                            "needed": needed,
+                        })),
                     },
                 )
             }
@@ -747,20 +775,25 @@ impl Web3ProxyError {
                 (
                     StatusCode::FORBIDDEN,
                     JsonRpcErrorData {
-                        message: format!("Origin ({}) is not allowed!", origin).into(),
+                        message: "Origin is not allowed!".into(),
                         code: StatusCode::FORBIDDEN.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(origin.to_string())),
                     },
                 )
             }
             Self::ParseBytesError(err) => {
                 trace!(?err, "ParseBytesError");
+
+                let data = err
+                    .as_ref()
+                    .map(|x| serde_json::Value::String(x.to_string()));
+
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
                         message: "parse bytes error!".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
-                        data: None,
+                        data,
                     },
                 )
             }
@@ -771,7 +804,7 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "parse message error!".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -825,6 +858,7 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: msg.into(),
                         code: StatusCode::TOO_MANY_REQUESTS.as_u16().into(),
+                        // TODO: use a generic message with details in the data
                         data: None,
                     },
                 )
@@ -836,7 +870,7 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "redis error!".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -846,9 +880,9 @@ impl Web3ProxyError {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
                         // TODO: is it safe to expose our io error strings?
-                        message: err.to_string().into(),
+                        message: "redis pool error".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -868,9 +902,9 @@ impl Web3ProxyError {
                 (
                     StatusCode::FORBIDDEN,
                     JsonRpcErrorData {
-                        message: format!("Referer ({:?}) is not allowed", referer).into(),
+                        message: "Referer is not allowed".into(),
                         code: StatusCode::FORBIDDEN.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(format!("{:?}", referer))),
                     },
                 )
             }
@@ -882,7 +916,7 @@ impl Web3ProxyError {
                         // TODO: is it safe to expose all of our anyhow strings?
                         message: "semaphore acquire error".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -891,9 +925,9 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: format!("de/serialization error! {}", err).into(),
+                        message: "de/serialization error!".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -902,9 +936,9 @@ impl Web3ProxyError {
                 (
                     StatusCode::UNAUTHORIZED,
                     JsonRpcErrorData {
-                        message: format!("siwe verification error: {}", err).into(),
+                        message: "siwe verification error".into(),
                         code: StatusCode::UNAUTHORIZED.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -931,31 +965,35 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: format!("stripe webhook error: {}", err).into(),
+                        message: "stripe webhook error".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         // TODO: include the stripe signature? anything else?
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
-            Self::Timeout(x) => (
-                StatusCode::REQUEST_TIMEOUT,
-                JsonRpcErrorData {
-                    // TODO: prettier message
-                    message: format!("request timed out: {:?}", x).into(),
-                    code: StatusCode::REQUEST_TIMEOUT.as_u16().into(),
-                    // TODO: include the actual id!
-                    data: None,
-                },
-            ),
+            Self::Timeout(x) => {
+                let data = x.as_ref().map(|x| json!(x.as_secs_f32()));
+
+                (
+                    StatusCode::REQUEST_TIMEOUT,
+                    JsonRpcErrorData {
+                        message: "request timed out".into(),
+                        code: StatusCode::REQUEST_TIMEOUT.as_u16().into(),
+                        // TODO: prettier message
+                        // TODO: include the actual id!
+                        data,
+                    },
+                )
+            }
             Self::UlidDecode(err) => {
                 trace!(?err, "UlidDecodeError");
                 (
                     StatusCode::BAD_REQUEST,
                     JsonRpcErrorData {
-                        message: format!("ulid decode error: {}", err).into(),
+                        message: "ulid decode error".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }
@@ -964,9 +1002,11 @@ impl Web3ProxyError {
                 (
                     StatusCode::OK,
                     JsonRpcErrorData {
-                        message: format!("block {} not found", hash).into(),
+                        message: "block hash not found".into(),
                         code: -32000,
-                        data: None,
+                        data: Some(json!({
+                            "hash": hash,
+                        })),
                     },
                 )
             }
@@ -975,10 +1015,12 @@ impl Web3ProxyError {
                 (
                     StatusCode::OK,
                     JsonRpcErrorData {
-                        message: format!("block #{} not found. best known is #{}", unknown, known)
-                            .into(),
+                        message: "block number not found".into(),
                         code: -32000,
-                        data: None,
+                        data: Some(json!({
+                            "unknown": unknown,
+                            "known": known,
+                        })),
                     },
                 )
             }
@@ -1017,9 +1059,9 @@ impl Web3ProxyError {
                 (
                     StatusCode::FORBIDDEN,
                     JsonRpcErrorData {
-                        message: format!("User agent ({}) is not allowed!", ua).into(),
+                        message: "User agent is not allowed!".into(),
                         code: StatusCode::FORBIDDEN.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(ua.to_string())),
                     },
                 )
             }
@@ -1042,7 +1084,7 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "watch recv error!".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
+                        data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
             }

@@ -1500,6 +1500,7 @@ impl Web3ProxyApp {
 
                 // emit transaction count stats
                 // TODO: use this cache to avoid sending duplicate transactions?
+                // TODO: different salt for ips and transactions?
                 if let Some(ref salt) = self.config.public_recent_ips_salt {
                     if let JsonRpcResponseEnum::Result { value, .. } = &response {
                         let now = Utc::now().timestamp();
