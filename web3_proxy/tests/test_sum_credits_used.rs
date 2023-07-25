@@ -92,10 +92,10 @@ async fn test_sum_credits_used() {
 
     // flush stats
     let flushed = x.flush_stats().await.unwrap();
-    // TODO: this was 2 when we flushed stats for anon users. that was temporarily disabled. it should be turned back on once indexes are fixed
-    assert_eq!(flushed.relational, 1, "relational");
-    // TODO: how many should this actually be?
+    assert_eq!(flushed.relational, 2, "relational");
     assert_eq!(flushed.timeseries, 1, "timeseries");
+
+    // TODO: sleep and then flush and make sure no more arrive
 
     // Give user wallet $1000
     admin_increase_balance(&x, &r, &admin_login_response, &user_wallet, 1000.into()).await;
