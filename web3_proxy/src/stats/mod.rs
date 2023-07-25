@@ -227,8 +227,10 @@ impl BufferedRpcQueryStats {
             self.paid_credits_used += stat.compute_unit_cost;
         }
 
-        // overwrite, don't increment!
-        self.approximate_balance_remaining = approximate_balance_remaining;
+        if approximate_balance_remaining.is_some() {
+            // notice that we overwrite. we intentionally do not increment!
+            self.approximate_balance_remaining = approximate_balance_remaining;
+        }
 
         trace!("added");
     }
