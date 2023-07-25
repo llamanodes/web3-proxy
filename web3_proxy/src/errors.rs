@@ -206,7 +206,7 @@ impl Web3ProxyError {
                 )
             }
             Self::Anyhow(err) => {
-                warn!(?err, "anyhow");
+                error!(?err, "anyhow: {}", err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
