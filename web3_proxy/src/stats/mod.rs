@@ -26,7 +26,6 @@ use num_traits::ToPrimitive;
 use parking_lot::Mutex;
 use std::borrow::Cow;
 use std::mem;
-use std::num::NonZeroU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tracing::{error, instrument, trace, warn};
@@ -88,15 +87,15 @@ pub struct RpcQueryKey {
     user_error_response: bool,
     /// the rpc method used.
     method: Cow<'static, str>,
-    /// None if the public url was used.
-    rpc_secret_key_id: Option<NonZeroU64>,
-    /// None if the public url was used.
-    rpc_key_user_id: Option<NonZeroU64>,
+    /// 0 if the public url was used.
+    rpc_secret_key_id: u64,
+    /// 0 if the public url was used.
+    rpc_key_user_id: u64,
 }
 
 impl RpcQueryKey {
     pub fn is_registered(&self) -> bool {
-        self.rpc_key_user_id.is_some()
+        self.rpc_key_user_id != 0
     }
 }
 
@@ -113,8 +112,15 @@ impl RpcQueryStats {
     fn accounting_key(&self, period_seconds: i64) -> RpcQueryKey {
         let response_timestamp = round_timestamp(self.response_timestamp, period_seconds);
 
-        // TODO: change this to use 0 for anonymous queries
-        let rpc_secret_key_id = self.authorization.checks.rpc_secret_key_id;
+        // it is very important that for anonymous users, rpc_secret_key_id is 0 and not NULL in the database
+        // for unique indexes, sql sees each NULL as a unique value!
+        // but we want them grouped!
+        let rpc_secret_key_id = self
+            .authorization
+            .checks
+            .rpc_secret_key_id
+            .map(u64::from)
+            .unwrap_or_default();
 
         let method = self.method.clone();
 
@@ -129,7 +135,7 @@ impl RpcQueryStats {
             error_response: self.error_response,
             method,
             rpc_secret_key_id,
-            rpc_key_user_id: self.authorization.checks.user_id.try_into().ok(),
+            rpc_key_user_id: self.authorization.checks.user_id,
             user_error_response,
         }
     }
@@ -141,8 +147,8 @@ impl RpcQueryStats {
         let method = self.method.clone();
 
         // everyone gets grouped together
-        let rpc_secret_key_id = None;
-        let rpc_key_user_id = None;
+        let rpc_secret_key_id = 0;
+        let rpc_key_user_id = 0;
 
         RpcQueryKey {
             response_timestamp: self.response_timestamp,
@@ -161,6 +167,13 @@ impl RpcQueryStats {
             return None;
         }
 
+        let rpc_secret_key_id = self
+            .authorization
+            .checks
+            .rpc_secret_key_id
+            .map(u64::from)
+            .unwrap_or_default();
+
         let method = self.method.clone();
 
         let key = RpcQueryKey {
@@ -168,8 +181,8 @@ impl RpcQueryStats {
             archive_needed: self.archive_request,
             error_response: self.error_response,
             method,
-            rpc_secret_key_id: self.authorization.checks.rpc_secret_key_id,
-            rpc_key_user_id: self.authorization.checks.user_id.try_into().ok(),
+            rpc_secret_key_id,
+            rpc_key_user_id: self.authorization.checks.user_id,
             user_error_response: self.user_error_response,
         };
 
@@ -187,7 +200,7 @@ pub enum AppStat {
 // TODO: move to stat_buffer.rs?
 impl BufferedRpcQueryStats {
     #[instrument(level = "trace")]
-    async fn add(&mut self, stat: RpcQueryStats, approximate_balance_remaining: Decimal) {
+    async fn add(&mut self, stat: RpcQueryStats, approximate_balance_remaining: Option<Decimal>) {
         // a stat always come from just 1 frontend request
         self.frontend_requests += 1;
 
@@ -214,7 +227,10 @@ impl BufferedRpcQueryStats {
             self.paid_credits_used += stat.compute_unit_cost;
         }
 
-        self.approximate_balance_remaining = approximate_balance_remaining;
+        if approximate_balance_remaining.is_some() {
+            // notice that we overwrite. we intentionally do not increment!
+            self.approximate_balance_remaining = approximate_balance_remaining;
+        }
 
         trace!("added");
     }
@@ -232,7 +248,8 @@ impl BufferedRpcQueryStats {
         // =============================== //
         let accounting_entry = rpc_accounting_v2::ActiveModel {
             id: sea_orm::NotSet,
-            rpc_key_id: sea_orm::Set(key.rpc_secret_key_id.map(Into::into)),
+            // eventually rpc_key_id will be `NOT NULL`, but we have old data in the db to deal with
+            rpc_key_id: sea_orm::Set(Some(key.rpc_secret_key_id)),
             chain_id: sea_orm::Set(chain_id),
             period_datetime: sea_orm::Set(period_datetime),
             archive_needed: sea_orm::Set(key.archive_needed),
@@ -335,7 +352,7 @@ impl BufferedRpcQueryStats {
         }
 
         // TODO: rename to owner_id?
-        let sender_user_id = key.rpc_key_user_id.map_or(0, |x| x.get());
+        let sender_user_id = key.rpc_key_user_id;
 
         // save the statistics to the database:
         self._save_db_stats(chain_id, db_conn, &key).await?;
@@ -480,12 +497,6 @@ impl BufferedRpcQueryStats {
             .field("sum_response_bytes", self.sum_response_bytes as i64)
             .field("sum_response_millis", self.sum_response_millis as i64)
             .field(
-                "balance",
-                self.approximate_balance_remaining
-                    .to_f64()
-                    .context("balance is really (too) large")?,
-            )
-            .field(
                 "sum_credits_used",
                 self.paid_credits_used
                     .to_f64()
@@ -498,9 +509,16 @@ impl BufferedRpcQueryStats {
                     .context("sum_credits_used is really (too) large")?,
             );
 
+        if let Some(balance) = self.approximate_balance_remaining {
+            builder = builder.field(
+                "balance",
+                balance.to_f64().context("balance is really (too) large")?,
+            )
+        }
+
         // TODO: set the rpc_secret_key_id tag to 0 when anon? will that make other queries easier?
-        if let Some(rpc_secret_key_id) = key.rpc_secret_key_id {
-            builder = builder.tag("rpc_secret_key_id", rpc_secret_key_id.to_string());
+        if key.rpc_secret_key_id != 0 {
+            builder = builder.tag("rpc_secret_key_id", key.rpc_secret_key_id.to_string());
         }
 
         // [add "uniq" to the timestamp](https://docs.influxdata.com/influxdb/v2.0/write-data/best-practices/duplicate-points/#increment-the-timestamp)

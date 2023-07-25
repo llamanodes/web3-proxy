@@ -133,8 +133,6 @@ pub enum AuthorizationType {
 #[derive(Clone, Debug, Default, From)]
 pub struct AuthorizationChecks {
     /// database id of the primary user. 0 if anon
-    /// TODO: do we need this? its on the authorization so probably not
-    /// TODO: `Option<NonZeroU64>`? they are actual zeroes some places in the db now
     pub user_id: u64,
     /// locally cached balance that may drift slightly if the user is on multiple servers
     pub latest_balance: Arc<AsyncRwLock<Balance>>,

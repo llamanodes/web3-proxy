@@ -31,7 +31,7 @@ pub struct BufferedRpcQueryStats {
     /// The user's balance at this point in time.
     /// Multiple queries might be modifying it at once, so this is a copy of it when received
     /// None if this is an unauthenticated request
-    pub approximate_balance_remaining: Decimal,
+    pub approximate_balance_remaining: Option<Decimal>,
 }
 
 #[derive(From)]
@@ -297,19 +297,17 @@ impl StatBuffer {
             }
 
             let accounting_key = stat.accounting_key(self.billing_period_seconds);
-            if accounting_key.is_registered() {
-                let span = tracing::trace_span!(
-                    "accounting",
-                    key = tracing::field::debug(&accounting_key)
-                )
-                .or_current();
-                self.accounting_db_buffer
-                    .entry(accounting_key)
-                    .or_default()
-                    .add(stat.clone(), approximate_balance_remaining)
-                    .instrument(span)
-                    .await;
-            }
+
+            let span =
+                tracing::trace_span!("accounting", key = tracing::field::debug(&accounting_key))
+                    .or_current();
+
+            self.accounting_db_buffer
+                .entry(accounting_key)
+                .or_default()
+                .add(stat.clone(), None)
+                .instrument(span)
+                .await;
         }
 
         if self.influxdb_client.is_some() {
@@ -322,7 +320,7 @@ impl StatBuffer {
                 self.opt_in_timeseries_buffer
                     .entry(opt_in_timeseries_key)
                     .or_default()
-                    .add(stat.clone(), approximate_balance_remaining)
+                    .add(stat.clone(), Some(approximate_balance_remaining))
                     .instrument(span)
                     .await;
             }
@@ -336,7 +334,7 @@ impl StatBuffer {
             self.global_timeseries_buffer
                 .entry(global_timeseries_key)
                 .or_default()
-                .add(stat, approximate_balance_remaining)
+                .add(stat, None)
                 .instrument(span)
                 .await;
         }
