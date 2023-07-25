@@ -31,10 +31,7 @@ impl ComputeUnit {
             return Self::subscription_response(response_bytes);
         }
 
-        let cu = if method.starts_with("ots_") {
-            // TODO: refine the different methods
-            1000
-        } else if method.starts_with("admin_") {
+        let cu = if method.starts_with("admin_") {
             // maybe charge extra since they are doing things they aren't supposed to
             return Self::unimplemented();
         } else {
@@ -124,6 +121,17 @@ impl ComputeUnit {
                 (_, "invalid_method") => 100,
                 (_, "web3_clientVersion") => 15,
                 (_, "web3_sha3") => 15,
+                (_, "ots_getInternalOperations") => 1000,
+                (_, "ots_hasCode") => 1000,
+                (_, "ots_getTransactionError") => 1000,
+                (_, "ots_traceTransaction") => 1000,
+                (_, "ots_getBlockDetails") => 1000,
+                (_, "ots_getBlockDetailsByHash") => 1000,
+                (_, "ots_getBlockTransactions") => 1000,
+                (_, "ots_searchTransactionsBefore") => 1000,
+                (_, "ots_searchTransactionsAfter") => 1000,
+                (_, "ots_getTransactionBySenderAndNonce") => 1000,
+                (_, "ots_getContractCreator") => 1000,
                 (_, method) => {
                     // TODO: emit a stat
                     // TODO: do some filtering on these to tarpit peers that are trying to do silly things like sql/influx inject
