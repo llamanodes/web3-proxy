@@ -200,7 +200,7 @@ pub enum AppStat {
 // TODO: move to stat_buffer.rs?
 impl BufferedRpcQueryStats {
     #[instrument(level = "trace")]
-    async fn add(&mut self, stat: RpcQueryStats, approximate_balance_remaining: Decimal) {
+    async fn add(&mut self, stat: RpcQueryStats, approximate_balance_remaining: Option<Decimal>) {
         // a stat always come from just 1 frontend request
         self.frontend_requests += 1;
 
@@ -227,6 +227,7 @@ impl BufferedRpcQueryStats {
             self.paid_credits_used += stat.compute_unit_cost;
         }
 
+        // overwrite, don't increment!
         self.approximate_balance_remaining = approximate_balance_remaining;
 
         trace!("added");
@@ -494,12 +495,6 @@ impl BufferedRpcQueryStats {
             .field("sum_response_bytes", self.sum_response_bytes as i64)
             .field("sum_response_millis", self.sum_response_millis as i64)
             .field(
-                "balance",
-                self.approximate_balance_remaining
-                    .to_f64()
-                    .context("balance is really (too) large")?,
-            )
-            .field(
                 "sum_credits_used",
                 self.paid_credits_used
                     .to_f64()
@@ -511,6 +506,13 @@ impl BufferedRpcQueryStats {
                     .to_f64()
                     .context("sum_credits_used is really (too) large")?,
             );
+
+        if let Some(balance) = self.approximate_balance_remaining {
+            builder = builder.field(
+                "balance",
+                balance.to_f64().context("balance is really (too) large")?,
+            )
+        }
 
         // TODO: set the rpc_secret_key_id tag to 0 when anon? will that make other queries easier?
         if key.rpc_secret_key_id != 0 {
