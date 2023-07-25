@@ -39,7 +39,7 @@ anyhow = { version = "1.0.72", features = ["backtrace"] }
 arc-swap = { version = "1.6.0" }
 argh = "0.1.10"
 async-stripe = { version = "0.22.2", default-features = false, features = ["billing", "checkout", "connect", "runtime-tokio-hyper-rustls", "webhook-events"] }
-async-trait = "0.1.71"
+async-trait = "0.1.72"
 axum = { version = "0.6.19", features = ["headers", "tracing", "ws"] }
 axum-client-ip = "0.4.1"
 axum-macros = "0.3.8"
@@ -79,11 +79,11 @@ proctitle = "0.1.1"
 rdkafka = { version = "0.33.2", features = ["tracing"] }
 regex = "1.9.1"
 reqwest = { version = "0.11.18", default-features = false, features = ["deflate", "gzip", "json", "tokio-rustls"] }
-rmp-serde = "1.1.1"
+rmp-serde = "1.1.2"
 rust_decimal = { version = "1.30.0", features = ["maths"] }
 sentry = { version = "0.31.5", default-features = false, features = ["anyhow", "backtrace", "contexts", "panic", "reqwest", "rustls", "serde_json", "tracing"] }
 sentry-tracing = "0.31.5"
-serde = { version = "1.0.173" }
+serde = { version = "1.0.175" }
 serde-inline-default = "0.1.1"
 serde_json = { version = "1.0.103", default-features = false, features = ["raw_value"] }
 serde_prometheus = "0.2.3"
