@@ -312,6 +312,10 @@ pub async fn user_balance_post(
             continue;
         }
 
+        if log.address != payment_factory_address {
+            continue;
+        }
+
         // Parse the log into an event
         if let Ok(event) = payment_factory_contract
             .decode_event::<payment_factory::PaymentReceivedFilter>(
