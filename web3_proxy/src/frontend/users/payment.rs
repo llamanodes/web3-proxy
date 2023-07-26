@@ -318,7 +318,7 @@ pub async fn user_balance_post(
             continue;
         }
 
-        info!(?log, "likely relevant");
+        debug!(?log, "likely relevant");
 
         // Parse the log into an event
         match payment_factory_contract.decode_event::<payment_factory::PaymentReceivedFilter>(
@@ -417,7 +417,7 @@ pub async fn user_balance_post(
                     "tx_hash": tx_hash,
                 });
 
-                debug!("deposit data: {:#?}", x);
+                info!("deposit: {:#}", x);
 
                 response_data.push(x);
 
