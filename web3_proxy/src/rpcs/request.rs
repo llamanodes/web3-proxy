@@ -298,9 +298,9 @@ impl OpenRequestHandle {
                     let retry_at = Instant::now() + Duration::from_secs(1);
 
                     if self.rpc.backup {
-                        debug!(?retry_at, "rate limited on {}!", self.rpc);
+                        debug!(?retry_at, ?err, "rate limited on {}!", self.rpc);
                     } else {
-                        warn!(?retry_at, "rate limited on {}!", self.rpc);
+                        warn!(?retry_at, ?err, "rate limited on {}!", self.rpc);
                     }
 
                     hard_limit_until.send_replace(retry_at);

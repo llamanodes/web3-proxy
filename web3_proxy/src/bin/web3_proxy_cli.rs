@@ -68,6 +68,7 @@ enum SubCommand {
     CreateKey(sub_commands::CreateKeySubCommand),
     CreateUser(sub_commands::CreateUserSubCommand),
     DropMigrationLock(sub_commands::DropMigrationLockSubCommand),
+    MassGrantCredits(sub_commands::MassGrantCredits),
     MigrateStatsToV2(sub_commands::MigrateStatsToV2SubCommand),
     Pagerduty(sub_commands::PagerdutySubCommand),
     PopularityContest(sub_commands::PopularityContestSubCommand),
@@ -389,6 +390,15 @@ fn main() -> anyhow::Result<()> {
 
                 // very intentionally, do NOT run migrations here. that would wait forever if the migration lock is abandoned
                 let db_conn = connect_db(db_url, 1, 1).await?;
+
+                x.main(&db_conn).await
+            }
+            SubCommand::MassGrantCredits(x) => {
+                let db_url = cli_config
+                    .db_url
+                    .expect("'--config' (with a db) or '--db-url' is required to run mass_grant_credits");
+
+                let db_conn = get_migrated_db(db_url, 1, 1).await?;
 
                 x.main(&db_conn).await
             }
