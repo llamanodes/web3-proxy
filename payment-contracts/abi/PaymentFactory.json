@@ -22,7 +22,7 @@
             {
                 "name": "account",
                 "type": "address",
-                "indexed": false
+                "indexed": true
             },
             {
                 "name": "token",

@@ -1,5 +1,27 @@
 [
     {
+        "name": "TokenBalanceRecovered",
+        "inputs": [
+            {
+                "name": "receiver",
+                "type": "address",
+                "indexed": false
+            },
+            {
+                "name": "token",
+                "type": "address",
+                "indexed": false
+            },
+            {
+                "name": "amount",
+                "type": "uint256",
+                "indexed": false
+            }
+        ],
+        "anonymous": false,
+        "type": "event"
+    },
+    {
         "stateMutability": "nonpayable",
         "type": "constructor",
         "inputs": [

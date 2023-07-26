@@ -107,7 +107,38 @@ pub mod payment_sweeper {
                     ],
                 ),
             ]),
-            events: ::std::collections::BTreeMap::new(),
+            events: ::core::convert::From::from([
+                (
+                    ::std::borrow::ToOwned::to_owned("TokenBalanceRecovered"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Event {
+                            name: ::std::borrow::ToOwned::to_owned(
+                                "TokenBalanceRecovered",
+                            ),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::EventParam {
+                                    name: ::std::borrow::ToOwned::to_owned("receiver"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                    indexed: false,
+                                },
+                                ::ethers::core::abi::ethabi::EventParam {
+                                    name: ::std::borrow::ToOwned::to_owned("token"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                    indexed: false,
+                                },
+                                ::ethers::core::abi::ethabi::EventParam {
+                                    name: ::std::borrow::ToOwned::to_owned("amount"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    indexed: false,
+                                },
+                            ],
+                            anonymous: false,
+                        },
+                    ],
+                ),
+            ]),
             errors: ::std::collections::BTreeMap::new(),
             receive: false,
             fallback: false,
@@ -195,12 +226,51 @@ pub mod payment_sweeper {
                 .method_hash([13, 124, 148, 161], token)
                 .expect("method not found (this should never happen)")
         }
+        ///Gets the contract's `TokenBalanceRecovered` event
+        pub fn token_balance_recovered_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<
+            ::std::sync::Arc<M>,
+            M,
+            TokenBalanceRecoveredFilter,
+        > {
+            self.0.event()
+        }
+        /// Returns an `Event` builder for all the events of this contract.
+        pub fn events(
+            &self,
+        ) -> ::ethers::contract::builders::Event<
+            ::std::sync::Arc<M>,
+            M,
+            TokenBalanceRecoveredFilter,
+        > {
+            self.0.event_with_filter(::core::default::Default::default())
+        }
     }
     impl<M: ::ethers::providers::Middleware> From<::ethers::contract::Contract<M>>
     for PaymentSweeper<M> {
         fn from(contract: ::ethers::contract::Contract<M>) -> Self {
             Self::new(contract.address(), contract.client())
         }
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethevent(
+        name = "TokenBalanceRecovered",
+        abi = "TokenBalanceRecovered(address,address,uint256)"
+    )]
+    pub struct TokenBalanceRecoveredFilter {
+        pub receiver: ::ethers::core::types::Address,
+        pub token: ::ethers::core::types::Address,
+        pub amount: ::ethers::core::types::U256,
     }
     ///Container type for all input parameters for the `FACTORY` function with signature `FACTORY()` and selector `0x2dd31000`
     #[derive(

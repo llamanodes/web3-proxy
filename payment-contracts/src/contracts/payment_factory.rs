@@ -714,7 +714,7 @@ pub mod payment_factory {
                                 ::ethers::core::abi::ethabi::EventParam {
                                     name: ::std::borrow::ToOwned::to_owned("account"),
                                     kind: ::ethers::core::abi::ethabi::ParamType::Address,
-                                    indexed: false,
+                                    indexed: true,
                                 },
                                 ::ethers::core::abi::ethabi::EventParam {
                                     name: ::std::borrow::ToOwned::to_owned("token"),
@@ -1244,6 +1244,7 @@ pub mod payment_factory {
         abi = "PaymentReceived(address,address,uint256)"
     )]
     pub struct PaymentReceivedFilter {
+        #[ethevent(indexed)]
         pub account: ::ethers::core::types::Address,
         pub token: ::ethers::core::types::Address,
         pub amount: ::ethers::core::types::U256,

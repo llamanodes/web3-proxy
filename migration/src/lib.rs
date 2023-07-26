@@ -41,6 +41,7 @@ mod m20230713_144446_stripe_default_date_created;
 mod m20230713_210511_deposit_add_date_created;
 mod m20230726_072845_default_premium_user_tier;
 mod m20230726_162138_drop_rpc_accounting_v2_fk;
+mod m20230726_225124_reduce_out_of_funds_tier_limits;
 
 pub struct Migrator;
 
@@ -89,6 +90,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20230713_210511_deposit_add_date_created::Migration),
             Box::new(m20230726_072845_default_premium_user_tier::Migration),
             Box::new(m20230726_162138_drop_rpc_accounting_v2_fk::Migration),
+            Box::new(m20230726_225124_reduce_out_of_funds_tier_limits::Migration),
         ]
     }
 }
