@@ -49,12 +49,14 @@ pub struct StatBuffer {
     global_timeseries_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
     influxdb_bucket: Option<String>,
     influxdb_client: Option<influxdb2::Client>,
-    /// a globally unique name
+    /// a globally unique integer. max of 1e6-1
     /// instance names can be re-used but they MUST only ever be used by a single server at a time!
-    instance: String,
+    /// this will be combined with tsdb_window to create a number with a max of 1e9-1
+    uniq_id: i64,
     opt_in_timeseries_buffer: HashMap<RpcQueryKey, BufferedRpcQueryStats>,
     rpc_secret_key_cache: RpcSecretKeyCache,
     tsdb_save_interval_seconds: u32,
+    /// a wrapping counter to keep stats from old times that got delayed from being seen as a duplicate
     tsdb_window: i64,
     num_tsdb_windows: i64,
     user_balance_cache: UserBalanceCache,
@@ -76,7 +78,7 @@ impl StatBuffer {
         tsdb_save_interval_seconds: u32,
         flush_sender: mpsc::Sender<oneshot::Sender<FlushedStats>>,
         flush_receiver: mpsc::Receiver<oneshot::Sender<FlushedStats>>,
-        instance: String,
+        uniq_id: i64,
     ) -> anyhow::Result<Option<SpawnedStatBuffer>> {
         if influxdb_bucket.is_none() {
             influxdb_client = None;
@@ -84,14 +86,14 @@ impl StatBuffer {
 
         let (stat_sender, stat_receiver) = mpsc::unbounded_channel();
 
-        // TODO: get the frontend request timeout and add a minute buffer instead of hard coding `(5 + 1)`
-        let num_tsdb_windows = ((5 + 1) * 60) / tsdb_save_interval_seconds as i64;
-
-        // make sure we have at least 4 windows
-        let num_tsdb_windows = num_tsdb_windows.max(4);
+        let num_tsdb_windows = 1_000;
 
         // start tsdb_window at num_tsdb_windows because the first run increments it at the start and wraps it back to 0
         let tsdb_window = num_tsdb_windows;
+
+        let uniq_id = uniq_id * num_tsdb_windows;
+
+        assert!(uniq_id < 1_000_000_000, "uniq_id too large!");
 
         let mut new = Self {
             accounting_db_buffer: Default::default(),
@@ -101,7 +103,7 @@ impl StatBuffer {
             global_timeseries_buffer: Default::default(),
             influxdb_bucket,
             influxdb_client,
-            instance,
+            uniq_id,
             num_tsdb_windows,
             opt_in_timeseries_buffer: Default::default(),
             rpc_secret_key_cache,
@@ -413,9 +415,11 @@ impl StatBuffer {
             // this has to be done carefully or cardinality becomes a problem!
             // https://docs.influxdata.com/influxdb/v2.0/write-data/best-practices/duplicate-points/
             self.tsdb_window += 1;
-            if self.tsdb_window > self.num_tsdb_windows {
+            if self.tsdb_window >= self.num_tsdb_windows {
                 self.tsdb_window = 0;
             }
+
+            let uniq = self.uniq_id + self.tsdb_window;
 
             let influxdb_bucket = self
                 .influxdb_bucket
@@ -430,13 +434,7 @@ impl StatBuffer {
                 let new_frontend_requests = stat.frontend_requests;
 
                 match stat
-                    .build_timeseries_point(
-                        "global_proxy",
-                        self.chain_id,
-                        key,
-                        &self.instance,
-                        self.tsdb_window,
-                    )
+                    .build_timeseries_point("global_proxy", self.chain_id, key, uniq)
                     .await
                 {
                     Ok(point) => {
@@ -453,13 +451,7 @@ impl StatBuffer {
             for (key, stat) in self.opt_in_timeseries_buffer.drain() {
                 // TODO: i don't like passing key (which came from the stat) to the function on the stat. but it works for now
                 match stat
-                    .build_timeseries_point(
-                        "opt_in_proxy",
-                        self.chain_id,
-                        key,
-                        &self.instance,
-                        self.tsdb_window,
-                    )
+                    .build_timeseries_point("opt_in_proxy", self.chain_id, key, uniq)
                     .await
                 {
                     Ok(point) => {

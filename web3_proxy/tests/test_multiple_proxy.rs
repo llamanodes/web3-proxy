@@ -34,8 +34,8 @@ async fn test_multiple_proxies_stats_add_up() {
         .unwrap();
 
     // Since when do indices start with 1
-    let x_0 = TestApp::spawn(&a, Some(&db), Some(&influx), Some("app_0".to_string())).await;
-    let x_1 = TestApp::spawn(&a, Some(&db), Some(&influx), Some("app_1".to_string())).await;
+    let x_0 = TestApp::spawn(&a, Some(&db), Some(&influx), Some(0)).await;
+    let x_1 = TestApp::spawn(&a, Some(&db), Some(&influx), Some(1)).await;
 
     // make a user and give them credits
     let user_0_wallet = a.wallet(0);
