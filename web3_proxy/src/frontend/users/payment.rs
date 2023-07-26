@@ -308,121 +308,128 @@ pub async fn user_balance_post(
     let mut response_data = vec![];
     for log in transaction_receipt.logs {
         if let Some(true) = log.removed {
+            debug!(?log, "log removed");
             // TODO: do we need to make sure this row is deleted? it should be handled by `handle_uncle_block`
             continue;
         }
 
         if log.address != payment_factory_address {
+            trace!(?log, ?payment_factory_address, "wrong log address");
             continue;
         }
 
+        info!(?log, "likely relevant");
+
         // Parse the log into an event
-        if let Ok(event) = payment_factory_contract
-            .decode_event::<payment_factory::PaymentReceivedFilter>(
-                "PaymentReceived",
-                log.topics,
-                log.data,
-            )
-        {
-            let recipient_account = event.account;
-            let payment_token_address = event.token;
-            let payment_token_wei = event.amount;
+        match payment_factory_contract.decode_event::<payment_factory::PaymentReceivedFilter>(
+            "PaymentReceived",
+            log.topics,
+            log.data,
+        ) {
+            Err(err) => debug!(?err, "failed parsing log as PaymentReceived"),
+            Ok(event) => {
+                let recipient_account = event.account;
+                let payment_token_address = event.token;
+                let payment_token_wei = event.amount;
 
-            // there is no need to check that payment_token_address is an allowed token
-            // the smart contract already reverts if the token isn't accepted
+                // there is no need to check that payment_token_address is an allowed token
+                // the smart contract already reverts if the token isn't accepted
 
-            // we used to skip here if amount is 0, but that means the txid wouldn't ever show up in the database which could be confusing
-            // its irrelevant though because the contract already reverts for 0 value
+                // we used to skip here if amount is 0, but that means the txid wouldn't ever show up in the database which could be confusing
+                // its irrelevant though because the contract already reverts for 0 value
 
-            let log_index = log
-                .log_index
-                .context("no log_index. transaction must not be confirmed")?
-                .as_u64();
+                let log_index = log
+                    .log_index
+                    .context("no log_index. transaction must not be confirmed")?
+                    .as_u64();
 
-            // the internal provider will handle caching of requests
-            let payment_token = IERC20::new(payment_token_address, app.internal_provider().clone());
+                // the internal provider will handle caching of requests
+                let payment_token =
+                    IERC20::new(payment_token_address, app.internal_provider().clone());
 
-            // get the decimals for the token
-            // hopefully u32 is always enough, because the Decimal crate doesn't accept a larger scale
-            // <https://eips.ethereum.org/EIPS/eip-20> uses uint8, but i've seen pretty much every int in practice
-            let payment_token_decimals = payment_token.decimals().call().await?.as_u32();
-            let mut payment_token_amount = Decimal::from_str_exact(&payment_token_wei.to_string())?;
-            // Setting the scale already does the decimal shift, no need to divide a second time
-            payment_token_amount.set_scale(payment_token_decimals)?;
+                // get the decimals for the token
+                // hopefully u32 is always enough, because the Decimal crate doesn't accept a larger scale
+                // <https://eips.ethereum.org/EIPS/eip-20> uses uint8, but i've seen pretty much every int in practice
+                let payment_token_decimals = payment_token.decimals().call().await?.as_u32();
+                let mut payment_token_amount =
+                    Decimal::from_str_exact(&payment_token_wei.to_string())?;
+                // Setting the scale already does the decimal shift, no need to divide a second time
+                payment_token_amount.set_scale(payment_token_decimals)?;
 
-            trace!(
-                "found deposit event for: {:?} {:?} {:?}",
-                recipient_account,
-                payment_token_address,
-                payment_token_amount
-            );
+                trace!(
+                    "found deposit event for: {:?} {:?} {:?}",
+                    recipient_account,
+                    payment_token_address,
+                    payment_token_amount
+                );
 
-            let txn = db_conn.begin().await?;
+                let txn = db_conn.begin().await?;
 
-            let (recipient, recipient_tier) =
-                match get_user_and_tier_from_address(&recipient_account, &txn).await? {
-                    Some(x) => x,
-                    None => {
-                        let (user, _) = register_new_user(&txn, recipient_account).await?;
+                let (recipient, recipient_tier) =
+                    match get_user_and_tier_from_address(&recipient_account, &txn).await? {
+                        Some(x) => x,
+                        None => {
+                            let (user, _) = register_new_user(&txn, recipient_account).await?;
 
-                        (user, None)
-                    }
+                            (user, None)
+                        }
+                    };
+
+                // For now we only accept stablecoins. This will need conversions if we accept other tokens.
+                // 1$ = Decimal(1) for any stablecoin
+                // TODO: Let's assume that people don't buy too much at _once_, we do support >$1M which should be fine for now
+                // TODO: double check. why >$1M? Decimal type in the database?
+                trace!(
+                    "Arithmetic is: {:?} / 10 ^ {:?} = {:?}",
+                    payment_token_wei,
+                    payment_token_decimals,
+                    payment_token_amount
+                );
+
+                trace!("Saving log {} of txid {:?}", log_index, tx_hash);
+                let receipt = increase_on_chain_balance_receipt::ActiveModel {
+                    id: sea_orm::ActiveValue::NotSet,
+                    amount: sea_orm::ActiveValue::Set(payment_token_amount),
+                    block_hash: sea_orm::ActiveValue::Set(block_hash.encode_hex()),
+                    chain_id: sea_orm::ActiveValue::Set(app.config.chain_id),
+                    deposit_to_user_id: sea_orm::ActiveValue::Set(recipient.id),
+                    log_index: sea_orm::ActiveValue::Set(log_index),
+                    token_address: sea_orm::ActiveValue::Set(payment_token_address.encode_hex()),
+                    tx_hash: sea_orm::ActiveValue::Set(tx_hash.encode_hex()),
+                    date_created: sea_orm::ActiveValue::NotSet,
                 };
+                trace!("Trying to insert receipt {:?}", receipt);
 
-            // For now we only accept stablecoins. This will need conversions if we accept other tokens.
-            // 1$ = Decimal(1) for any stablecoin
-            // TODO: Let's assume that people don't buy too much at _once_, we do support >$1M which should be fine for now
-            // TODO: double check. why >$1M? Decimal type in the database?
-            trace!(
-                "Arithmetic is: {:?} / 10 ^ {:?} = {:?}",
-                payment_token_wei,
-                payment_token_decimals,
-                payment_token_amount
-            );
+                receipt.save(&txn).await?;
 
-            trace!("Saving log {} of txid {:?}", log_index, tx_hash);
-            let receipt = increase_on_chain_balance_receipt::ActiveModel {
-                id: sea_orm::ActiveValue::NotSet,
-                amount: sea_orm::ActiveValue::Set(payment_token_amount),
-                block_hash: sea_orm::ActiveValue::Set(block_hash.encode_hex()),
-                chain_id: sea_orm::ActiveValue::Set(app.config.chain_id),
-                deposit_to_user_id: sea_orm::ActiveValue::Set(recipient.id),
-                log_index: sea_orm::ActiveValue::Set(log_index),
-                token_address: sea_orm::ActiveValue::Set(payment_token_address.encode_hex()),
-                tx_hash: sea_orm::ActiveValue::Set(tx_hash.encode_hex()),
-                date_created: sea_orm::ActiveValue::NotSet,
-            };
-            trace!("Trying to insert receipt {:?}", receipt);
+                grant_premium_tier(&recipient, recipient_tier.as_ref(), &txn)
+                    .await
+                    .web3_context("granting premium tier")?;
 
-            receipt.save(&txn).await?;
+                txn.commit().await?;
 
-            grant_premium_tier(&recipient, recipient_tier.as_ref(), &txn)
-                .await
-                .web3_context("granting premium tier")?;
+                let x = json!({
+                    "amount": payment_token_amount,
+                    "block_hash": block_hash,
+                    "log_index": log_index,
+                    "recipient_account": recipient_account,
+                    "token": payment_token_address,
+                    "tx_hash": tx_hash,
+                });
 
-            txn.commit().await?;
+                debug!("deposit data: {:#?}", x);
 
-            let x = json!({
-                "amount": payment_token_amount,
-                "block_hash": block_hash,
-                "log_index": log_index,
-                "recipient_account": recipient_account,
-                "token": payment_token_address,
-                "tx_hash": tx_hash,
-            });
+                response_data.push(x);
 
-            debug!("deposit data: {:#?}", x);
-
-            response_data.push(x);
-
-            // invalidate the cache as well
-            if let Err(err) = app
-                .user_balance_cache
-                .invalidate(&recipient.id, &db_conn, &app.rpc_secret_key_cache)
-                .await
-            {
-                warn!(?err, user_id=%recipient.id, "unable to invalidate cache");
-            };
+                // invalidate the cache as well
+                if let Err(err) = app
+                    .user_balance_cache
+                    .invalidate(&recipient.id, &db_conn, &app.rpc_secret_key_cache)
+                    .await
+                {
+                    warn!(?err, user_id=%recipient.id, "unable to invalidate cache");
+                };
+            }
         }
     }
 
