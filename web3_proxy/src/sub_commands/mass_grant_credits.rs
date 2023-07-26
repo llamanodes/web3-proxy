@@ -50,20 +50,22 @@ impl MassGrantCredits {
             let txn = db_conn.begin().await?;
 
             for user_to_upgrade in users_to_upgrade {
-                let increase_balance_receipt = admin_increase_balance_receipt::ActiveModel {
-                    amount: sea_orm::Set(self.credits),
-                    // TODO: allow customizing the admin id
-                    admin_id: sea_orm::Set(1),
-                    deposit_to_user_id: sea_orm::Set(user_to_upgrade.id),
-                    note: sea_orm::Set("mass grant credits".into()),
-                    ..Default::default()
-                };
+                if self.credits > 0.into() {
+                    let increase_balance_receipt = admin_increase_balance_receipt::ActiveModel {
+                        amount: sea_orm::Set(self.credits),
+                        // TODO: allow customizing the admin id
+                        admin_id: sea_orm::Set(1),
+                        deposit_to_user_id: sea_orm::Set(user_to_upgrade.id),
+                        note: sea_orm::Set("mass grant credits".into()),
+                        ..Default::default()
+                    };
+                    increase_balance_receipt.save(&txn).await?;
+                }
 
                 let mut user_to_upgrade = user_to_upgrade.into_active_model();
 
                 user_to_upgrade.user_tier_id = sea_orm::Set(new_user_tier.id);
 
-                increase_balance_receipt.save(&txn).await?;
                 user_to_upgrade.save(&txn).await?;
             }
 
