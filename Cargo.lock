@@ -1678,7 +1678,7 @@ dependencies = [
 
 [[package]]
 name = "entities"
-version = "0.41.0"
+version = "0.42.0"
 dependencies = [
  "ethers",
  "sea-orm",
@@ -3330,7 +3330,7 @@ dependencies = [
 
 [[package]]
 name = "migration"
-version = "0.41.0"
+version = "0.42.0"
 dependencies = [
  "chrono",
  "sea-orm",
@@ -6982,7 +6982,7 @@ dependencies = [
 
 [[package]]
 name = "web3_proxy"
-version = "0.41.0"
+version = "1.42.0"
 dependencies = [
  "anyhow",
  "arc-swap",

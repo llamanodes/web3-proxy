@@ -12,7 +12,7 @@ impl MigrationTrait for Migration {
                 (UserTier::MaxRequestsPerPeriod, Some("3000").into()),
                 (UserTier::MaxConcurrentRequests, Some("3").into()),
             ])
-            .and_where(Expr::col((UserTier::Title).eq("Premium Out Of Funds")))
+            .and_where(Expr::col(UserTier::Title).eq("Premium Out Of Funds"))
             .to_owned();
 
         manager.exec_stmt(update_out_of_funds_tier).await?;
@@ -20,7 +20,7 @@ impl MigrationTrait for Migration {
         Ok(())
     }
 
-    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+    async fn down(&self, _manager: &SchemaManager) -> Result<(), DbErr> {
         Ok(())
     }
 }
@@ -28,7 +28,6 @@ impl MigrationTrait for Migration {
 #[derive(Iden)]
 enum UserTier {
     Table,
-    Id,
     Title,
     MaxRequestsPerPeriod,
     MaxConcurrentRequests,
