@@ -6,14 +6,16 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        manager
+        let _ = manager
             .drop_foreign_key(
                 ForeignKey::drop()
                     .name("rpc_accounting_v2_ibfk_1")
                     .table(RpcAccountingV2::Table)
                     .to_owned(),
             )
-            .await
+            .await;
+
+        Ok(())
     }
 
     async fn down(&self, _manager: &SchemaManager) -> Result<(), DbErr> {
