@@ -391,7 +391,7 @@ impl OpenRequestHandle {
                         }
                         Err(err) => {
                             warn!(
-                                %method,
+                                ?method,
                                 ?params,
                                 ?err,
                                 "failed parsing eth_call params. unable to save revert",

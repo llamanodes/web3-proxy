@@ -66,7 +66,7 @@ pub async fn websocket_handler(
 
 /// Public entrypoint for WebSocket JSON-RPC requests that uses all synced servers.
 /// Queries all synced backends with every request! This might get expensive!
-#[debug_handler]
+// #[debug_handler]
 pub async fn fastest_websocket_handler(
     Extension(app): Extension<Arc<Web3ProxyApp>>,
     InsecureClientIp(ip): InsecureClientIp,
