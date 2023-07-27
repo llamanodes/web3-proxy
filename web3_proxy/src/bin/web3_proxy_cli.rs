@@ -68,6 +68,7 @@ enum SubCommand {
     CreateKey(sub_commands::CreateKeySubCommand),
     CreateUser(sub_commands::CreateUserSubCommand),
     DropMigrationLock(sub_commands::DropMigrationLockSubCommand),
+    GrantCreditsToAddress(sub_commands::GrantCreditsToAddress),
     MassGrantCredits(sub_commands::MassGrantCredits),
     MigrateStatsToV2(sub_commands::MigrateStatsToV2SubCommand),
     Pagerduty(sub_commands::PagerdutySubCommand),
@@ -81,7 +82,6 @@ enum SubCommand {
     UserImport(sub_commands::UserImportSubCommand),
     // TODO: sub command to downgrade migrations? sea-orm has this but doing downgrades here would be easier+safer
     // TODO: sub command to add new api keys to an existing user?
-    // TODO: sub command to change a user's tier
 }
 
 fn main() -> anyhow::Result<()> {
@@ -373,6 +373,15 @@ fn main() -> anyhow::Result<()> {
                     .expect("'--config' (with a db) or '--db-url' is required to run count_users");
 
                 let db_conn = connect_db(db_url, 1, 1).await?;
+
+                x.main(&db_conn).await
+            }
+            SubCommand::GrantCreditsToAddress(x) => {
+                let db_url = cli_config
+                    .db_url
+                    .expect("'--config' (with a db) or '--db-url' is required to run create_user");
+
+                let db_conn = get_migrated_db(db_url, 1, 1).await?;
 
                 x.main(&db_conn).await
             }
