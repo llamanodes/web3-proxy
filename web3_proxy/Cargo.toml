@@ -83,9 +83,9 @@ rmp-serde = "1.1.2"
 rust_decimal = { version = "1.30.0", features = ["maths"] }
 sentry = { version = "0.31.5", default-features = false, features = ["anyhow", "backtrace", "contexts", "panic", "reqwest", "rustls", "serde_json", "tracing"] }
 sentry-tracing = "0.31.5"
-serde = { version = "1.0.175" }
+serde = { version = "1.0.177" }
 serde-inline-default = "0.1.1"
-serde_json = { version = "1.0.103", default-features = false, features = ["raw_value"] }
+serde_json = { version = "1.0.104", default-features = false, features = ["raw_value"] }
 serde_prometheus = "0.2.3"
 strum = { version = "0.25.0", features = ["derive"] }
 time_01 = { package = "time", version = "0.1.45" }
