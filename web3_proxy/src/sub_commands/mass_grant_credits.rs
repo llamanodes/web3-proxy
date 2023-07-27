@@ -49,6 +49,8 @@ impl MassGrantCredits {
         while let Some(users_to_upgrade) = user_stream.try_next().await? {
             let txn = db_conn.begin().await?;
 
+            info!("Upgrading {} users", users_to_upgrade.len());
+
             for user_to_upgrade in users_to_upgrade {
                 if self.credits > 0.into() {
                     let increase_balance_receipt = admin_increase_balance_receipt::ActiveModel {
