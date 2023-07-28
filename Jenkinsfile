@@ -9,12 +9,9 @@ pipeline {
         ansiColor('xterm')
     }
     environment {
-        // TODO: can we just use jenkin's PROJECT_NAME? I think that might cause problems with things in the provisioning repo
-        REPO_NAME="web3-proxy"
-
         // AWS_ECR_URL needs to be set in jenkin's config.
         // AWS_ECR_URL could really be any docker registry. we just use ECR so that we don't have to manage it
-        REGISTRY="${AWS_ECR_URL}/${REPO_NAME}"
+        REGISTRY="${AWS_ECR_URL}/web3-proxy"
 
         // branch that should get tagged with "latest_$arch" (stable, main, master, etc.)
         LATEST_BRANCH="main"
@@ -22,8 +19,6 @@ pipeline {
         // non-buildkit builds are officially deprecated
         // buildkit is much faster and handles caching much better than the default build process.
         DOCKER_BUILDKIT=1
-
-        GIT_SHORT="${GIT_COMMIT.substring(0,8)}"
     }
     stages {
         stage('build and push') {
