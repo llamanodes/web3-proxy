@@ -58,13 +58,14 @@ RUN --mount=type=cache,target=/root/.cargo/git \
 
 # sccache
 ARG AWS_ACCESS_KEY_ID
+ARG AWS_PROFILE
 ARG AWS_SECRET_ACCESS_KEY
 ARG AWS_SESSION_TOKEN
 ARG BUILD_JOBS=4
-ARG SCCACHE_BUCKET=llamanodes-sccache
-ARG SCCACHE_REGION=us-east-2
-ARG SCCACHE_S3_KEY_PREFIX=web3-proxy
-ARG SCCACHE_S3_USE_SSL=true
+ARG SCCACHE_BUCKET
+ARG SCCACHE_REGION
+ARG SCCACHE_S3_KEY_PREFIX
+ARG SCCACHE_S3_USE_SSL
 RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cache/sccache \
@@ -82,6 +83,7 @@ FROM rust as rust_nextest
 # keep the ARGs from the previous step
 # we probably won't need sccache since we install with binstall. But compiling is a fallback for binstall, so it is possible.
 ARG AWS_ACCESS_KEY_ID
+ARG AWS_PROFILE
 ARG AWS_SECRET_ACCESS_KEY
 ARG AWS_SESSION_TOKEN
 ARG BUILD_JOBS
@@ -105,6 +107,7 @@ FROM rust as rust_foundry
 # keep the ARGs from the previous step
 # we probably won't need sccache since foundry tries to use binaries. But compiling is a fallback, so it is possible.
 ARG AWS_ACCESS_KEY_ID
+ARG AWS_PROFILE
 ARG AWS_SECRET_ACCESS_KEY
 ARG AWS_SESSION_TOKEN
 ARG BUILD_JOBS
@@ -126,6 +129,7 @@ FROM rust as rust_with_env
 
 # keep the ARGs from the previous step
 ARG AWS_ACCESS_KEY_ID
+ARG AWS_PROFILE
 ARG AWS_SECRET_ACCESS_KEY
 ARG AWS_SESSION_TOKEN
 ARG BUILD_JOBS
@@ -159,6 +163,7 @@ COPY --from=rust_nextest /root/.cargo/bin/cargo-nextest* /root/.cargo/bin/
 # keep the ARGs from the previous step
 # sccache should be a huge savings here
 ARG AWS_ACCESS_KEY_ID
+ARG AWS_PROFILE
 ARG AWS_SECRET_ACCESS_KEY
 ARG AWS_SESSION_TOKEN
 ARG BUILD_JOBS
@@ -192,6 +197,7 @@ FROM rust_with_env as build_app
 # keep the ARGs from the previous step
 # sccache should be a huge savings here
 ARG AWS_ACCESS_KEY_ID
+ARG AWS_PROFILE
 ARG AWS_SECRET_ACCESS_KEY
 ARG AWS_SESSION_TOKEN
 ARG BUILD_JOBS
