@@ -234,11 +234,13 @@ impl CacheMode {
             "eth_getBlockByHash" => {
                 // TODO: double check that any node can serve this
                 // TODO: can a block change? like what if it gets orphaned?
+                // TODO: make sure re-orgs work properly!
                 return Ok(CacheMode::CacheSuccessForever);
             }
             "eth_getBlockByNumber" => {
                 // TODO: double check that any node can serve this
                 // TODO: CacheSuccessForever if the block is old enough
+                // TODO: make sure re-orgs work properly!
                 return Ok(CacheMode::Cache {
                     block: head_block.into(),
                     cache_errors: true,
@@ -351,6 +353,13 @@ impl CacheMode {
                 return Ok(CacheMode::CacheSuccessForever);
             }
             "eth_getUncleCountByBlockNumber" => 0,
+            "eth_maxPriorityFeePerGas" => {
+                // TODO: this might be too aggressive. i think it can change before a block is mined
+                return Ok(CacheMode::Cache {
+                    block: head_block.into(),
+                    cache_errors: false,
+                });
+            }
             _ => {
                 // some other command that doesn't take block numbers as an argument
                 // since we are caching with the head block, it should be safe to cache_errors
