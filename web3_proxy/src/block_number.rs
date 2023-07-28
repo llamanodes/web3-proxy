@@ -230,6 +230,13 @@ impl CacheMode {
         let block_param_id = match method {
             "eth_call" => 1,
             "eth_estimateGas" => 1,
+            "eth_feeHistory" => 1,
+            "eth_gasPrice" => {
+                return Ok(CacheMode::Cache {
+                    block: head_block.into(),
+                    cache_errors: false,
+                });
+            }
             "eth_getBalance" => 1,
             "eth_getBlockByHash" => {
                 // TODO: double check that any node can serve this
