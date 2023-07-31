@@ -4,7 +4,7 @@ Web3_proxy is a fast caching and load-balancing proxy designed for web3 (Ethereu
 
 **Under construction!** Please note that the code is currently under active development. If you wish to run the proxy yourself, please send us a message on Discord, and we can explain things that aren't documented yet. Most RPC methods are currently supported, though filters will be added soon. Additionally, more tests are always needed.
 
-Signed transactions `(eth_sendRawTransaction)` are sent in parallel to the configured private RPCs (NeoC, Eden, BloxRoute, Flashbots, etc.). A tiering and more intelligent routing system is under active development.
+Signed transactions `(eth_sendRawTransaction)` are sent in parallel to the configured private RPCs (NeoC, Eden, BloxRoute, Flashbots, etc.).
 
 All other requests are sent to an RPC server that is currently on the latest block (LlamaNodes, Alchemy, Moralis, Rivet, your node, or one of many other providers). If multiple servers are in sync, we prioritize servers based on their `active_requests` and request latency. Please keep in mind that this means that the fastest server is most likely to serve requests, while slower servers are unlikely to ever receive any requests.
 
