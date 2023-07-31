@@ -1,14 +1,14 @@
 # web3_proxy
 
-Web3_proxy is a fast caching and load balancing proxy for web3 (Ethereum or similar) JsonRPC servers.
+Web3_proxy is a fast caching and load-balancing proxy designed for web3 (Ethereum or similar) JsonRPC servers.
 
-**Under construction!** This code is under active development. If you want to run this proxy youself, send us a message on [Discord](https://discord.llamanodes.com/) and I can explain things that aren't documented yet. Most RPC methods are supported, but filters are coming soon. And of course, more tests are always needed.
+**Under construction!** Please note that the code is currently under active development. If you wish to run the proxy yourself, please send us a message on Discord, and we can explain things that aren't documented yet. Most RPC methods are currently supported, though filters will be added soon. Additionally, more tests are always needed.
 
-Signed transactions (eth_sendRawTransaction) are sent in parallel to the configured private RPCs (NeoC, Eden, Ethermine, Flashbots, etc.).
+Signed transactions `(eth_sendRawTransaction)` are sent in parallel to the configured private RPCs (NeoC, Eden, BloxRoute, Flashbots, etc.). A tiering and more intelligent routing system is under active development.
 
-All other requests are sent to an RPC server on the latest block (llamanodes, alchemy, moralis, rivet, your own node, or one of many other providers). If multiple servers are in sync, they are prioritized by `active_requests` and request latency. Note that this means that the fastest server is most likely to serve requests and slow servers are unlikely to ever get any requests.
+All other requests are sent to an RPC server that is currently on the latest block (LlamaNodes, Alchemy, Moralis, Rivet, your node, or one of many other providers). If multiple servers are in sync, we prioritize servers based on their `active_requests` and request latency. Please keep in mind that this means that the fastest server is most likely to serve requests, while slower servers are unlikely to ever receive any requests.
 
-Each server has different limits to configure. The `soft_limit` is the number of parallel active requests where a server starts to slow down. The `hard_limit` is where a server starts giving rate limits or other errors.
+Each server has different limits that can be configured. The `soft_limit` is the number of parallel active requests where a server starts to slow down, while the `hard_limit` is where a server starts giving rate limits or other errors.
 
 ## Quick development
 
