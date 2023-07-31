@@ -80,10 +80,10 @@ rdkafka = { version = "0.33.2", features = ["tracing"] }
 regex = "1.9.1"
 reqwest = { version = "0.11.18", default-features = false, features = ["deflate", "gzip", "json", "tokio-rustls"] }
 rmp-serde = "1.1.2"
-rust_decimal = { version = "1.30.0", features = ["maths"] }
+rust_decimal = { version = "1.31.0", features = ["maths"] }
 sentry = { version = "0.31.5", default-features = false, features = ["anyhow", "backtrace", "contexts", "panic", "reqwest", "rustls", "serde_json", "tracing"] }
 sentry-tracing = "0.31.5"
-serde = { version = "1.0.177" }
+serde = { version = "1.0.180" }
 serde-inline-default = "0.1.1"
 serde_json = { version = "1.0.104", default-features = false, features = ["raw_value"] }
 serde_prometheus = "0.2.3"
