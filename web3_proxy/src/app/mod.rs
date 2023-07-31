@@ -1731,10 +1731,16 @@ impl Web3ProxyApp {
                                 // return all the errors now. moka will not cache Err results
                                 Err(err)
                             } else {
+                                // convert jsonrpc errors into JsonRpcResponseEnum, but leave the rest as errors
                                 let response_data: JsonRpcResponseEnum<Arc<RawValue>> = response_data.try_into()?;
 
-                                // TODO: response data should maybe be Arc<JsonRpcResponseEnum<Box<RawValue>>>, but that's more work
-                                Ok(response_data)
+                                if response_data.is_null() {
+                                    // don't ever cache "null" as a success. its too likely to be a problem
+                                    Err(Web3ProxyError::NullJsonRpcResult)
+                                } else {
+                                    // TODO: response data should maybe be Arc<JsonRpcResponseEnum<Box<RawValue>>>, but that's more work
+                                    Ok(response_data)
+                                }
                             }
                         }).await?
                 } else {

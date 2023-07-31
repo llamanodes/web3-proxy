@@ -124,6 +124,8 @@ pub enum Web3ProxyError {
     #[from(ignore)]
     NotImplemented(Cow<'static, str>),
     NoVolatileRedisDatabase,
+    /// make it easy to skip caching null results
+    NullJsonRpcResult,
     OriginRequired,
     #[error(ignore)]
     #[from(ignore)]
@@ -758,6 +760,9 @@ impl Web3ProxyError {
                         data: None,
                     },
                 )
+            }
+            Self::NullJsonRpcResult => {
+                return (StatusCode::OK, JsonRpcResponseEnum::NullResult);
             }
             Self::OriginRequired => {
                 trace!("OriginRequired");

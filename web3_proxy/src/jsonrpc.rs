@@ -366,6 +366,10 @@ impl JsonRpcForwardedResponse {
 
     pub fn from_response_data(data: JsonRpcResponseEnum<Arc<RawValue>>, id: Box<RawValue>) -> Self {
         match data {
+            JsonRpcResponseEnum::NullResult => {
+                let x: Box<RawValue> = Default::default();
+                Self::from_raw_response(x.into(), id)
+            }
             JsonRpcResponseEnum::Result { value, .. } => Self::from_raw_response(value, id),
             JsonRpcResponseEnum::RpcError {
                 error_data: value, ..

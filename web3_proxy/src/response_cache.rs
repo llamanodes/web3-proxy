@@ -89,6 +89,7 @@ pub type JsonRpcResponseCache = Cache<u64, JsonRpcResponseEnum<Arc<RawValue>>>;
 /// TODO: we might need one that holds RawValue and one that holds serde_json::Value
 #[derive(Clone, Debug)]
 pub enum JsonRpcResponseEnum<R> {
+    NullResult,
     Result {
         value: R,
         num_bytes: u32,
@@ -103,8 +104,25 @@ pub enum JsonRpcResponseEnum<R> {
 impl<R> JsonRpcResponseEnum<R> {
     pub fn num_bytes(&self) -> u32 {
         match self {
+            Self::NullResult => 1,
             Self::Result { num_bytes, .. } => *num_bytes,
             Self::RpcError { num_bytes, .. } => *num_bytes,
+        }
+    }
+}
+
+impl<R> JsonRpcResponseEnum<Option<R>> {
+    pub fn is_null(&self) -> bool {
+        matches!(self, Self::NullResult | Self::Result { value: None, .. })
+    }
+}
+
+impl JsonRpcResponseEnum<Arc<RawValue>> {
+    pub fn is_null(&self) -> bool {
+        match self {
+            Self::NullResult => true,
+            Self::Result { value, .. } => value.get() == "null",
+            _ => false,
         }
     }
 }
