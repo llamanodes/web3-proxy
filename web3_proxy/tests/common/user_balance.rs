@@ -18,6 +18,8 @@ pub async fn user_get_balance(
         .bearer_auth(login_response.bearer_token)
         .send()
         .await
+        .unwrap()
+        .error_for_status()
         .unwrap();
     trace!(
         ?balance_response,

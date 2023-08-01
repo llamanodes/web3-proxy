@@ -25,7 +25,13 @@ pub async fn create_user(
         x.proxy_provider.url(),
         user_wallet.address()
     );
-    let user_login_message = r.get(user_login_get_url).send().await.unwrap();
+    let user_login_message = r
+        .get(user_login_get_url)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
     let user_login_message = user_login_message.text().await.unwrap();
 
     // Sign the message and POST it to login as the user

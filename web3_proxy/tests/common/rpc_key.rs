@@ -47,6 +47,8 @@ pub async fn user_get_first_rpc_key(
         .bearer_auth(login_response.bearer_token)
         .send()
         .await
+        .unwrap()
+        .error_for_status()
         .unwrap();
     info!(?rpc_key_response);
 

@@ -20,6 +20,8 @@ pub async fn user_get_mysql_stats(
         .bearer_auth(login_response.bearer_token)
         .send()
         .await
+        .unwrap()
+        .error_for_status()
         .unwrap();
     trace!(
         ?_stats_response,
@@ -46,6 +48,8 @@ pub async fn user_get_influx_stats_detailed(
         .bearer_auth(login_response.bearer_token)
         .send()
         .await
+        .unwrap()
+        .error_for_status()
         .unwrap();
     info!(
         ?_stats_response,
@@ -88,6 +92,8 @@ pub async fn user_get_influx_stats_aggregated(
         .bearer_auth(login_response.bearer_token)
         .send()
         .await
+        .unwrap()
+        .error_for_status()
         .unwrap();
     info!(
         ?_stats_response,

@@ -25,7 +25,13 @@ pub async fn create_user_as_admin(
         x.proxy_provider.url(),
         admin_wallet.address()
     );
-    let admin_login_message = r.get(admin_login_get_url).send().await.unwrap();
+    let admin_login_message = r
+        .get(admin_login_get_url)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
     let admin_login_message = admin_login_message.text().await.unwrap();
 
     // Sign the message and POST it to login as admin
@@ -80,7 +86,9 @@ pub async fn create_user_as_admin(
         x.proxy_provider.url(),
         admin_wallet.address()
     );
-    let admin_login_message = r.get(admin_login_get_url).send().await.unwrap();
+    let admin_login_message = r.get(admin_login_get_url).send().await.unwrap()
+    .error_for_status()
+    .unwrap();
 
     assert_eq!(admin_login_message.status(), StatusCode::OK);
 

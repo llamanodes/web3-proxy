@@ -55,6 +55,8 @@ pub async fn get_referral_code(
         .bearer_auth(login_response.bearer_token)
         .send()
         .await
+        .unwrap()
+        .error_for_status()
         .unwrap();
     info!(?referral_link);
     let referral_link = referral_link.json::<serde_json::Value>().await.unwrap();
@@ -80,6 +82,8 @@ pub async fn get_shared_referral_codes(
         .bearer_auth(login_response.bearer_token)
         .send()
         .await
+        .unwrap()
+        .error_for_status()
         .unwrap();
     info!(?shared_referral_codes);
 
@@ -109,6 +113,8 @@ pub async fn get_used_referral_codes(
         .bearer_auth(login_response.bearer_token)
         .send()
         .await
+        .unwrap()
+        .error_for_status()
         .unwrap();
     info!(?used_referral_codes);
 
