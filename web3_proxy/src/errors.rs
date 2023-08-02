@@ -23,7 +23,6 @@ use redis_rate_limiter::redis::RedisError;
 use redis_rate_limiter::RedisPoolError;
 use reqwest::header::ToStrError;
 use rust_decimal::Error as DecimalError;
-use serde::Serialize;
 use serde_json::json;
 use serde_json::value::RawValue;
 use siwe::VerificationError;
@@ -124,6 +123,10 @@ pub enum Web3ProxyError {
     #[from(ignore)]
     NotImplemented(Cow<'static, str>),
     NoVolatileRedisDatabase,
+    /// make it easy to skip caching large results
+    #[error(ignore)]
+    #[display(fmt = "{:?}", _0)]
+    JsonRpcResponse(JsonRpcResponseEnum<Arc<RawValue>>),
     /// make it easy to skip caching null results
     NullJsonRpcResult,
     OriginRequired,
@@ -181,7 +184,7 @@ pub enum Web3ProxyError {
 impl Web3ProxyError {
     /// turn the error into an axum response.
     /// <https://www.jsonrpc.org/specification#error_object>
-    pub fn as_response_parts<R: Serialize>(&self) -> (StatusCode, JsonRpcResponseEnum<R>) {
+    pub fn as_response_parts(&self) -> (StatusCode, JsonRpcResponseEnum<Arc<RawValue>>) {
         // TODO: include a unique request id in the data
         let (code, err): (StatusCode, JsonRpcErrorData) = match self {
             Self::Abi(err) => {
@@ -760,6 +763,10 @@ impl Web3ProxyError {
                         data: None,
                     },
                 )
+            }
+            Self::JsonRpcResponse(response_enum) => {
+                // TODO: shame we have to clone, but its an Arc so its not terrible
+                return (StatusCode::OK, response_enum.clone());
             }
             Self::NullJsonRpcResult => {
                 return (StatusCode::OK, JsonRpcResponseEnum::NullResult);

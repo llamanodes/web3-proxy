@@ -464,7 +464,7 @@ impl ResponseOrBytes<'_> {
                 .len(),
             Self::Bytes(num_bytes) => *num_bytes,
             Self::Error(x) => {
-                let (_, x) = x.as_response_parts::<()>();
+                let (_, x) = x.as_response_parts();
 
                 x.num_bytes() as usize
             }
@@ -578,6 +578,8 @@ impl RequestMetadata {
         // TODO: record first or last timestamp? really, we need multiple
         self.response_timestamp
             .store(Utc::now().timestamp(), atomic::Ordering::Release);
+
+        // TODO: set user_error_response and error_response here instead of outside this function
 
         if let Some(kafka_debug_logger) = self.kafka_debug_logger.as_ref() {
             if let ResponseOrBytes::Response(response) = response {

@@ -109,6 +109,14 @@ impl<R> JsonRpcResponseEnum<R> {
             Self::RpcError { num_bytes, .. } => *num_bytes,
         }
     }
+
+    pub fn is_error(&self) -> bool {
+        match self {
+            Self::NullResult => false,
+            Self::Result { .. } => false,
+            Self::RpcError { .. } => true,
+        }
+    }
 }
 
 impl<R> JsonRpcResponseEnum<Option<R>> {
@@ -157,19 +165,25 @@ impl From<Box<RawValue>> for JsonRpcResponseEnum<Arc<RawValue>> {
     }
 }
 
-impl<R> TryFrom<Web3ProxyError> for JsonRpcResponseEnum<R> {
+impl TryFrom<Web3ProxyError> for JsonRpcResponseEnum<Arc<RawValue>> {
     type Error = Web3ProxyError;
 
     fn try_from(value: Web3ProxyError) -> Result<Self, Self::Error> {
-        if let Web3ProxyError::EthersProvider(ref err) = value {
-            if let Ok(x) = JsonRpcErrorData::try_from(err) {
-                let x = x.into();
+        match value {
+            Web3ProxyError::EthersProvider(err) => {
+                if let Ok(x) = JsonRpcErrorData::try_from(&err) {
+                    let x = x.into();
 
-                return Ok(x);
+                    Ok(x)
+                } else {
+                    Err(err.into())
+                }
             }
+            Web3ProxyError::NullJsonRpcResult => Ok(JsonRpcResponseEnum::NullResult),
+            Web3ProxyError::JsonRpcResponse(x) => Ok(x),
+            Web3ProxyError::JsonRpcErrorData(err) => Ok(err.into()),
+            err => Err(err),
         }
-
-        Err(value)
     }
 }
 

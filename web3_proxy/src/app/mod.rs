@@ -1161,6 +1161,8 @@ impl Web3ProxyApp {
 
         // TODO: trace/kafka log request.params before we send them to _proxy_request_with_caching which might modify them
 
+        // turn some of the Web3ProxyErrors into Ok results
+        // TODO: move this into a helper function
         let (code, response_data) = match self
             ._proxy_request_with_caching(
                 &request.method,
@@ -1175,6 +1177,20 @@ impl Web3ProxyApp {
                 request_metadata
                     .error_response
                     .store(false, Ordering::Release);
+
+                (StatusCode::OK, response_data)
+            }
+            Err(err @ Web3ProxyError::NullJsonRpcResult) => {
+                request_metadata
+                    .error_response
+                    .store(false, Ordering::Release);
+
+                err.as_response_parts()
+            }
+            Err(Web3ProxyError::JsonRpcResponse(response_data)) => {
+                request_metadata
+                    .error_response
+                    .store(response_data.is_error(), Ordering::Release);
 
                 (StatusCode::OK, response_data)
             }
@@ -1706,11 +1722,15 @@ impl Web3ProxyApp {
                     let to_block_num = cache_key.to_block_num().copied();
                     let cache_jsonrpc_errors = cache_key.cache_errors();
 
+                    // don't cache anything larger than 2 MiB
+                    let max_response_cache_bytes = 2 * (1024 ^ 2);  // self.config.max_response_cache_bytes;
+
                     // TODO: try to fetch out of s3
 
                     self
                         .jsonrpc_response_cache
                         .try_get_with::<_, Web3ProxyError>(cache_key.hash(), async {
+                            // TODO: think more about this timeout and test that it works well!
                             let response_data = timeout(
                                 backend_request_timetout + Duration::from_millis(100),
                                 self.balanced_rpcs
@@ -1737,6 +1757,9 @@ impl Web3ProxyApp {
                                 if response_data.is_null() {
                                     // don't ever cache "null" as a success. its too likely to be a problem
                                     Err(Web3ProxyError::NullJsonRpcResult)
+                                } else if response_data.num_bytes() > max_response_cache_bytes {
+                                    // don't cache really large requests
+                                    Err(Web3ProxyError::JsonRpcResponse(response_data))
                                 } else {
                                     // TODO: response data should maybe be Arc<JsonRpcResponseEnum<Box<RawValue>>>, but that's more work
                                     Ok(response_data)
