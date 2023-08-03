@@ -267,7 +267,6 @@ impl Web3Rpcs {
         &self,
         hash: &H256,
         rpc: Option<&Arc<Web3Rpc>>,
-        max_tries: Option<usize>,
         max_wait: Option<Duration>,
     ) -> Web3ProxyResult<Web3ProxyBlock> {
         // first, try to get the hash from our cache
@@ -285,7 +284,7 @@ impl Web3Rpcs {
             }
 
             // hashes don't match! this block must be in the middle of being uncled
-            // TODO: check known uncles
+            // TODO: check known uncles. clear uncle caches
         }
 
         if hash == &H256::zero() {
@@ -303,10 +302,11 @@ impl Web3Rpcs {
                 "eth_getBlockByHash",
                 &get_block_params,
                 None,
-                max_tries,
                 max_wait,
             )
-            .await?
+            .await
+            .ok()
+            .flatten()
         } else {
             None
         };
@@ -319,7 +319,6 @@ impl Web3Rpcs {
                 .internal_request::<_, Option<ArcBlock>>(
                     "eth_getBlockByHash",
                     &get_block_params,
-                    max_tries,
                     max_wait,
                 )
                 .await?;
@@ -391,7 +390,7 @@ impl Web3Rpcs {
         if let Some(block_hash) = self.blocks_by_number.get(num) {
             // TODO: sometimes this needs to fetch the block. why? i thought block_numbers would only be set if the block hash was set
             // TODO: configurable max wait and rpc
-            let block = self.block(&block_hash, None, Some(3), None).await?;
+            let block = self.block(&block_hash, None, None).await?;
 
             return Ok((block, block_depth));
         }
@@ -399,12 +398,7 @@ impl Web3Rpcs {
         // block number not in cache. we need to ask an rpc for it
         // TODO: this error is too broad
         let response = self
-            .internal_request::<_, Option<ArcBlock>>(
-                "eth_getBlockByNumber",
-                &(*num, false),
-                Some(3),
-                None,
-            )
+            .internal_request::<_, Option<ArcBlock>>("eth_getBlockByNumber", &(*num, false), None)
             .await?
             .ok_or(Web3ProxyError::NoBlocksKnown)?;
 
