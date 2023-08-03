@@ -1010,7 +1010,7 @@ impl Web3Rpcs {
                         request_metadata.no_servers.fetch_add(1, Ordering::AcqRel);
                     }
 
-                    tokio::select! {
+                    select! {
                         _ = sleep_until(retry_at) => {
                             trace!("slept!");
                             skip_rpcs.pop();
@@ -1191,7 +1191,7 @@ impl Web3Rpcs {
                         break;
                     };
 
-                    tokio::select! {
+                    select! {
                         _ = sleep_until(max_sleep) => {
                             // rpcs didn't change and we have waited too long. break to return an error
                             warn!(?self, "timeout waiting for try_send_all_synced_connections!");
@@ -1223,11 +1223,21 @@ impl Web3Rpcs {
 
                         // TODO: only make one of these sleep_untils
 
-                        tokio::select! {
-                            _ = sleep_until(start + max_wait) => {break}
-                            _ = sleep_until(retry_at) => {}
-                            _ = watch_consensus_rpcs.changed() => {
-                                watch_consensus_rpcs.borrow_and_update();
+                        let break_at = start + max_wait;
+
+                        if break_at <= retry_at {
+                            select! {
+                                _ = sleep_until(break_at) => {break}
+                                _ = watch_consensus_rpcs.changed() => {
+                                    watch_consensus_rpcs.borrow_and_update();
+                                }
+                            }
+                        } else {
+                            select! {
+                                _ = sleep_until(retry_at) => {}
+                                _ = watch_consensus_rpcs.changed() => {
+                                    watch_consensus_rpcs.borrow_and_update();
+                                }
                             }
                         }
 

@@ -10,6 +10,7 @@ use futures::stream;
 use hashbrown::HashMap;
 use migration::sea_orm::prelude::Decimal;
 use std::time::Duration;
+use tokio::select;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::time::{interval, sleep};
 use tracing::{debug, error, info, trace, warn, Instrument};
@@ -140,7 +141,7 @@ impl StatBuffer {
         let mut db_frontend_requests = 0;
 
         loop {
-            tokio::select! {
+            select! {
                 stat = stat_receiver.recv() => {
                     if let Some(stat) = stat {
                         total_frontend_requests += self._buffer_app_stat(stat).await?;

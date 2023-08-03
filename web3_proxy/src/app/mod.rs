@@ -544,6 +544,7 @@ impl Web3ProxyApp {
                             _ = new_top_config_receiver.changed() => {}
                         }
                     } else {
+                        // configs applied successfully. wait for configs to change or for the app to exit
                         select! {
                             _ = config_watcher_shutdown_receiver.recv() => {
                                 break;

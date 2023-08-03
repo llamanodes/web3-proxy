@@ -34,6 +34,7 @@ use std::net::IpAddr;
 use std::str::from_utf8_mut;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use tokio::select;
 use tokio::sync::{broadcast, mpsc, OwnedSemaphorePermit, RwLock as AsyncRwLock};
 use tracing::trace;
 
@@ -465,7 +466,7 @@ async fn read_web3_socket(
     let (close_sender, mut close_receiver) = broadcast::channel(1);
 
     loop {
-        tokio::select! {
+        select! {
             msg = ws_rx.next() => {
                 if let Some(Ok(msg)) = msg {
                     // clone things so we can handle multiple messages in parallel

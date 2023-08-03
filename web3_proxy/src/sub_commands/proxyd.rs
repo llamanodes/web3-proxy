@@ -165,9 +165,7 @@ impl ProxydSubCommand {
                     return Err(anyhow::anyhow!("oh no! we never got a head block!"))
                 }
                 _ = head_block_receiver.changed() => {
-                    if let Some(head_block) = spawned_app
-                        .app
-                        .head_block_receiver()
+                    if let Some(head_block) = head_block_receiver
                         .borrow_and_update()
                         .as_ref()
                     {
@@ -195,7 +193,7 @@ impl ProxydSubCommand {
         // if everything is working, these should all run forever
         let mut exited_with_err = false;
         let mut frontend_exited = false;
-        tokio::select! {
+        select! {
             x = flatten_handles(spawned_app.app_handles) => {
                 match x {
                     Ok(_) => info!("app_handle exited"),
@@ -245,8 +243,6 @@ impl ProxydSubCommand {
                     }
                 }
             }
-            // TODO: This seems to have been removed on the main branch
-            // TODO: how can we properly watch background handles here? this returns None immediatly and the app exits. i think the bug is somewhere else though
             x = spawned_app.background_handles.next() => {
                 match x {
                     Some(Ok(_)) => info!("quiting from background handles"),
