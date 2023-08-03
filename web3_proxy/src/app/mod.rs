@@ -1723,8 +1723,8 @@ impl Web3ProxyApp {
                     let to_block_num = cache_key.to_block_num().copied();
                     let cache_jsonrpc_errors = cache_key.cache_errors();
 
-                    // don't cache anything larger than 2 MiB
-                    let max_response_cache_bytes = 2 * (1024 ^ 2);  // self.config.max_response_cache_bytes;
+                    // don't cache anything larger than 16 MiB
+                    let max_response_cache_bytes = 16 * (1024 ^ 2);  // self.config.max_response_cache_bytes;
 
                     // TODO: try to fetch out of s3
 
