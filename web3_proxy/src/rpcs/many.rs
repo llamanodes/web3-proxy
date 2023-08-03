@@ -521,6 +521,7 @@ impl Web3Rpcs {
 
         let mut potential_rpcs = Vec::new();
 
+        // TODO: max loop count if no max_wait?
         loop {
             // TODO: need a change so that protected and 4337 rpcs set watch_consensus_rpcs on start
             let ranked_rpcs: Option<Arc<RankedRpcs>> =
@@ -572,9 +573,9 @@ impl Web3Rpcs {
                     }
                 }
 
-                let waiting_for = min_block_needed.max(max_block_needed);
-
                 if let Some(max_wait) = max_wait {
+                    let waiting_for = min_block_needed.max(max_block_needed);
+
                     match ranked_rpcs.should_wait_for_block(waiting_for, skip_rpcs) {
                         ShouldWaitForBlock::NeverReady => break,
                         ShouldWaitForBlock::Ready => {
@@ -589,6 +590,8 @@ impl Web3Rpcs {
                             _ = sleep_until(start + max_wait) => break,
                         },
                     }
+                } else {
+                    break;
                 }
             } else if let Some(max_wait) = max_wait {
                 select! {
