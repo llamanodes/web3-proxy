@@ -1106,9 +1106,9 @@ impl Web3ProxyApp {
                         Some(request_metadata),
                         None,
                         None,
-                        Some(Duration::from_secs(30)),
+                        Some(Duration::from_secs(10)),
                         Some(Level::TRACE.into()),
-                        None,
+                        Some(3),
                     )
                     .await;
 
@@ -1136,7 +1136,7 @@ impl Web3ProxyApp {
                 Some(request_metadata),
                 None,
                 None,
-                Some(Duration::from_secs(30)),
+                Some(Duration::from_secs(10)),
                 Some(Level::TRACE.into()),
                 num_public_rpcs,
             )
@@ -1164,56 +1164,66 @@ impl Web3ProxyApp {
 
         // turn some of the Web3ProxyErrors into Ok results
         // TODO: move this into a helper function
-        let (code, response_data) = match self
-            ._proxy_request_with_caching(
-                &request.method,
-                &mut request.params,
-                head_block,
-                &request_metadata,
-            )
-            .await
-        {
-            Ok(response_data) => {
-                request_metadata
-                    .error_response
-                    .store(false, Ordering::Release);
+        let max_tries = 3;
+        let mut tries = 0;
+        loop {
+            let (code, response_data) = match self
+                ._proxy_request_with_caching(
+                    &request.method,
+                    &mut request.params,
+                    head_block,
+                    &request_metadata,
+                )
+                .await
+            {
+                Ok(response_data) => {
+                    request_metadata
+                        .error_response
+                        .store(false, Ordering::Release);
 
-                (StatusCode::OK, response_data)
-            }
-            Err(err @ Web3ProxyError::NullJsonRpcResult) => {
-                request_metadata
-                    .error_response
-                    .store(false, Ordering::Release);
+                    (StatusCode::OK, response_data)
+                }
+                Err(err @ Web3ProxyError::NullJsonRpcResult) => {
+                    request_metadata
+                        .error_response
+                        .store(false, Ordering::Release);
 
-                err.as_response_parts()
-            }
-            Err(Web3ProxyError::JsonRpcResponse(response_data)) => {
-                request_metadata
-                    .error_response
-                    .store(response_data.is_error(), Ordering::Release);
+                    err.as_response_parts()
+                }
+                Err(Web3ProxyError::JsonRpcResponse(response_data)) => {
+                    request_metadata
+                        .error_response
+                        .store(response_data.is_error(), Ordering::Release);
 
-                (StatusCode::OK, response_data)
-            }
-            Err(err) => {
-                request_metadata
-                    .error_response
-                    .store(true, Ordering::Release);
+                    (StatusCode::OK, response_data)
+                }
+                Err(err) => {
+                    tries += 1;
+                    if tries < max_tries {
+                        // try again
+                        continue
+                    }
 
-                err.as_response_parts()
-            }
-        };
+                    request_metadata
+                        .error_response
+                        .store(true, Ordering::Release);
 
-        let response = JsonRpcForwardedResponse::from_response_data(response_data, response_id);
+                    err.as_response_parts()
+                }
+            };
 
-        // TODO: this serializes twice :/
-        request_metadata.add_response(ResponseOrBytes::Response(&response));
+            let response = JsonRpcForwardedResponse::from_response_data(response_data, response_id);
 
-        let rpcs = request_metadata.backend_rpcs_used();
+            // TODO: this serializes twice :/
+            request_metadata.add_response(ResponseOrBytes::Response(&response));
 
-        // there might be clones in the background, so this isn't a sure thing
-        let _ = request_metadata.try_send_arc_stat();
+            let rpcs = request_metadata.backend_rpcs_used();
 
-        (code, response, rpcs)
+            // there might be clones in the background, so this isn't a sure thing
+            let _ = request_metadata.try_send_arc_stat();
+
+            return (code, response, rpcs)
+        }
     }
 
     /// main logic for proxy_cached_request but in a dedicated function so the try operator is easy to use
@@ -1453,16 +1463,12 @@ impl Web3ProxyApp {
 
                 // TODO: error if the chain_id is incorrect
 
-                let response = timeout(
-                    Duration::from_secs(30),
-                    self
-                        .try_send_protected(
-                            method,
-                            params,
-                            request_metadata,
-                        )
-                )
-                .await?;
+                let response = self
+                    .try_send_protected(
+                        method,
+                        params,
+                        request_metadata,
+                    ).await;
 
                 let mut response = response.try_into()?;
 

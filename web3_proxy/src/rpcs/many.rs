@@ -12,10 +12,10 @@ use crate::frontend::status::MokaCacheSerializer;
 use crate::jsonrpc::{JsonRpcErrorData, JsonRpcParams, JsonRpcResultData};
 use counter::Counter;
 use derive_more::From;
-use ethers::prelude::{ProviderError, U64};
+use ethers::prelude::U64;
 use futures::future::try_join_all;
 use futures::stream::FuturesUnordered;
-use futures::StreamExt;
+use futures::{StreamExt, TryFutureExt};
 use hashbrown::HashMap;
 use itertools::Itertools;
 use moka::future::CacheBuilder;
@@ -31,7 +31,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::select;
 use tokio::sync::{mpsc, watch};
-use tokio::time::{sleep, sleep_until, Duration, Instant};
+use tokio::time::{sleep, sleep_until, timeout, Duration, Instant};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 /// A collection of web3 connections. Sends requests either the current best server or all servers.
@@ -379,20 +379,30 @@ impl Web3Rpcs {
         active_request_handles: Vec<OpenRequestHandle>,
         method: &str,
         params: &P,
-        // TODO: remove this box once i figure out how to do the options
-    ) -> Result<Box<RawValue>, ProviderError> {
+        max_wait: Option<Duration>,
+    ) -> Result<Box<RawValue>, Web3ProxyError> {
         // TODO: if only 1 active_request_handles, do self.try_send_request?
+
+        let max_wait = max_wait.unwrap_or_else(|| Duration::from_secs(300));
 
         // TODO: iter stream
         let responses = active_request_handles
             .into_iter()
             .map(|active_request_handle| async move {
-                let result: Result<Box<RawValue>, _> =
-                    active_request_handle.request(method, &json!(&params)).await;
-                result
+                let result: Result<Result<Box<RawValue>, Web3ProxyError>, Web3ProxyError> =
+                    timeout(
+                        max_wait,
+                        active_request_handle
+                            .request(method, &json!(&params))
+                            .map_err(Web3ProxyError::EthersProvider),
+                    )
+                    .await
+                    .map_err(Web3ProxyError::from);
+
+                result.flatten()
             })
             .collect::<FuturesUnordered<_>>()
-            .collect::<Vec<Result<Box<RawValue>, ProviderError>>>()
+            .collect::<Vec<Result<Box<RawValue>, Web3ProxyError>>>()
             .await;
 
         // TODO: Strings are not great keys, but we can't use RawValue or ProviderError as keys because they don't implement Hash or Eq
@@ -1123,7 +1133,12 @@ impl Web3Rpcs {
                     }
 
                     let x = self
-                        .try_send_parallel_requests(active_request_handles, method, params)
+                        .try_send_parallel_requests(
+                            active_request_handles,
+                            method,
+                            params,
+                            max_wait,
+                        )
                         .await?;
 
                     return Ok(x);
