@@ -32,7 +32,7 @@ use std::sync::Arc;
 use tokio::select;
 use tokio::sync::{mpsc, watch};
 use tokio::time::{sleep, sleep_until, Duration, Instant};
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 
 /// A collection of web3 connections. Sends requests either the current best server or all servers.
 #[derive(From)]
@@ -499,6 +499,7 @@ impl Web3Rpcs {
         }
     }
 
+    #[instrument(level = "trace")]
     pub async fn wait_for_best_rpc(
         &self,
         request_metadata: Option<&Arc<RequestMetadata>>,
@@ -536,6 +537,7 @@ impl Web3Rpcs {
                         .all()
                         .iter()
                         .filter(|rpc| {
+                            // TODO: instrument this?
                             ranked_rpcs.rpc_will_work_now(
                                 skip_rpcs,
                                 min_block_needed,
@@ -586,6 +588,7 @@ impl Web3Rpcs {
                         ShouldWaitForBlock::Wait { .. } => select! {
                             _ = watch_ranked_rpcs.changed() => {
                                 // no need to borrow_and_update because we do that at the top of the loop
+                                trace!("watch ranked rpcs changed");
                             },
                             _ = sleep_until(start + max_wait) => break,
                         },
@@ -594,13 +597,16 @@ impl Web3Rpcs {
                     break;
                 }
             } else if let Some(max_wait) = max_wait {
+                trace!(max_wait = max_wait.as_secs_f32(), "no potential rpcs");
                 select! {
                     _ = watch_ranked_rpcs.changed() => {
                         // no need to borrow_and_update because we do that at the top of the loop
+                        trace!("watch ranked rpcs changed");
                     },
                     _ = sleep_until(start + max_wait) => break,
                 }
             } else {
+                trace!("no potential rpcs and set to not wait");
                 break;
             }
 
@@ -726,64 +732,11 @@ impl Web3Rpcs {
         &self,
         method: &str,
         params: &P,
-        max_tries: Option<usize>,
         max_wait: Option<Duration>,
     ) -> Web3ProxyResult<R> {
         // TODO: no request_metadata means we won't have stats on this internal request.
-        self.request_with_metadata_and_retries(
-            method, params, None, max_tries, max_wait, None, None,
-        )
-        .await
-    }
-
-    /// Make a request with stat tracking.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn request_with_metadata_and_retries<P: JsonRpcParams, R: JsonRpcResultData>(
-        &self,
-        method: &str,
-        params: &P,
-        request_metadata: Option<&Arc<RequestMetadata>>,
-        max_tries: Option<usize>,
-        max_wait: Option<Duration>,
-        min_block_needed: Option<&U64>,
-        max_block_needed: Option<&U64>,
-    ) -> Web3ProxyResult<R> {
-        let mut tries = max_tries.unwrap_or(1);
-
-        let mut last_error = None;
-
-        while tries > 0 {
-            tries -= 1;
-
-            match self
-                .request_with_metadata(
-                    method,
-                    params,
-                    request_metadata,
-                    max_wait,
-                    min_block_needed,
-                    max_block_needed,
-                )
-                .await
-            {
-                Ok(x) => return Ok(x),
-                Err(Web3ProxyError::JsonRpcErrorData(err)) => {
-                    // TODO: retry some of these? i think request_with_metadata is already smart enough though
-                    return Err(err.into());
-                }
-                Err(err) => {
-                    // TODO: only log params in dev
-                    warn!(rpc=%self, %method, ?params, ?err, %tries, "retry-able error");
-                    last_error = Some(err)
-                }
-            }
-        }
-
-        if let Some(err) = last_error {
-            return Err(err);
-        }
-
-        Err(anyhow::anyhow!("no response, but no error either. this is a bug").into())
+        self.request_with_metadata(method, params, None, max_wait, None, None)
+            .await
     }
 
     /// Make a request with stat tracking.
@@ -1262,7 +1215,6 @@ impl Web3Rpcs {
         method: &str,
         params: &P,
         request_metadata: Option<&Arc<RequestMetadata>>,
-        max_tries: Option<usize>,
         max_wait: Option<Duration>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
@@ -1271,11 +1223,10 @@ impl Web3Rpcs {
 
         match proxy_mode {
             ProxyMode::Debug | ProxyMode::Best => {
-                self.request_with_metadata_and_retries(
+                self.request_with_metadata(
                     method,
                     params,
                     request_metadata,
-                    max_tries,
                     max_wait,
                     min_block_needed,
                     max_block_needed,

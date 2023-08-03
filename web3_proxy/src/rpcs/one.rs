@@ -303,7 +303,6 @@ impl Web3Rpc {
                     &[(); 0],
                     // error here are expected, so keep the level low
                     Some(Level::DEBUG.into()),
-                    Some(2),
                     Some(Duration::from_secs(5)),
                 )
                 .await
@@ -328,7 +327,6 @@ impl Web3Rpc {
                     )),
                     // error here are expected, so keep the level low
                     Some(Level::TRACE.into()),
-                    Some(2),
                     Some(Duration::from_secs(5)),
                 )
                 .await;
@@ -419,7 +417,6 @@ impl Web3Rpc {
                 "eth_chainId",
                 &[(); 0],
                 Some(Level::TRACE.into()),
-                Some(2),
                 Some(Duration::from_secs(5)),
             )
             .await?;
@@ -546,7 +543,6 @@ impl Web3Rpc {
                         "eth_getTransactionByHash",
                         &(txid,),
                         error_handler,
-                        Some(2),
                         Some(Duration::from_secs(5)),
                     )
                     .await?
@@ -569,7 +565,6 @@ impl Web3Rpc {
                     "eth_getCode",
                     &(to, block_number),
                     error_handler,
-                    Some(2),
                     Some(Duration::from_secs(5)),
                 )
                 .await?;
@@ -803,7 +798,6 @@ impl Web3Rpc {
                     "eth_getBlockByNumber",
                     &("latest", false),
                     error_handler,
-                    Some(2),
                     Some(Duration::from_secs(5)),
                 )
                 .await;
@@ -839,7 +833,6 @@ impl Web3Rpc {
                         "eth_getBlockByNumber",
                         &("latest", false),
                         error_handler,
-                        Some(2),
                         Some(Duration::from_secs(5)),
                     )
                     .await;
@@ -979,20 +972,12 @@ impl Web3Rpc {
         method: &str,
         params: &P,
         error_handler: Option<RequestErrorHandler>,
-        max_tries: Option<usize>,
         max_wait: Option<Duration>,
     ) -> Web3ProxyResult<R> {
         let authorization = Default::default();
 
-        self.authorized_request(
-            method,
-            params,
-            &authorization,
-            error_handler,
-            max_tries,
-            max_wait,
-        )
-        .await
+        self.authorized_request(method, params, &authorization, error_handler, max_wait)
+            .await
     }
 
     pub async fn authorized_request<P: JsonRpcParams, R: JsonRpcResultData>(
@@ -1001,42 +986,15 @@ impl Web3Rpc {
         params: &P,
         authorization: &Arc<Authorization>,
         error_handler: Option<RequestErrorHandler>,
-        max_tries: Option<usize>,
         max_wait: Option<Duration>,
     ) -> Web3ProxyResult<R> {
-        // TODO: take max_wait as a function argument?
-        let mut tries = max_tries.unwrap_or(1);
+        let handle = self
+            .wait_for_request_handle(authorization, max_wait, error_handler)
+            .await?;
 
-        let mut last_error: Option<Web3ProxyError> = None;
+        let x = handle.request::<P, R>(method, params).await?;
 
-        while tries > 0 {
-            tries -= 1;
-
-            let handle = match self
-                .wait_for_request_handle(authorization, max_wait, error_handler)
-                .await
-            {
-                Ok(x) => x,
-                Err(err) => {
-                    last_error = Some(err);
-                    continue;
-                }
-            };
-
-            match handle.request::<P, R>(method, params).await {
-                Ok(x) => return Ok(x),
-                Err(err) => {
-                    last_error = Some(err.into());
-                    continue;
-                }
-            }
-        }
-
-        if let Some(last_error) = last_error {
-            return Err(last_error);
-        }
-
-        Err(anyhow::anyhow!("authorized_request failed in an unexpected way").into())
+        Ok(x)
     }
 }
 
