@@ -98,7 +98,7 @@ pub async fn clean_block_number(
                             serde_json::from_value(block_hash).context("decoding blockHash")?;
 
                         let block = rpcs
-                            .block(&block_hash, None, None)
+                            .block(&block_hash, None, Some(3), None)
                             .await
                             .context("fetching block number from hash")?;
 
@@ -117,7 +117,7 @@ pub async fn clean_block_number(
                             .context("fetching block hash from number")?;
 
                         let block = rpcs
-                            .block(&block_hash, None, None)
+                            .block(&block_hash, None, Some(3), None)
                             .await
                             .context("fetching block from hash")?;
 
@@ -138,7 +138,7 @@ pub async fn clean_block_number(
                                 .context("fetching block hash from number")?;
 
                             let block = rpcs
-                                .block(&block_hash, None, None)
+                                .block(&block_hash, None, Some(3), None)
                                 .await
                                 .context("fetching block from hash")?;
 
@@ -146,7 +146,7 @@ pub async fn clean_block_number(
                         }
                     } else if let Ok(block_hash) = serde_json::from_value::<H256>(x.clone()) {
                         let block = rpcs
-                            .block(&block_hash, None, None)
+                            .block(&block_hash, None, Some(3), None)
                             .await
                             .context("fetching block number from hash")?;
 

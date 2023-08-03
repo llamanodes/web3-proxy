@@ -860,7 +860,7 @@ impl ConsensusFinder {
 
                 let parent_hash = block_to_check.parent_hash();
 
-                match web3_rpcs.block(parent_hash, Some(rpc), None).await {
+                match web3_rpcs.block(parent_hash, Some(rpc), Some(1), None).await {
                     Ok(parent_block) => block_to_check = parent_block,
                     Err(err) => {
                         debug!(

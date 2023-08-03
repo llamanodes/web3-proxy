@@ -1169,6 +1169,7 @@ impl Web3ProxyApp {
                 &request.method,
                 &mut request.params,
                 head_block,
+                Some(2),
                 &request_metadata,
             )
             .await
@@ -1223,6 +1224,7 @@ impl Web3ProxyApp {
         method: &str,
         params: &mut serde_json::Value,
         head_block: Option<&Web3ProxyBlock>,
+        max_tries: Option<usize>,
         request_metadata: &Arc<RequestMetadata>,
     ) -> Web3ProxyResult<JsonRpcResponseEnum<Arc<RawValue>>> {
         // TODO: don't clone into a new string?
@@ -1336,6 +1338,7 @@ impl Web3ProxyApp {
                             method,
                             params,
                             Some(request_metadata),
+                            max_tries,
                             Some(Duration::from_secs(30)),
                             None,
                             None,
@@ -1375,6 +1378,7 @@ impl Web3ProxyApp {
                         method,
                         params,
                         Some(request_metadata),
+                        max_tries,
                         Some(Duration::from_secs(30)),
                         None,
                         None,
@@ -1408,6 +1412,7 @@ impl Web3ProxyApp {
                         method,
                         params,
                         Some(request_metadata),
+                        max_tries,
                         Some(Duration::from_secs(30)),
                         None,
                         None,
@@ -1432,7 +1437,7 @@ impl Web3ProxyApp {
                             method,
                             params,
                             Some(request_metadata),
-                            
+                            max_tries,
                             Some(Duration::from_secs(30)),
                             // TODO: should this be block 0 instead?
                             Some(&U64::one()),
@@ -1734,7 +1739,7 @@ impl Web3ProxyApp {
                                         method,
                                         params,
                                         Some(request_metadata),
-                                        
+                                        max_tries,
                                         Some(backend_request_timetout),
                                         from_block_num.as_ref(),
                                         to_block_num.as_ref(),
@@ -1770,7 +1775,7 @@ impl Web3ProxyApp {
                             method,
                             params,
                             Some(request_metadata),
-                            
+                            max_tries,
                             Some(backend_request_timetout),
                             None,
                             None,
