@@ -298,7 +298,7 @@ impl Web3Rpcs {
 
         let mut block: Option<ArcBlock> = if let Some(rpc) = rpc {
             // ask a specific rpc
-            // this doesn't have retries, so we do retries with `self.internal_request` below (note the "self" vs "rpc")
+            // if this errors, other rpcs will be tried
             rpc.internal_request::<_, Option<ArcBlock>>(
                 "eth_getBlockByHash",
                 &get_block_params,
@@ -306,7 +306,9 @@ impl Web3Rpcs {
                 max_tries,
                 max_wait,
             )
-            .await?
+            .await
+            .ok()
+            .flatten()
         } else {
             None
         };
