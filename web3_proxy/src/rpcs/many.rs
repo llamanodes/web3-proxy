@@ -170,6 +170,8 @@ impl Web3Rpcs {
 
         let mut names_to_keep = vec![];
 
+        let server_id = app.config.unique_id;
+
         // turn configs into connections (in parallel)
         let mut spawn_handles: FuturesUnordered<_> = rpc_configs
             .into_iter()
@@ -197,6 +199,7 @@ impl Web3Rpcs {
                 let handle = tokio::spawn(server_config.spawn(
                     server_name,
                     vredis_pool,
+                    server_id,
                     chain_id,
                     block_interval,
                     http_client,

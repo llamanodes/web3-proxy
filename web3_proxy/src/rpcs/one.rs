@@ -95,6 +95,7 @@ impl Web3Rpc {
         // optional because this is only used for http providers. websocket-only providers don't use it
         http_client: Option<reqwest::Client>,
         redis_pool: Option<RedisPool>,
+        server_id: i64,
         block_interval: Duration,
         block_map: BlocksByHashCache,
         block_and_rpc_sender: Option<mpsc::UnboundedSender<BlockAndRpc>>,
@@ -105,12 +106,18 @@ impl Web3Rpc {
         let hard_limit = match (config.hard_limit, redis_pool) {
             (None, None) => None,
             (Some(hard_limit), Some(redis_pool)) => {
-                // TODO: in process rate limiter instead? or is deffered good enough?
+                let label = if config.hard_limit_per_endpoint {
+                    format!("{}:{}:{}", chain_id, "endpoint", name)
+                } else {
+                    format!("{}:{}:{}", chain_id, server_id, name)
+                };
+
+                // TODO: in process rate limiter instead? or maybe deferred? or is this good enough?
                 let rrl = RedisRateLimiter::new(
                     "web3_proxy",
-                    &format!("{}:{}", chain_id, name),
+                    &label,
                     hard_limit,
-                    60.0,
+                    config.hard_limit_period as f32,
                     redis_pool,
                 );
 

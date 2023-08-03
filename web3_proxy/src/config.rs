@@ -1,4 +1,5 @@
 use crate::app::Web3ProxyJoinHandle;
+use crate::compute_units::default_usd_per_cu;
 use crate::rpcs::blockchain::{BlocksByHashCache, Web3ProxyBlock};
 use crate::rpcs::one::Web3Rpc;
 use argh::FromArgs;
@@ -50,6 +51,20 @@ pub struct TopConfig {
     /// unknown config options get put here
     #[serde(flatten, default = "HashMap::default")]
     pub extra: HashMap<String, serde_json::Value>,
+}
+
+impl TopConfig {
+    /// TODO: this should probably be part of Deserialize
+    pub fn clean(&mut self) {
+        if !self.extra.is_empty() {
+            warn!(
+                extra=?self.extra.keys(),
+                "unknown TopConfig fields!",
+            );
+        }
+
+        self.app.clean();
+    }
 }
 
 /// shared configuration between Web3Rpcs
@@ -192,15 +207,16 @@ pub struct AppConfig {
     /// influxdb bucket to use for stats
     pub influxdb_bucket: Option<String>,
 
-    /// influxdb_id to use to keep stats from different servers being seen as duplicates of each other
+    /// unique_id keeps stats from different servers being seen as duplicates of each other.
     /// this int is used as part of the "nanoseconds" part of the influx timestamp.
+    /// it can also be used by the rate limiter.
     ///
     /// This **MUST** be set to a unique value for each running server.
-    /// If not set, severs will overwrite eachother's stats.
+    /// If not set, severs will overwrite eachother's stats!
     ///
     /// <https://docs.influxdata.com/influxdb/v2.0/write-data/best-practices/duplicate-points/#increment-the-timestamp>
     #[serde_inline_default(0i64)]
-    pub influxdb_id: i64,
+    pub unique_id: i64,
 
     /// unknown config options get put here
     #[serde(flatten, default = "HashMap::default")]
@@ -210,6 +226,26 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         serde_json::from_str("{}").unwrap()
+    }
+}
+
+impl AppConfig {
+    /// TODO: this should probably be part of Deserialize
+    fn clean(&mut self) {
+        if self.usd_per_cu.is_none() {
+            self.usd_per_cu = Some(default_usd_per_cu(self.chain_id));
+        }
+
+        if let Some(influxdb_id) = self.extra.get("influxdb_id") {
+            self.unique_id = influxdb_id.as_i64().unwrap();
+        }
+
+        if !self.extra.is_empty() {
+            warn!(
+                extra=?self.extra.keys(),
+                "unknown Web3ProxyAppConfig fields!",
+            );
+        }
     }
 }
 
@@ -258,8 +294,15 @@ pub struct Web3RpcConfig {
     /// the requests per second at which the server starts slowing down
     #[serde_inline_default(1u32)]
     pub soft_limit: u32,
-    /// the requests per second at which the server throws errors (rate limit or otherwise)
+    /// the requests per period at which the server throws errors (rate limit or otherwise)
     pub hard_limit: Option<u64>,
+    /// the number of seconds in a rate limiting period
+    /// some providers allow burst limits and rolling windows, but coding that is a lot more complicated
+    #[serde_inline_default(1u32)]
+    pub hard_limit_period: u32,
+    /// if hard limits are applied per server or per endpoint. default is per server
+    #[serde(default = "Default::default")]
+    pub hard_limit_per_endpoint: bool,
     /// only use this rpc if everything else is lagging too far. this allows us to ignore fast but very low limit rpcs
     #[serde(default = "Default::default")]
     pub backup: bool,
@@ -286,6 +329,7 @@ impl Web3RpcConfig {
         self,
         name: String,
         redis_pool: Option<redis_rate_limiter::RedisPool>,
+        server_id: i64,
         chain_id: u64,
         block_interval: Duration,
         http_client: Option<reqwest::Client>,
@@ -294,6 +338,7 @@ impl Web3RpcConfig {
         max_head_block_age: Duration,
     ) -> anyhow::Result<(Arc<Web3Rpc>, Web3ProxyJoinHandle<()>)> {
         if !self.extra.is_empty() {
+            // TODO: move this to a `clean` function
             warn!(extra=?self.extra.keys(), "unknown Web3RpcConfig fields!");
         }
 
@@ -303,6 +348,7 @@ impl Web3RpcConfig {
             chain_id,
             http_client,
             redis_pool,
+            server_id,
             block_interval,
             blocks_by_hash_cache,
             block_sender,

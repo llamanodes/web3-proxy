@@ -5,7 +5,6 @@ use std::time::Duration;
 use std::{fs, thread};
 use tracing::{error, info, trace, warn};
 use web3_proxy::app::{flatten_handle, flatten_handles, Web3ProxyApp};
-use web3_proxy::compute_units::default_usd_per_cu;
 use web3_proxy::config::TopConfig;
 use web3_proxy::globals::global_db_conn;
 use web3_proxy::prelude::anyhow;
@@ -74,11 +73,6 @@ impl ProxydSubCommand {
         flush_stat_buffer_sender: mpsc::Sender<oneshot::Sender<FlushedStats>>,
         flush_stat_buffer_receiver: mpsc::Receiver<oneshot::Sender<FlushedStats>>,
     ) -> anyhow::Result<()> {
-        // TODO: this is gross but it works. i'd rather it be called by serde, but it needs to know the chain id
-        if top_config.app.usd_per_cu.is_none() {
-            top_config.app.usd_per_cu = Some(default_usd_per_cu(top_config.app.chain_id));
-        }
-
         // tokio has code for catching ctrl+c so we use that to shut down in most cases
         // frontend_shutdown_sender is currently only used in tests, but we might make a /shutdown endpoint or something
         // we do not need this receiver. new receivers are made by `shutdown_sender.subscribe()`
@@ -115,10 +109,7 @@ impl ProxydSubCommand {
                     match fs::read_to_string(&top_config_path) {
                         Ok(new_top_config) => match toml::from_str::<TopConfig>(&new_top_config) {
                             Ok(mut new_top_config) => {
-                                if new_top_config.app.usd_per_cu.is_none() {
-                                    new_top_config.app.usd_per_cu =
-                                        Some(default_usd_per_cu(new_top_config.app.chain_id));
-                                }
+                                new_top_config.clean();
 
                                 if new_top_config != current_config {
                                     trace!("current_config: {:#?}", current_config);

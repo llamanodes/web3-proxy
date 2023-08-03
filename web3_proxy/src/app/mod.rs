@@ -168,7 +168,7 @@ impl Web3ProxyApp {
     pub async fn spawn(
         frontend_port: Arc<AtomicU16>,
         prometheus_port: Arc<AtomicU16>,
-        top_config: TopConfig,
+        mut top_config: TopConfig,
         num_workers: usize,
         shutdown_sender: broadcast::Sender<()>,
         flush_stat_buffer_sender: mpsc::Sender<oneshot::Sender<FlushedStats>>,
@@ -177,6 +177,8 @@ impl Web3ProxyApp {
         let stat_buffer_shutdown_receiver = shutdown_sender.subscribe();
         let mut config_watcher_shutdown_receiver = shutdown_sender.subscribe();
         let mut background_shutdown_receiver = shutdown_sender.subscribe();
+
+        top_config.clean();
 
         let (new_top_config_sender, mut new_top_config_receiver) =
             watch::channel(top_config.clone());
@@ -193,20 +195,6 @@ impl Web3ProxyApp {
             assert!(
                 redirect.contains("{{rpc_key_id}}"),
                 "redirect_rpc_key_url user url must contain \"{{rpc_key_id}}\""
-            );
-        }
-
-        if !top_config.extra.is_empty() {
-            warn!(
-                extra=?top_config.extra.keys(),
-                "unknown TopConfig fields!",
-            );
-        }
-
-        if !top_config.app.extra.is_empty() {
-            warn!(
-                extra=?top_config.app.extra.keys(),
-                "unknown Web3ProxyAppConfig fields!",
             );
         }
 
@@ -338,7 +326,7 @@ impl Web3ProxyApp {
             10,
             flush_stat_buffer_sender.clone(),
             flush_stat_buffer_receiver,
-            top_config.app.influxdb_id,
+            top_config.app.unique_id,
         )? {
             // since the database entries are used for accounting, we want to be sure everything is saved before exiting
             important_background_handles.push(spawned_stat_buffer.background_handle);

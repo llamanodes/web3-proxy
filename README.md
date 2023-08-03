@@ -59,9 +59,9 @@ Be sure to set `innodb_rollback_on_timeout=1`
 
 ## Influx
 
-If running multiple web3-proxies connected to the same influxdb bucket, you **must** set `app.influxdb_id` to a globally unique value for each server!
+If running multiple web3-proxies connected to the same influxdb bucket, you **must** set `app.unique_id` to a globally unique value for each server!
 
-`app.influxdb_id` defaults to 0 which will only work if you only have one server!
+`app.unique_id` defaults to 0 which will only work if you only have one server!
 
 ## Common commands
 

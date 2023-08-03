@@ -198,6 +198,8 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
+        top_config.clean();
+
         (Some(top_config), Some(top_config_path))
     } else {
         (None, None)

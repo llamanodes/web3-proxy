@@ -137,7 +137,7 @@ async fn test_multiple_proxies_stats_add_up() {
     // assert_eq!(flush_1_count_0.timeseries, 2);
 
     // give time for more stats to arrive
-    sleep(Duration::from_secs(2)).await;
+    sleep(Duration::from_secs(5)).await;
 
     // no more stats should arrive
     let flush_0_count_1 = x_0.flush_stats().await.unwrap();

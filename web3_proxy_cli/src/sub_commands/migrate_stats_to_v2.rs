@@ -93,7 +93,7 @@ impl MigrateStatsToV2SubCommand {
             60,
             flush_sender,
             flush_receiver,
-            top_config.app.influxdb_id,
+            top_config.app.unique_id,
         )
         .context("Error spawning stat buffer")?
         .context("No stat buffer spawned. Maybe missing influx or db credentials?")?;

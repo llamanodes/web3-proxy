@@ -20,9 +20,10 @@ impl CheckConfigSubCommand {
 
         info!("Loading config @ {}", self.path);
         let top_config: String = fs::read_to_string(self.path)?;
-        let top_config: TopConfig = toml::from_str(&top_config)?;
+        let mut top_config: TopConfig = toml::from_str(&top_config)?;
 
-        // TODO: pretty print
+        top_config.clean();
+
         info!("config: {:#?}", top_config);
 
         if top_config.app.db_url.is_none() {
