@@ -4349,17 +4349,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "proctitle"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "924cd8a0de90723d63fed19c5035ea129913a0bc998b37686a67f1eaf6a2aab5"
-dependencies = [
- "lazy_static",
- "libc",
- "winapi",
-]
-
-[[package]]
 name = "prost"
 version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7219,7 +7208,7 @@ dependencies = [
 
 [[package]]
 name = "web3_proxy"
-version = "1.42.1"
+version = "1.42.2"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -7268,8 +7257,6 @@ dependencies = [
  "pagerduty-rs",
  "parking_lot",
  "payment-contracts",
- "prettytable",
- "proctitle",
  "rdkafka",
  "redis-rate-limiter",
  "regex",
@@ -7298,6 +7285,22 @@ dependencies = [
  "ulid",
  "url",
  "uuid 1.4.1",
+]
+
+[[package]]
+name = "web3_proxy_cli"
+version = "0.1.0"
+dependencies = [
+ "env_logger",
+ "parking_lot",
+ "prettytable",
+ "serde",
+ "serde_json",
+ "test-log",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "web3_proxy",
 ]
 
 [[package]]

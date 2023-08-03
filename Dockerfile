@@ -78,7 +78,7 @@ RUN --mount=type=cache,target=/root/.cargo/git \
 FROM rust as rust_with_env
 
 # changing our features doesn't change any of the steps above
-ENV WEB3_PROXY_FEATURES "deadlock_detection,rdkafka-src"
+ENV WEB3_PROXY_FEATURES "rdkafka-src"
 
 # copy the app
 COPY . .
@@ -130,7 +130,7 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     --frozen \
     --no-default-features \
     --offline \
-    --path ./web3_proxy \
+    --path ./web3_proxy_cli \
     --root /usr/local \
     ; \
     /usr/local/bin/web3_proxy_cli --help | grep 'Usage: web3_proxy_cli'

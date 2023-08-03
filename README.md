@@ -50,7 +50,7 @@ RUST_LOG=web3_proxy=trace,info cargo nextest run
 Run more tests:
 
 ```
-RUST_LOG=web3_proxy=trace,info cargo nextest run --features tests-needing-docker
+RUST_LOG=web3_proxy=trace,info cargo nextest run --features tests-needing-docker,tests_utils
 ```
 
 ## Mysql

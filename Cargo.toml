@@ -8,6 +8,7 @@ members = [
   "rate-counter",
   "redis-rate-limiter",
   "web3_proxy",
+  "web3_proxy_cli",
 ]
 resolver = "2"
 

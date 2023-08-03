@@ -1,18 +1,17 @@
 [package]
 name = "web3_proxy"
-version = "1.42.1"
+version = "1.42.2"
 edition = "2021"
-default-run = "web3_proxy_cli"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["deadlock_detection"]
-deadlock_detection = ["parking_lot/deadlock_detection"]
+default = []
+
 mimalloc = ["dep:mimalloc"]
-tokio-console = ["dep:tokio-console", "dep:console-subscriber"]
 rdkafka-src = ["rdkafka/cmake-build", "rdkafka/libz", "rdkafka/ssl-vendored", "rdkafka/zstd-pkg-config"]
 tests-needing-docker = []
+tokio-console = ["dep:tokio-console", "dep:console-subscriber"]
 
 [dependencies]
 deferred-rate-limiter = { path = "../deferred-rate-limiter" }
@@ -74,8 +73,6 @@ once_cell = { version = "1.18.0" }
 ordered-float = {version = "3.7.0" }
 pagerduty-rs = { version = "0.1.6", default-features = false, features = ["async", "rustls", "sync"] }
 parking_lot = { version = "0.12.1", features = ["arc_lock", "nightly"] }
-prettytable = "0.10.0"
-proctitle = "0.1.1"
 rdkafka = { version = "0.33.2", features = ["tracing"] }
 regex = "1.9.1"
 reqwest = { version = "0.11.18", default-features = false, features = ["deflate", "gzip", "json", "tokio-rustls"] }
@@ -97,7 +94,6 @@ toml = "0.7.6"
 tower = { version = "0.4.13", features = ["timeout", "tracing"] }
 tower-http = { version = "0.4.3", features = ["cors", "normalize-path", "sensitive-headers", "trace"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ulid = { version = "1.0.0", features = ["rand", "uuid", "serde"] }
 url = { version = "2.4.0" }
 uuid = { version = "1.4.1", default-features = false, features = ["fast-rng", "v4", "zerocopy"] }

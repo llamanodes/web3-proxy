@@ -1,0 +1,33 @@
+[package]
+name = "web3_proxy_cli"
+version = "0.1.0"
+edition = "2021"
+default-run = "web3_proxy_cli"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = []
+
+deadlock_detection = ["parking_lot/deadlock_detection"]
+mimalloc = ["web3_proxy/mimalloc"]
+rdkafka-src = ["web3_proxy/rdkafka-src"]
+tests-needing-docker = ["web3_proxy/tests-needing-docker"]
+tokio-console = ["web3_proxy/tokio-console"]
+
+[dependencies]
+web3_proxy = { path = "../web3_proxy" }
+
+parking_lot = { version = "0.12.1", features = ["arc_lock", "nightly"] }
+prettytable = "0.10.0"
+serde = { version = "1.0.180" }
+serde_json = { version = "1.0.104", default-features = false, features = ["raw_value"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+env_logger = "0.10"
+test-log = "0.2.12"
+tokio = { version = "1.29.1", features = ["full", "test-util"] }
+tracing = {version = "0.1", default-features = false}
+tracing-subscriber = {version = "0.3", default-features = false, features = ["env-filter", "fmt"]}
