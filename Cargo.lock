@@ -538,9 +538,9 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
 name = "axum"
-version = "0.6.19"
+version = "0.6.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6a1de45611fdb535bfde7b7de4fd54f4fd2b17b1737c0a59b69bf9b92074b8c"
+checksum = "3b829e4e32b91e643de6eafe82b1d90675f5874230191a4ffbc1b336dec4d6bf"
 dependencies = [
  "async-trait",
  "axum-core",
@@ -566,7 +566,7 @@ dependencies = [
  "sha1",
  "sync_wrapper",
  "tokio",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.20.0",
  "tower",
  "tower-layer",
  "tower-service",
@@ -2094,7 +2094,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.19.0",
  "tracing",
  "tracing-futures",
  "url",
@@ -5204,9 +5204,9 @@ dependencies = [
 
 [[package]]
 name = "sea-orm"
-version = "0.12.1"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90b508f060b689cd91abd76973ba4f1b0f416bb09915e2177fd3c6f853be76bc"
+checksum = "61f6c7daef05dde3476d97001e11fca7a52b655aa3bf4fd610ab2da1176a2ed5"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -5232,9 +5232,9 @@ dependencies = [
 
 [[package]]
 name = "sea-orm-cli"
-version = "0.12.1"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d3b389690bccc6565e6a6af367599957b196288c4f556a7b4157a8c5086eb8d"
+checksum = "3e3f0ff2fa5672e2e7314d107c6498a18e469beeb340a0ed84e3075fce73c2cd"
 dependencies = [
  "chrono",
  "clap 4.3.19",
@@ -5249,9 +5249,9 @@ dependencies = [
 
 [[package]]
 name = "sea-orm-macros"
-version = "0.12.1"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d49560a5a1bbd57f82fa1a622a8deefa51e44ce3a0b27f012f50bb6092a914f"
+checksum = "cd90e73d5f5b184bad525767da29fbfec132b4e62ebd6f60d2f2737ec6468f62"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -5263,9 +5263,9 @@ dependencies = [
 
 [[package]]
 name = "sea-orm-migration"
-version = "0.12.1"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdccbb31e93d1a426a0df84f5f36d0b84d302444c3156e3a4fedb0b8da64ae87"
+checksum = "21f673fcefb3a7e7b89a12b6c0e854ec0be14367635ac3435369c8ad7f11e09e"
 dependencies = [
  "async-trait",
  "clap 4.3.19",
@@ -5533,9 +5533,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.180"
+version = "1.0.181"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ea67f183f058fe88a4e3ec6e2788e003840893b91bac4559cabedd00863b3ed"
+checksum = "6d3e73c93c3240c0bda063c239298e633114c69a888c3e37ca8bb33f343e9890"
 dependencies = [
  "serde_derive",
 ]
@@ -5553,9 +5553,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.180"
+version = "1.0.181"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24e744d7782b686ab3b73267ef05697159cc0e5abbed3f47f9933165e5219036"
+checksum = "be02f6cb0cd3a5ec20bbcfbcbd749f57daddb1a0882dc2e46a6c236c90b977ed"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6572,8 +6572,20 @@ dependencies = [
  "rustls 0.21.5",
  "tokio",
  "tokio-rustls 0.24.1",
- "tungstenite",
+ "tungstenite 0.19.0",
  "webpki-roots 0.23.1",
+]
+
+[[package]]
+name = "tokio-tungstenite"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b2dbec703c26b00d74844519606ef15d09a7d6857860f84ad223dec002ddea2"
+dependencies = [
+ "futures-util",
+ "log",
+ "tokio",
+ "tungstenite 0.20.0",
 ]
 
 [[package]]
@@ -6871,6 +6883,25 @@ dependencies = [
  "url",
  "utf-8",
  "webpki",
+]
+
+[[package]]
+name = "tungstenite"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e862a1c4128df0112ab625f55cd5c934bcb4312ba80b39ae4b4835a3fd58e649"
+dependencies = [
+ "byteorder",
+ "bytes",
+ "data-encoding",
+ "http",
+ "httparse",
+ "log",
+ "rand 0.8.5",
+ "sha1",
+ "thiserror",
+ "url",
+ "utf-8",
 ]
 
 [[package]]
@@ -7208,7 +7239,7 @@ dependencies = [
 
 [[package]]
 name = "web3_proxy"
-version = "1.42.2"
+version = "1.42.3"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -7289,7 +7320,7 @@ dependencies = [
 
 [[package]]
 name = "web3_proxy_cli"
-version = "0.1.0"
+version = "1.42.3"
 dependencies = [
  "env_logger",
  "parking_lot",

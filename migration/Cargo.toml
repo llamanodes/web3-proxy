@@ -11,10 +11,10 @@ path = "src/lib.rs"
 [dependencies]
 tokio = { version = "1.29.1", features = ["full", "tracing"] }
 chrono = "0.4.26"
-sea-orm = { version = "0.12.1", features = ["with-chrono"]}
+sea-orm = { version = "0.12.2", features = ["with-chrono"]}
 
 [dependencies.sea-orm-migration]
-version = "0.12.1"
+version = "0.12.2"
 features = [
   # Enable at least one `ASYNC_RUNTIME` and `DATABASE_DRIVER` feature if you want to run migration via CLI.
   # View the list of supported features at https://www.sea-ql.org/SeaORM/docs/install-and-config/database-and-async-runtime.

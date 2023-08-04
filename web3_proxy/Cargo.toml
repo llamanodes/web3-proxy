@@ -1,6 +1,6 @@
 [package]
 name = "web3_proxy"
-version = "1.42.2"
+version = "1.42.3"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -39,7 +39,7 @@ arc-swap = { version = "1.6.0" }
 argh = "0.1.10"
 async-stripe = { version = "0.22.2", default-features = false, features = ["billing", "checkout", "connect", "runtime-tokio-hyper-rustls", "webhook-events"] }
 async-trait = "0.1.72"
-axum = { version = "0.6.19", features = ["headers", "tracing", "ws"] }
+axum = { version = "0.6.20", features = ["headers", "tracing", "ws"] }
 axum-client-ip = "0.4.1"
 axum-macros = "0.3.8"
 base64 = "0.21.2"
@@ -80,7 +80,7 @@ rmp-serde = "1.1.2"
 rust_decimal = { version = "1.31.0", features = ["maths"] }
 sentry = { version = "0.31.5", default-features = false, features = ["anyhow", "backtrace", "contexts", "panic", "reqwest", "rustls", "serde_json", "tracing"] }
 sentry-tracing = "0.31.5"
-serde = { version = "1.0.180" }
+serde = { version = "1.0.181" }
 serde-inline-default = "0.1.1"
 serde_json = { version = "1.0.104", default-features = false, features = ["raw_value"] }
 serde_prometheus = "0.2.3"

@@ -1,6 +1,6 @@
 [package]
 name = "web3_proxy_cli"
-version = "0.1.0"
+version = "1.42.3"
 edition = "2021"
 default-run = "web3_proxy_cli"
 
@@ -20,7 +20,7 @@ web3_proxy = { path = "../web3_proxy" }
 
 parking_lot = { version = "0.12.1", features = ["arc_lock", "nightly"] }
 prettytable = "0.10.0"
-serde = { version = "1.0.180" }
+serde = { version = "1.0.181" }
 serde_json = { version = "1.0.104", default-features = false, features = ["raw_value"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
