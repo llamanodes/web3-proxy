@@ -11,14 +11,11 @@ pipeline {
     environment {
         // AWS_ECR_URL needs to be set in jenkin's config.
         // AWS_ECR_URL could really be any docker registry. we just use ECR so that we don't have to manage it
-        REGISTRY="${AWS_ECR_URL}/web3-proxy"
+
+        REPO_NAME="web3-proxy"
 
         // branch that should get tagged with "latest_$arch" (stable, main, master, etc.)
         LATEST_BRANCH="main"
-
-        // non-buildkit builds are officially deprecated
-        // buildkit is much faster and handles caching much better than the default build process.
-        DOCKER_BUILDKIT=1
     }
     stages {
         stage('build and push') {
