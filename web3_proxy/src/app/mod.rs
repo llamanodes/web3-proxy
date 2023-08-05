@@ -52,7 +52,7 @@ use std::sync::{atomic, Arc};
 use std::time::Duration;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc, oneshot, watch, Semaphore};
-use tokio::task::JoinHandle;
+use tokio::task::{JoinHandle, yield_now};
 use tokio::time::{sleep, timeout};
 use tracing::{error, info, trace, warn, Level};
 
@@ -540,6 +540,7 @@ impl Web3ProxyApp {
                             _ = new_top_config_receiver.changed() => {}
                         }
                     }
+                    yield_now().await;
                 }
 
                 Ok(())

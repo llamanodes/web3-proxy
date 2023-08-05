@@ -171,6 +171,7 @@ impl ProxydSubCommand {
                     }
                 }
             }
+            yield_now().await;
         }
 
         // start the frontend port

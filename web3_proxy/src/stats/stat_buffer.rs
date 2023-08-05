@@ -12,6 +12,7 @@ use migration::sea_orm::prelude::Decimal;
 use std::time::Duration;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::task::yield_now;
 use tokio::time::{interval, sleep};
 use tracing::{debug, error, info, trace, warn, Instrument};
 
@@ -196,6 +197,7 @@ impl StatBuffer {
                     break;
                 }
             }
+            yield_now().await;
         }
 
         // TODO: wait on all websockets to close

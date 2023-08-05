@@ -31,6 +31,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::select;
 use tokio::sync::{mpsc, watch};
+use tokio::task::yield_now;
 use tokio::time::{sleep, sleep_until, timeout, Duration, Instant};
 use tracing::{debug, error, info, instrument, trace, warn};
 
@@ -618,6 +619,7 @@ impl Web3Rpcs {
                     },
                     _ = sleep_until(start + max_wait) => break,
                 }
+                yield_now().await;
             } else {
                 trace!("no potential rpcs and set to not wait");
                 break;
@@ -985,9 +987,12 @@ impl Web3Rpcs {
                             skip_rpcs.pop();
                         }
                         _ = watch_consensus_rpcs.changed() => {
+                            // we don't actually care what they are now. we just care that they changed
                             watch_consensus_rpcs.borrow_and_update();
+
                         }
                     }
+                    yield_now().await;
                 }
                 OpenRequestResult::NotReady => {
                     if let Some(request_metadata) = request_metadata {
@@ -1174,6 +1179,9 @@ impl Web3Rpcs {
                         _ = watch_consensus_rpcs.changed() => {
                             // consensus rpcs changed!
                             watch_consensus_rpcs.borrow_and_update();
+
+                            yield_now().await;
+
                             // continue to try again
                             continue;
                         }
@@ -1214,6 +1222,8 @@ impl Web3Rpcs {
                                 }
                             }
                         }
+
+                        yield_now().await;
 
                         continue;
                     } else {
