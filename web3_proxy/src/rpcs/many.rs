@@ -355,12 +355,12 @@ impl Web3Rpcs {
         if futures.is_empty() {
             // no transaction or block subscriptions.
 
+            // TODO: i don't like this. it's a hack to keep the tokio task alive
             let handle = tokio::task::Builder::default()
                 .name("noop")
                 .spawn(async move {
                     loop {
                         sleep(Duration::from_secs(600)).await;
-                        // TODO: "every interval, do a health check or disconnect the rpc"
                     }
                 })?;
 
@@ -619,11 +619,12 @@ impl Web3Rpcs {
                     },
                     _ = sleep_until(start + max_wait) => break,
                 }
-                yield_now().await;
             } else {
                 trace!("no potential rpcs and set to not wait");
                 break;
             }
+
+            yield_now().await;
 
             // clear for the next loop
             potential_rpcs.clear();

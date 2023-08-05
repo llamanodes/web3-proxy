@@ -52,7 +52,7 @@ use std::sync::{atomic, Arc};
 use std::time::Duration;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc, oneshot, watch, Semaphore};
-use tokio::task::{JoinHandle, yield_now};
+use tokio::task::{yield_now, JoinHandle};
 use tokio::time::{sleep, timeout};
 use tracing::{error, info, trace, warn, Level};
 
@@ -1190,7 +1190,9 @@ impl Web3ProxyApp {
                     tries += 1;
                     if tries < max_tries {
                         // try again
-                        continue
+                        yield_now().await;
+
+                        continue;
                     }
 
                     request_metadata
@@ -1211,7 +1213,7 @@ impl Web3ProxyApp {
             // there might be clones in the background, so this isn't a sure thing
             let _ = request_metadata.try_send_arc_stat();
 
-            return (code, response, rpcs)
+            return (code, response, rpcs);
         }
     }
 
@@ -1431,7 +1433,6 @@ impl Web3ProxyApp {
                             method,
                             params,
                             Some(request_metadata),
-                            
                             Some(Duration::from_secs(30)),
                             // TODO: should this be block 0 instead?
                             Some(&U64::one()),
@@ -1705,9 +1706,6 @@ impl Web3ProxyApp {
                     }
                 };
 
-                // TODO: different timeouts for different user tiers. get the duration out of the request_metadata
-                let backend_request_timetout = Duration::from_secs(240);
-
                 if let Some(cache_key) = cache_key {
                     let from_block_num = cache_key.from_block_num().copied();
                     let to_block_num = cache_key.to_block_num().copied();
@@ -1721,20 +1719,17 @@ impl Web3ProxyApp {
                     self
                         .jsonrpc_response_cache
                         .try_get_with::<_, Web3ProxyError>(cache_key.hash(), async {
-                            // TODO: think more about this timeout and test that it works well!
-                            let response_data = timeout(
-                                backend_request_timetout + Duration::from_millis(100),
-                                self.balanced_rpcs
+                            // TODO: think more about this timeout. we should probably have a `request_expires_at` Duration on the request_metadata
+                            let response_data = self.balanced_rpcs
                                     .try_proxy_connection::<_, Arc<RawValue>>(
                                         method,
                                         params,
                                         Some(request_metadata),
-                                        
-                                        Some(backend_request_timetout),
+                                        Some(Duration::from_secs(240)),
                                         from_block_num.as_ref(),
                                         to_block_num.as_ref(),
-                                    ))
-                                .await?;
+                                    )
+                                .await;
 
                             if !cache_jsonrpc_errors && let Err(err) = response_data {
                                 // if we are not supposed to cache jsonrpc errors,
@@ -1758,20 +1753,16 @@ impl Web3ProxyApp {
                             }
                         }).await?
                 } else {
-                    let x = timeout(
-                        backend_request_timetout + Duration::from_millis(100),
-                        self.balanced_rpcs
+                    let x = self.balanced_rpcs
                         .try_proxy_connection::<_, Arc<RawValue>>(
                             method,
                             params,
                             Some(request_metadata),
-                            
-                            Some(backend_request_timetout),
+                            Some(Duration::from_secs(240)),
                             None,
                             None,
                         )
-                    )
-                    .await??;
+                    .await?;
 
                     x.into()
                 }

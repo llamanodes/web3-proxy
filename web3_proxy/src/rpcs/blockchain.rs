@@ -205,7 +205,8 @@ impl Web3Rpcs {
                     num: parent_num,
                     hash: *block.parent_hash(),
                 };
-                loop {
+                // TODO: smarter max loop on this
+                for _ in 0..16 {
                     let ancestor_number_to_hash_entry = self
                         .blocks_by_number
                         .entry_by_ref(&ancestor.num)

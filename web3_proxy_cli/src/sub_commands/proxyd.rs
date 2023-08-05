@@ -64,7 +64,7 @@ impl ProxydSubCommand {
     /// this shouldn't really be pub except it makes test fixtures easier
     #[allow(clippy::too_many_arguments)]
     pub async fn _main(
-        mut top_config: TopConfig,
+        top_config: TopConfig,
         top_config_path: Option<PathBuf>,
         frontend_port: Arc<AtomicU16>,
         prometheus_port: Arc<AtomicU16>,
@@ -136,6 +136,7 @@ impl ProxydSubCommand {
                     }
 
                     // TODO: wait for SIGHUP instead?
+                    // TODO: wait for file to change instead of polling?
                     thread::sleep(Duration::from_secs(10));
                 });
             }
@@ -171,7 +172,6 @@ impl ProxydSubCommand {
                     }
                 }
             }
-            yield_now().await;
         }
 
         // start the frontend port
