@@ -53,7 +53,7 @@ use std::time::Duration;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc, oneshot, watch, Semaphore};
 use tokio::task::{yield_now, JoinHandle};
-use tokio::time::{sleep, timeout};
+use tokio::time::sleep;
 use tracing::{error, info, trace, warn, Level};
 
 // TODO: make this customizable?
