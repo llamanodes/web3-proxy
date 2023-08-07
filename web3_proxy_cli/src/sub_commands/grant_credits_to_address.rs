@@ -26,6 +26,10 @@ pub struct GrantCreditsToAddress {
     #[argh(positional)]
     /// how many credits to give. "0" to just see their balance
     credits: Decimal,
+
+    #[argh(option)]
+    /// description of the transaction.
+    note: Option<String>,
 }
 
 impl GrantCreditsToAddress {
@@ -52,7 +56,10 @@ impl GrantCreditsToAddress {
                 // TODO: allow customizing the admin id
                 admin_id: sea_orm::Set(1),
                 deposit_to_user_id: sea_orm::Set(user_id),
-                note: sea_orm::Set("grant credits to address".into()),
+                note: sea_orm::Set(
+                    self.note
+                        .unwrap_or_else(|| "grant credits to address".to_string()),
+                ),
                 ..Default::default()
             };
             increase_balance_receipt.save(&txn).await?;
