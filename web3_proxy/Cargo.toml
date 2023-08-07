@@ -65,7 +65,7 @@ ipnet = { version = "2.8.0", features = ["json"] }
 itertools = "0.11.0"
 listenfd = "1.0.1"
 mimalloc = { version = "0.1.37", optional = true}
-moka = { version = "0.11.2", default-features = false, features = ["atomic64", "future", "parking_lot", "quanta", "triomphe"] }
+moka = { version = "0.11.3", default-features = false, features = ["atomic64", "future", "parking_lot", "quanta", "triomphe"] }
 nanorand = { version = "0.7.0", default-features = false, features = ["std", "tls", "wyrand"] }
 num = { version = "0.4.1" }
 num-traits = "0.2.16"
@@ -74,13 +74,13 @@ ordered-float = {version = "3.7.0" }
 pagerduty-rs = { version = "0.1.6", default-features = false, features = ["async", "rustls", "sync"] }
 parking_lot = { version = "0.12.1", features = ["arc_lock", "nightly"] }
 rdkafka = { version = "0.33.2", features = ["tracing"] }
-regex = "1.9.1"
+regex = "1.9.3"
 reqwest = { version = "0.11.18", default-features = false, features = ["deflate", "gzip", "json", "tokio-rustls"] }
 rmp-serde = "1.1.2"
 rust_decimal = { version = "1.31.0", features = ["maths"] }
 sentry = { version = "0.31.5", default-features = false, features = ["anyhow", "backtrace", "contexts", "panic", "reqwest", "rustls", "serde_json", "tracing"] }
 sentry-tracing = "0.31.5"
-serde = { version = "1.0.181" }
+serde = { version = "1.0.183" }
 serde-inline-default = "0.1.1"
 serde_json = { version = "1.0.104", default-features = false, features = ["raw_value"] }
 serde_prometheus = "0.2.3"
