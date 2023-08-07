@@ -1,0 +1,7 @@
+influx config set -n llamanodes_staging -a
+influx delete --bucket web3_proxy --start 2023-01-01T00:00:00-00:00 --stop "$(date +"%Y-%m-%dT%H:%M:%SZ")" --predicate _measurement="global_proxy"
+influx delete --bucket web3_proxy --start 2023-01-01T00:00:00-00:00 --stop "$(date +"%Y-%m-%dT%H:%M:%SZ")" --predicate _measurement="opt_in_proxy"
+
+influx config set -n llamanodes_production -a
+influx delete --bucket web3_proxy --start 2023-07-18T18:00:00-07:00 --stop "$(date +"%Y-%m-%dT%H:%M:%SZ")" --predicate _measurement="global_proxy"
+influx delete --bucket web3_proxy --start 2023-07-18T18:00:00-07:00 --stop "$(date +"%Y-%m-%dT%H:%M:%SZ")" --predicate _measurement="opt_in_proxy"

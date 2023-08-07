@@ -746,3 +746,10 @@ in another repo: event subscriber
 - [ ] use pin instead of arc for a bunch of things?
   - https://fasterthanli.me/articles/pin-and-suffering
 - [ ] calculate archive depth automatically based on block_data_limits 
+- `[2023-04-11T05:40:33Z ERROR ethers_providers::rpc::transports::ws::backend] Failed to deserialize message e=invalid type: null, expected u64 at line 1 column 26`
+  - "Post http://127.0.0.1:8544: net/http: request canceled (Client.Timeout exceeded while awaiting headers)"
+  - probably need to have a max count on how long we wait for a response
+- [ ] do we need lto = true? is that the default on release?
+- [x] we want rate limits based on request latency instead of head latency. low head latency already increases the chance that the server will be seen
+- [x] server selection isn't picking lagged archive servers correctly
+- [x] sending an empty block on disconnect is bad. the rpc name is used as a key instead of the arc. so the new connection's block is cleared
