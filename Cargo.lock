@@ -7243,7 +7243,7 @@ dependencies = [
 
 [[package]]
 name = "web3_proxy"
-version = "1.42.3"
+version = "1.42.4"
 dependencies = [
  "anyhow",
  "arc-swap",
