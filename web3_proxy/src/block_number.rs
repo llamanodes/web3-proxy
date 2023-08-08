@@ -79,7 +79,7 @@ pub async fn clean_block_number(
             None => {
                 if params.len() == block_param_id {
                     // add the latest block number to the end of the params
-                    params.push(json!(latest_block));
+                    params.push(json!(latest_block.number()));
                 } else {
                     // don't modify the request. only cache with current block
                     // TODO: more useful log that include the
@@ -90,7 +90,9 @@ pub async fn clean_block_number(
                 Ok(latest_block.into())
             }
             Some(x) => {
-                // convert the json value to a BlockNumber
+                // dig into the json value to find a BlockNumber or similar block identifier
+                trace!(?x, "inspecting");
+
                 let (block, change) = if let Some(obj) = x.as_object_mut() {
                     // it might be a Map like `{"blockHash": String("0xa5626dc20d3a0a209b1de85521717a3e859698de8ce98bca1b16822b7501f74b")}`
                     if let Some(block_hash) = obj.get("blockHash").cloned() {
@@ -159,10 +161,11 @@ pub async fn clean_block_number(
                     }
                 };
 
-                // if we changed "latest" to a hash, update the params to match
+                // if we changed "latest" to an actual block, update the params to match
+                // TODO: should we do hash or number? some functions work with either, but others need a number :cry:
                 if change {
-                    trace!(old=%x, new=%block.hash(), "changing block number");
-                    *x = json!(block.hash());
+                    trace!(old=%x, new=%block.num(), "changing block number");
+                    *x = json!(block.num());
                 }
 
                 Ok(block)
@@ -172,6 +175,7 @@ pub async fn clean_block_number(
 }
 
 /// TODO: change this to also return the hash needed?
+#[derive(Debug, Eq, PartialEq)]
 pub enum CacheMode {
     CacheSuccessForever,
     CacheNever,
@@ -188,6 +192,29 @@ pub enum CacheMode {
     },
 }
 
+fn get_block_param_id(method: &str) -> Option<usize> {
+    match method {
+        "debug_traceBlockByHash" => Some(0),
+        "debug_traceBlockByNumber" => Some(0),
+        "debug_traceCall" => Some(1),
+        "debug_traceTransaction" => None,
+        "eth_call" => Some(1),
+        "eth_estimateGas" => Some(1),
+        "eth_feeHistory" => Some(1),
+        "eth_getBalance" => Some(1),
+        "eth_getBlockReceipts" => Some(0),
+        "eth_getBlockTransactionCountByNumber" => Some(0),
+        "eth_getCode" => Some(1),
+        "eth_getStorageAt" => Some(2),
+        "eth_getTransactionByBlockNumberAndIndex" => Some(0),
+        "eth_getTransactionCount" => Some(1),
+        "eth_getUncleByBlockNumberAndIndex" => Some(0),
+        "eth_getUncleCountByBlockNumber" => Some(0),
+        "trace_call" => Some(2),
+        _ => None,
+    }
+}
+
 impl CacheMode {
     pub async fn new(
         method: &str,
@@ -197,9 +224,19 @@ impl CacheMode {
     ) -> Self {
         match Self::try_new(method, params, head_block, rpcs).await {
             Ok(x) => x,
+            Err(Web3ProxyError::NoBlocksKnown) => {
+                warn!(%method, ?params, "no servers available to get block from params. caching with head block");
+                CacheMode::Cache {
+                    block: head_block.into(),
+                    cache_errors: true,
+                }
+            }
             Err(err) => {
-                warn!(?err, "unable to determine cache mode from params");
-                Self::CacheNever
+                error!(%method, ?params, ?err, "could not get block from params. caching with head block");
+                CacheMode::Cache {
+                    block: head_block.into(),
+                    cache_errors: true,
+                }
             }
         }
     }
@@ -210,56 +247,44 @@ impl CacheMode {
         head_block: &Web3ProxyBlock,
         rpcs: &Web3Rpcs,
     ) -> Web3ProxyResult<Self> {
-        // some requests have potentially very large responses
-        // TODO: only skip caching if the response actually is large
-        if method.starts_with("trace_") || method == "debug_traceTransaction" {
-            return Ok(Self::CacheNever);
-        }
-
         if matches!(params, serde_json::Value::Null) {
-            // no params given
+            // no params given. cache with the head block
             return Ok(Self::Cache {
                 block: head_block.into(),
                 cache_errors: true,
             });
         }
 
-        // get the index for the BlockNumber
-        // The BlockNumber is usually the last element.
-        // TODO: double check these. i think some of the getBlock stuff will never need archive
-        let block_param_id = match method {
-            "eth_call" => 1,
-            "eth_estimateGas" => 1,
-            "eth_feeHistory" => 1,
-            "eth_gasPrice" => {
-                return Ok(CacheMode::Cache {
-                    block: head_block.into(),
-                    cache_errors: false,
-                });
+        match method {
+            "debug_traceBlockByHash" => {
+                todo!();
             }
-            "eth_getBalance" => 1,
+            "debug_traceTransaction" => {
+                todo!();
+            }
+            "eth_gasPrice" => Ok(CacheMode::Cache {
+                block: head_block.into(),
+                cache_errors: false,
+            }),
             "eth_getBlockByHash" => {
                 // TODO: double check that any node can serve this
                 // TODO: can a block change? like what if it gets orphaned?
                 // TODO: make sure re-orgs work properly!
-                return Ok(CacheMode::CacheSuccessForever);
+                Ok(CacheMode::CacheSuccessForever)
             }
             "eth_getBlockByNumber" => {
                 // TODO: double check that any node can serve this
                 // TODO: CacheSuccessForever if the block is old enough
                 // TODO: make sure re-orgs work properly!
-                return Ok(CacheMode::Cache {
+                Ok(CacheMode::Cache {
                     block: head_block.into(),
                     cache_errors: true,
-                });
+                })
             }
-            "eth_getBlockReceipts" => 0,
             "eth_getBlockTransactionCountByHash" => {
                 // TODO: double check that any node can serve this
-                return Ok(CacheMode::CacheSuccessForever);
+                Ok(CacheMode::CacheSuccessForever)
             }
-            "eth_getBlockTransactionCountByNumber" => 0,
-            "eth_getCode" => 1,
             "eth_getLogs" => {
                 // TODO: think about this more
                 // TODO: jsonrpc has a specific code for this
@@ -272,7 +297,7 @@ impl CacheMode {
                     })?;
 
                 if obj.contains_key("blockHash") {
-                    return Ok(CacheMode::CacheSuccessForever);
+                    Ok(CacheMode::CacheSuccessForever)
                 } else {
                     let from_block = if let Some(x) = obj.get_mut("fromBlock") {
                         // TODO: use .take instead of clone
@@ -315,87 +340,107 @@ impl CacheMode {
                         head_block.into()
                     };
 
-                    return Ok(CacheMode::CacheRange {
+                    Ok(CacheMode::CacheRange {
                         from_block,
                         to_block,
                         cache_errors: true,
-                    });
+                    })
                 }
             }
-            "eth_getStorageAt" => 2,
             "eth_getTransactionByHash" => {
                 // TODO: not sure how best to look these up
                 // try full nodes first. retry will use archive
-                return Ok(CacheMode::Cache {
+                Ok(CacheMode::Cache {
                     block: head_block.into(),
                     cache_errors: true,
-                });
+                })
             }
             "eth_getTransactionByBlockHashAndIndex" => {
                 // TODO: check a Cache of recent hashes
                 // try full nodes first. retry will use archive
-                return Ok(CacheMode::CacheSuccessForever);
+                Ok(CacheMode::CacheSuccessForever)
             }
-            "eth_getTransactionByBlockNumberAndIndex" => 0,
-            "eth_getTransactionCount" => 1,
             "eth_getTransactionReceipt" => {
                 // TODO: not sure how best to look these up
                 // try full nodes first. retry will use archive
-                return Ok(CacheMode::Cache {
+                Ok(CacheMode::Cache {
                     block: head_block.into(),
                     cache_errors: true,
-                });
+                })
             }
             "eth_getUncleByBlockHashAndIndex" => {
                 // TODO: check a Cache of recent hashes
                 // try full nodes first. retry will use archive
                 // TODO: what happens if this block is uncled later?
-                return Ok(CacheMode::CacheSuccessForever);
+                Ok(CacheMode::CacheSuccessForever)
             }
-            "eth_getUncleByBlockNumberAndIndex" => 0,
             "eth_getUncleCountByBlockHash" => {
                 // TODO: check a Cache of recent hashes
                 // try full nodes first. retry will use archive
                 // TODO: what happens if this block is uncled later?
-                return Ok(CacheMode::CacheSuccessForever);
+                Ok(CacheMode::CacheSuccessForever)
             }
-            "eth_getUncleCountByBlockNumber" => 0,
             "eth_maxPriorityFeePerGas" => {
                 // TODO: this might be too aggressive. i think it can change before a block is mined
-                return Ok(CacheMode::Cache {
+                Ok(CacheMode::Cache {
                     block: head_block.into(),
                     cache_errors: false,
-                });
+                })
             }
-            _ => {
-                // some other command that doesn't take block numbers as an argument
-                // since we are caching with the head block, it should be safe to cache_errors
-                return Ok(CacheMode::Cache {
-                    block: head_block.into(),
-                    cache_errors: true,
-                });
-            }
+            method => match get_block_param_id(method) {
+                Some(block_param_id) => {
+                    let block =
+                        clean_block_number(params, block_param_id, head_block, rpcs).await?;
+
+                    Ok(CacheMode::Cache {
+                        block,
+                        cache_errors: true,
+                    })
+                }
+                None => Err(Web3ProxyError::UnhandledMethod(method.to_string().into())),
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::CacheMode;
+    use crate::rpcs::{blockchain::Web3ProxyBlock, many::Web3Rpcs};
+    use ethers::types::{Block, H256};
+    use serde_json::json;
+    use std::sync::Arc;
+
+    #[test_log::test(tokio::test)]
+    async fn test_fee_history() {
+        let method = "eth_feeHistory";
+        let mut params = json!([4, "latest", [25, 75]]);
+
+        let head_block = Block {
+            number: Some(1.into()),
+            hash: Some(H256::random()),
+            ..Default::default()
         };
 
-        match clean_block_number(params, block_param_id, head_block, rpcs).await {
-            Ok(block) => Ok(CacheMode::Cache {
-                block,
-                cache_errors: true,
-            }),
-            Err(Web3ProxyError::NoBlocksKnown) => {
-                warn!(%method, ?params, "no servers available to get block from params");
-                Ok(CacheMode::Cache {
-                    block: head_block.into(),
-                    cache_errors: true,
-                })
+        let head_block = Web3ProxyBlock::try_new(Arc::new(head_block)).unwrap();
+
+        let (empty, _handle, _ranked_rpc_reciver) =
+            Web3Rpcs::spawn(1, None, 1, 1, "test".into(), None)
+                .await
+                .unwrap();
+
+        let x = CacheMode::try_new(method, &mut params, &head_block, &empty)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            x,
+            CacheMode::Cache {
+                block: (&head_block).into(),
+                cache_errors: true
             }
-            Err(err) => {
-                error!(%method, ?params, ?err, "could not get block from params");
-                Ok(CacheMode::Cache {
-                    block: head_block.into(),
-                    cache_errors: true,
-                })
-            }
-        }
+        );
+
+        assert_eq!(params.get(1), Some(&json!(head_block.number())));
     }
 }

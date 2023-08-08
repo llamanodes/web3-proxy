@@ -48,25 +48,60 @@ curl https://eth.llamarpc.com \
     --data '{"method":"eth_getTransactionReceipt","params":["0x85d995eba9763907fdf35cd2034144dd9d53ce32cbec21349d4b12823c6860c5"],"id":1,"jsonrpc":"2.0"}'
 
 
---> [
-    {"jsonrpc": "2.0", "method": "sum", "params": [1,2,4], "id": "1"},
-    {"jsonrpc": "2.0", "method": "notify_hello", "params": [7]},
-    {"jsonrpc": "2.0", "method": "subtract", "params": [42,23], "id": "2"},
-    {"foo": "boo"},
-    {"jsonrpc": "2.0", "method": "foo.get", "params": {"name": "myself"}, "id": "5"},
-    {"jsonrpc": "2.0", "method": "get_data", "id": "9"} 
-]
-<-- [
-    {"jsonrpc": "2.0", "result": 7, "id": "1"},
-    {"jsonrpc": "2.0", "result": 19, "id": "2"},
-    {"jsonrpc": "2.0", "error": {"code": -32600, "message": "Invalid Request"}, "id": null},
-    {"jsonrpc": "2.0", "error": {"code": -32601, "message": "Method not found"}, "id": "5"},
-    {"jsonrpc": "2.0", "result": ["hello", 5], "id": "9"}
-]
+curl http://localhost:8544 \
+    -X POST \
+    -H "Content-Type: application/json" \
+    --data '{
+  "id": 1,
+  "jsonrpc": "2.0",
+  "method": "eth_feeHistory",
+  "params": [
+    4,
+    4,
+    4
+  ]
+}'
 
---> [1,2,3]
-<-- [
-    {"jsonrpc": "2.0", "error": {"code": -32600, "message": "Invalid Request"}, "id": null},
-    {"jsonrpc": "2.0", "error": {"code": -32600, "message": "Invalid Request"}, "id": null},
-    {"jsonrpc": "2.0", "error": {"code": -32600, "message": "Invalid Request"}, "id": null}
-]
+curl https://docs-demo.quiknode.pro/ \
+    -X POST \
+    -H "Content-Type: application/json" \
+    --data '{"method":"eth_feeHistory","params":[4, "latest", [25, 75]],"id":1,"jsonrpc":"2.0"}'
+
+curl https://ethereum.llamarpc.com/ \
+    -X POST \
+    -H "Content-Type: application/json" \
+    --data '{"method":"eth_feeHistory","params":[4, "latest", [25, 75]],"id":1,"jsonrpc":"2.0"}'
+
+curl http://127.0.0.1:8544/ \
+    -X POST \
+    -H "Content-Type: application/json" \
+    --data '{"method":"eth_feeHistory","params":[4, "latest", [25, 75]],"id":1,"jsonrpc":"2.0"}'
+
+curl http://10.11.12.16:8548/ \
+    -X POST \
+    -H "Content-Type: application/json" \
+    --data '{"method":"eth_feeHistory","params":[4, "latest", [25, 75]],"id":1,"jsonrpc":"2.0"}'
+
+
+# --> [
+#     {"jsonrpc": "2.0", "method": "sum", "params": [1,2,4], "id": "1"},
+#     {"jsonrpc": "2.0", "method": "notify_hello", "params": [7]},
+#     {"jsonrpc": "2.0", "method": "subtract", "params": [42,23], "id": "2"},
+#     {"foo": "boo"},
+#     {"jsonrpc": "2.0", "method": "foo.get", "params": {"name": "myself"}, "id": "5"},
+#     {"jsonrpc": "2.0", "method": "get_data", "id": "9"} 
+# ]
+# <-- [
+#     {"jsonrpc": "2.0", "result": 7, "id": "1"},
+#     {"jsonrpc": "2.0", "result": 19, "id": "2"},
+#     {"jsonrpc": "2.0", "error": {"code": -32600, "message": "Invalid Request"}, "id": null},
+#     {"jsonrpc": "2.0", "error": {"code": -32601, "message": "Method not found"}, "id": "5"},
+#     {"jsonrpc": "2.0", "result": ["hello", 5], "id": "9"}
+# ]
+
+# --> [1,2,3]
+# <-- [
+#     {"jsonrpc": "2.0", "error": {"code": -32600, "message": "Invalid Request"}, "id": null},
+#     {"jsonrpc": "2.0", "error": {"code": -32600, "message": "Invalid Request"}, "id": null},
+#     {"jsonrpc": "2.0", "error": {"code": -32600, "message": "Invalid Request"}, "id": null}
+# ]

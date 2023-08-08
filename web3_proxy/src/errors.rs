@@ -168,6 +168,8 @@ pub enum Web3ProxyError {
         unknown: U64,
     },
     UnknownKey,
+    #[error(ignore)]
+    UnhandledMethod(Cow<'static, str>),
     UserAgentRequired,
     #[error(ignore)]
     UserAgentNotAllowed(headers::UserAgent),
@@ -1008,6 +1010,12 @@ impl Web3ProxyError {
                         data: Some(serde_json::Value::String(err.to_string())),
                     },
                 )
+            }
+            Self::UnhandledMethod(method) => {
+                unimplemented!(
+                    "unhandled method ({}) should never be shown to a user",
+                    method
+                );
             }
             Self::UnknownBlockHash(hash) => {
                 debug!(%hash, "UnknownBlockHash");
