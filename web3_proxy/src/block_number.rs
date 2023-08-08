@@ -435,6 +435,7 @@ mod test {
             }
         );
 
+        // "latest" should have been changed to the block number
         assert_eq!(params.get(1), Some(&json!(head_block.number())));
     }
 }

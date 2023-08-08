@@ -7324,7 +7324,7 @@ dependencies = [
 
 [[package]]
 name = "web3_proxy_cli"
-version = "1.42.3"
+version = "1.42.4"
 dependencies = [
  "env_logger",
  "parking_lot",

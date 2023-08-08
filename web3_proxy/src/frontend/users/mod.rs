@@ -92,7 +92,7 @@ pub async fn user_post(
             .filter(referrer::Column::ReferralCode.like(&x))
             .one(&txn)
             .await?
-            .web3_context(format!("posted referral code does not exist"))?;
+            .web3_context("posted referral code does not exist")?;
 
         // make sure the user doesn't already have a referral code set
         if let Some(existing_referee) = referee::Entity::find()
