@@ -70,7 +70,6 @@ pub async fn user_get_influx_stats_aggregated(
     chain_id: u64,
 ) -> serde_json::Value {
     let query_window_seconds = 300;
-    let chain_id = chain_id;
     let start = SystemTime::now();
     let query_start = start
         .duration_since(UNIX_EPOCH)

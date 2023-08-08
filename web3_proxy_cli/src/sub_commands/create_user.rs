@@ -68,7 +68,7 @@ impl CreateUserSubCommand {
             Address::from_slice(u.address.as_ref())
         );
 
-        let rpc_secret_key = self.rpc_secret_key.unwrap_or_else(RpcSecretKey::new);
+        let rpc_secret_key = self.rpc_secret_key.unwrap_or_default();
 
         // create a key for the new user
         let uk = rpc_key::ActiveModel {
