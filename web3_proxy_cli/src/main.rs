@@ -65,6 +65,7 @@ enum SubCommand {
     ChangeUserTier(sub_commands::ChangeUserTierSubCommand),
     ChangeUserTierByAddress(sub_commands::ChangeUserTierByAddressSubCommand),
     ChangeUserTierByKey(sub_commands::ChangeUserTierByKeySubCommand),
+    CheckBalance(sub_commands::CheckBalanceSubCommand),
     CheckConfig(sub_commands::CheckConfigSubCommand),
     CountUsers(sub_commands::CountUsersSubCommand),
     CreateKey(sub_commands::CreateKeySubCommand),
@@ -344,6 +345,15 @@ fn main() -> anyhow::Result<()> {
                 let db_url = cli_config
                     .db_url
                     .expect("'--config' (with a db) or '--db-url' is required to run change_user_tier_by_key");
+
+                let db_conn = connect_db(db_url, 1, 1).await?;
+
+                x.main(&db_conn).await
+            }
+            SubCommand::CheckBalance(x) => {
+                let db_url = cli_config
+                    .db_url
+                    .expect("'--config' (with a db) or '--db-url' is required to run change_user_addres");
 
                 let db_conn = connect_db(db_url, 1, 1).await?;
 
