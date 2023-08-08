@@ -172,9 +172,9 @@ dependencies = [
 
 [[package]]
 name = "argh"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab257697eb9496bf75526f0217b5ed64636a9cfafa78b8365c71bd283fcef93e"
+checksum = "301f76fef0d5543f18f605d4f9d0146b4a780c93dd4686f12af2ce2262013969"
 dependencies = [
  "argh_derive",
  "argh_shared",
@@ -182,21 +182,24 @@ dependencies = [
 
 [[package]]
 name = "argh_derive"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b382dbd3288e053331f03399e1db106c9fb0d8562ad62cb04859ae926f324fa6"
+checksum = "1eb588dd891fc388820fdf0ca3bc60b9973a0c35ff0bda09287ad89b6b7e9c21"
 dependencies = [
  "argh_shared",
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.28",
 ]
 
 [[package]]
 name = "argh_shared"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64cb94155d965e3d37ffbbe7cc5b82c3dd79dd33bd48e536f73d2cfb8d85506f"
+checksum = "0e88e0de1f43d15c92df9d6c94d8cb90cb73db205ce416912e128598c4fb02c0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "arrayvec"
