@@ -256,12 +256,6 @@ impl CacheMode {
         }
 
         match method {
-            "debug_traceBlockByHash" => {
-                todo!();
-            }
-            "debug_traceTransaction" => {
-                todo!();
-            }
             "eth_gasPrice" => Ok(CacheMode::Cache {
                 block: head_block.into(),
                 cache_errors: false,
