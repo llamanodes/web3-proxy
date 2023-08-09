@@ -19,6 +19,9 @@ pipeline {
     }
     stages {
         stage('build and push') {
+            agent {
+                label 'builtin'
+            }
             parallel {
                 // stage('build and push amd64_epyc2 image') {
                 //     agent {
@@ -75,6 +78,9 @@ pipeline {
             }
         }
         stage('push latest') {
+            agent {
+                label 'builtin'
+            }
             parallel {
                 stage('maybe push latest_arm64_graviton2 tag') {
                     agent any
