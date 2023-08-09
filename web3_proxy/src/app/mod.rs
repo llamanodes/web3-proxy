@@ -1633,6 +1633,12 @@ impl Web3ProxyApp {
                     // TODO: emit a stat? will probably just be noise
                     return Err(Web3ProxyError::AccessDenied("admin methods are not allowed".into()));
                 }
+                if method.starts_with("alchemy_") {
+                    return Err(JsonRpcErrorData::from(format!(
+                        "the method {} does not exist/is not available",
+                        method
+                    )).into());
+                }
 
                 // TODO: if no servers synced, wait for them to be synced? probably better to error and let haproxy retry another server
                 let head_block: Web3ProxyBlock = head_block
