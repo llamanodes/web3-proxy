@@ -210,7 +210,9 @@ fn get_block_param_id(method: &str) -> Option<usize> {
         "eth_getTransactionCount" => Some(1),
         "eth_getUncleByBlockNumberAndIndex" => Some(0),
         "eth_getUncleCountByBlockNumber" => Some(0),
+        "trace_block" => Some(0),
         "trace_call" => Some(2),
+        "trace_callMany" => Some(1),
         _ => None,
     }
 }
@@ -266,8 +268,10 @@ impl CacheMode {
         }
 
         match method {
-            "net_listening" => Ok(CacheMode::CacheSuccessForever),
-            "net_version" => Ok(CacheMode::CacheSuccessForever),
+            "debug_traceTransaction" => {
+                // TODO: make sure re-orgs work properly!
+                Ok(CacheMode::CacheSuccessForever)
+            }
             "eth_gasPrice" => Ok(CacheMode::Cache {
                 block: head_block.into(),
                 cache_errors: false,
@@ -393,6 +397,8 @@ impl CacheMode {
                     cache_errors: false,
                 })
             }
+            "net_listening" => Ok(CacheMode::CacheSuccessForever),
+            "net_version" => Ok(CacheMode::CacheSuccessForever),
             method => match get_block_param_id(method) {
                 Some(block_param_id) => {
                     let block =
