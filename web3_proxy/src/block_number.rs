@@ -255,6 +255,16 @@ impl CacheMode {
             });
         }
 
+        if let Some(params) = params.as_array() {
+            if params.is_empty() {
+                // no params given. cache with the head block
+                return Ok(Self::Cache {
+                    block: head_block.into(),
+                    cache_errors: true,
+                });
+            }
+        }
+
         match method {
             "net_listening" => Ok(CacheMode::CacheSuccessForever),
             "net_version" => Ok(CacheMode::CacheSuccessForever),
