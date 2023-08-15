@@ -34,11 +34,11 @@ siwe = { git = "https://github.com/llamanodes/siwe-rs", rev = "013be5204ff1c8577
 # TODO: import chrono from sea-orm so we always have the same version
 # TODO: make sure this time version matches siwe. PR to put this in their prelude
 
-anyhow = { version = "1.0.72", features = ["backtrace"] }
+anyhow = { version = "1.0.74", features = ["backtrace"] }
 arc-swap = { version = "1.6.0" }
 argh = "0.1.12"
 async-stripe = { version = "0.22.2", default-features = false, features = ["billing", "checkout", "connect", "runtime-tokio-hyper-rustls", "webhook-events"] }
-async-trait = "0.1.72"
+async-trait = "0.1.73"
 axum = { version = "0.6.20", features = ["headers", "tracing", "ws"] }
 axum-client-ip = "0.4.1"
 axum-macros = "0.3.8"
@@ -82,12 +82,12 @@ sentry = { version = "0.31.5", default-features = false, features = ["anyhow", "
 sentry-tracing = "0.31.5"
 serde = { version = "1.0.183" }
 serde-inline-default = "0.1.1"
-serde_json = { version = "1.0.104", default-features = false, features = ["raw_value"] }
+serde_json = { version = "1.0.105", default-features = false, features = ["raw_value"] }
 serde_prometheus = "0.2.3"
 strum = { version = "0.25.0", features = ["derive"] }
 time_01 = { package = "time", version = "0.1.45" }
 time_03 = { package = "time", version = "0.3" }
-tokio = { version = "1.29.1", features = ["full", "tracing"] }
+tokio = { version = "1.31.0", features = ["full", "tracing"] }
 tokio-console = { version = "0.1.9", optional = true }
 tokio-stream = { version = "0.1.14", features = ["sync"] }
 toml = "0.7.6"
@@ -104,6 +104,6 @@ test-log = { version = "0.2.12", default-features = false, features = ["trace"] 
 [dev-dependencies]
 env_logger = "0.10"
 test-log = "0.2.12"
-tokio = { version = "1.29.1", features = ["full", "test-util"] }
+tokio = { version = "1.31.0", features = ["full", "test-util"] }
 tracing = {version = "0.1", default-features = false}
 tracing-subscriber = {version = "0.3", default-features = false, features = ["env-filter", "fmt"]}

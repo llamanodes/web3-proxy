@@ -21,13 +21,13 @@ web3_proxy = { path = "../web3_proxy" }
 parking_lot = { version = "0.12.1", features = ["arc_lock", "nightly"] }
 prettytable = "0.10.0"
 serde = { version = "1.0.183" }
-serde_json = { version = "1.0.104", default-features = false, features = ["raw_value"] }
+serde_json = { version = "1.0.105", default-features = false, features = ["raw_value"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
 env_logger = "0.10"
 test-log = "0.2.12"
-tokio = { version = "1.29.1", features = ["full", "test-util"] }
+tokio = { version = "1.31.0", features = ["full", "test-util"] }
 tracing = {version = "0.1", default-features = false}
 tracing-subscriber = {version = "0.3", default-features = false, features = ["env-filter", "fmt"]}

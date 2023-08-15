@@ -6,12 +6,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-log = "0.4.19"
+log = "0.4.20"
 portable-atomic = { version = "1.4.2", features = ["float"] }
 serde = { version = "1.0.183", features = [] }
-tokio = { version = "1.29.1", features = ["full"] }
+tokio = { version = "1.31.0", features = ["full"] }
 tracing = "0.1.37"
 watermill = "0.1.1"
 
 [dev-dependencies]
-tokio = { version = "1.29.1", features = ["full", "test-util"] }
+tokio = { version = "1.31.0", features = ["full", "test-util"] }
