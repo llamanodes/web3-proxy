@@ -1712,6 +1712,9 @@ impl Web3ProxyApp {
                     }
                 };
 
+                // TODO: think more about timeouts
+                let max_wait = Some(Duration::from_secs(299));
+
                 if let Some(cache_key) = cache_key {
                     let from_block_num = cache_key.from_block_num().copied();
                     let to_block_num = cache_key.to_block_num().copied();
@@ -1731,7 +1734,7 @@ impl Web3ProxyApp {
                                         method,
                                         params,
                                         Some(request_metadata),
-                                        Some(Duration::from_secs(240)),
+                                        max_wait,
                                         from_block_num.as_ref(),
                                         to_block_num.as_ref(),
                                     )
@@ -1751,6 +1754,7 @@ impl Web3ProxyApp {
                                     Err(Web3ProxyError::NullJsonRpcResult)
                                 } else if response_data.num_bytes() > max_response_cache_bytes {
                                     // don't cache really large requests
+                                    // TODO: emit a stat
                                     Err(Web3ProxyError::JsonRpcResponse(response_data))
                                 } else {
                                     // TODO: response data should maybe be Arc<JsonRpcResponseEnum<Box<RawValue>>>, but that's more work
@@ -1764,7 +1768,7 @@ impl Web3ProxyApp {
                             method,
                             params,
                             Some(request_metadata),
-                            Some(Duration::from_secs(240)),
+                            max_wait,
                             None,
                             None,
                         )

@@ -113,7 +113,7 @@ pub async fn clean_block_number(
                     // TODO: "BlockNumber" needs a better name
                     // TODO: move this to a helper function?
                     if let Ok(block_num) = serde_json::from_value::<U64>(x.clone()) {
-                        let (block_hash, _) = rpcs
+                        let block_hash = rpcs
                             .block_hash(&block_num)
                             .await
                             .context("fetching block hash from number")?;
@@ -134,7 +134,7 @@ pub async fn clean_block_number(
                         if block_num == *latest_block.number() {
                             (latest_block.into(), change)
                         } else {
-                            let (block_hash, _) = rpcs
+                            let block_hash = rpcs
                                 .block_hash(&block_num)
                                 .await
                                 .context("fetching block hash from number")?;
@@ -256,6 +256,8 @@ impl CacheMode {
         }
 
         match method {
+            "net_listening" => Ok(CacheMode::CacheSuccessForever),
+            "net_version" => Ok(CacheMode::CacheSuccessForever),
             "eth_gasPrice" => Ok(CacheMode::Cache {
                 block: head_block.into(),
                 cache_errors: false,
@@ -307,7 +309,7 @@ impl CacheMode {
                             *x = json!(block_num);
                         }
 
-                        let (block_hash, _) = rpcs.block_hash(&block_num).await?;
+                        let block_hash = rpcs.block_hash(&block_num).await?;
 
                         BlockNumAndHash(block_num, block_hash)
                     } else {
@@ -327,7 +329,7 @@ impl CacheMode {
                             *x = json!(block_num);
                         }
 
-                        let (block_hash, _) = rpcs.block_hash(&block_num).await?;
+                        let block_hash = rpcs.block_hash(&block_num).await?;
 
                         BlockNumAndHash(block_num, block_hash)
                     } else {

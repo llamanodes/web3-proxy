@@ -335,20 +335,27 @@ impl Web3Rpcs {
     }
 
     /// Convenience method to get the cannonical block at a given block height.
-    pub async fn block_hash(&self, num: &U64) -> Web3ProxyResult<(H256, u64)> {
-        let (block, block_depth) = self.cannonical_block(num).await?;
+    pub async fn block_hash(&self, num: &U64) -> Web3ProxyResult<H256> {
+        let block = self.cannonical_block(num).await?;
 
         let hash = *block.hash();
 
-        Ok((hash, block_depth))
+        Ok(hash)
     }
 
     /// Get the heaviest chain's block from cache or backend rpc
     /// Caution! If a future block is requested, this might wait forever. Be sure to have a timeout outside of this!
-    pub async fn cannonical_block(&self, num: &U64) -> Web3ProxyResult<(Web3ProxyBlock, u64)> {
+    pub async fn cannonical_block(&self, num: &U64) -> Web3ProxyResult<Web3ProxyBlock> {
         // we only have blocks by hash now
         // maybe save them during save_block in a blocks_by_number Cache<U64, Vec<ArcBlock>>
-        // if theres multiple, use petgraph to find the one on the main chain (and remove the others if they have enough confirmations)
+        // TODO: if theres multiple, use petgraph to find the one on the main chain (and remove the others if they have enough confirmations)
+
+        // try to get the hash from our cache
+        if let Some(block_hash) = self.blocks_by_number.get(num) {
+            // TODO: sometimes this needs to fetch the block. why? i thought block_numbers would only be set if the block hash was set
+            // TODO: configurable max wait and rpc
+            return self.block(&block_hash, None, None).await;
+        }
 
         let mut consensus_head_receiver = self
             .watch_head_block
@@ -384,18 +391,6 @@ impl Web3Rpcs {
             }
         }
 
-        let block_depth = (head_block_num - num).as_u64();
-
-        // try to get the hash from our cache
-        // deref to not keep the lock open
-        if let Some(block_hash) = self.blocks_by_number.get(num) {
-            // TODO: sometimes this needs to fetch the block. why? i thought block_numbers would only be set if the block hash was set
-            // TODO: configurable max wait and rpc
-            let block = self.block(&block_hash, None, None).await?;
-
-            return Ok((block, block_depth));
-        }
-
         // block number not in cache. we need to ask an rpc for it
         // TODO: this error is too broad
         let response = self
@@ -408,7 +403,7 @@ impl Web3Rpcs {
         // the block was fetched using eth_getBlockByNumber, so it should have all fields and be on the heaviest chain
         let block = self.try_cache_block(block, true).await?;
 
-        Ok((block, block_depth))
+        Ok(block)
     }
 
     pub(super) async fn process_incoming_blocks(

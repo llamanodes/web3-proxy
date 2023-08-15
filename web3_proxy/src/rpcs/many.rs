@@ -53,7 +53,8 @@ pub struct Web3Rpcs {
     /// this head receiver makes it easy to wait until there is a new block
     pub(super) watch_head_block: Option<watch::Sender<Option<Web3ProxyBlock>>>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
-    /// all blocks, including orphans
+    /// all blocks, including uncles
+    /// TODO: i think uncles should be excluded
     pub(super) blocks_by_hash: BlocksByHashCache,
     /// blocks on the heaviest chain
     pub(super) blocks_by_number: BlocksByNumberCache,
@@ -87,7 +88,7 @@ impl Web3Rpcs {
         // these blocks don't have full transactions, but they do have rather variable amounts of transaction hashes
         // TODO: actual weighter on this
         // TODO: time_to_idle instead?
-        let blocks_by_hash: BlocksByHashCache = CacheBuilder::new(1_000)
+        let blocks_by_hash: BlocksByHashCache = CacheBuilder::new(10_000)
             .name("blocks_by_hash")
             .time_to_idle(Duration::from_secs(30 * 60))
             .build();
@@ -95,7 +96,7 @@ impl Web3Rpcs {
         // all block numbers are the same size, so no need for weigher
         // TODO: limits from config
         // TODO: time_to_idle instead?
-        let blocks_by_number = CacheBuilder::new(1_000)
+        let blocks_by_number = CacheBuilder::new(10_000)
             .name("blocks_by_number")
             .time_to_idle(Duration::from_secs(30 * 60))
             .build();
@@ -1768,21 +1769,17 @@ mod tests {
 
         let rpcs = Web3Rpcs {
             block_sender,
+            blocks_by_hash: CacheBuilder::new(100).build(),
+            blocks_by_number: CacheBuilder::new(100).build(),
             by_name: RwLock::new(by_name),
             chain_id,
+            max_head_block_age: Duration::from_secs(60),
+            max_head_block_lag: 5.into(),
+            min_sum_soft_limit: 4_000,
+            min_synced_rpcs: 1,
             name: "test".into(),
             watch_head_block: Some(watch_consensus_head_sender),
             watch_ranked_rpcs,
-            blocks_by_hash: CacheBuilder::new(100)
-                .time_to_live(Duration::from_secs(120))
-                .build(),
-            blocks_by_number: CacheBuilder::new(100)
-                .time_to_live(Duration::from_secs(120))
-                .build(),
-            min_synced_rpcs: 1,
-            min_sum_soft_limit: 4_000,
-            max_head_block_age: Duration::from_secs(60),
-            max_head_block_lag: 5.into(),
         };
 
         let mut connection_heads = ConsensusFinder::new(None, None);
@@ -1936,17 +1933,17 @@ mod tests {
         // TODO: make a Web3Rpcs::new
         let rpcs = Web3Rpcs {
             block_sender,
+            blocks_by_hash: Cache::new(100),
+            blocks_by_number: Cache::new(100),
             by_name: RwLock::new(by_name),
             chain_id,
+            max_head_block_age: Duration::from_secs(60),
+            max_head_block_lag: 5.into(),
+            min_sum_soft_limit: 1_000,
+            min_synced_rpcs: 1,
             name: "test".into(),
             watch_head_block: Some(watch_consensus_head_sender),
             watch_ranked_rpcs,
-            blocks_by_hash: Cache::new(10_000),
-            blocks_by_number: Cache::new(10_000),
-            min_synced_rpcs: 1,
-            min_sum_soft_limit: 1_000,
-            max_head_block_age: Duration::from_secs(60),
-            max_head_block_lag: 5.into(),
         };
 
         let mut consensus_finder = ConsensusFinder::new(None, None);
