@@ -83,7 +83,7 @@ impl Web3Rpcs {
         Web3ProxyJoinHandle<()>,
         watch::Receiver<Option<Arc<RankedRpcs>>>,
     )> {
-        let (block_sender, block_receiver) = mpsc::unbounded_channel::<BlockAndRpc>();
+        let (block_and_rpc_sender, block_and_rpc_receiver) = mpsc::unbounded_channel::<BlockAndRpc>();
 
         // these blocks don't have full transactions, but they do have rather variable amounts of transaction hashes
         // TODO: actual weighter on this
@@ -113,7 +113,7 @@ impl Web3Rpcs {
             average_block_interval(chain_id).mul_f32((max_head_block_lag.as_u64() * 10) as f32);
 
         let connections = Arc::new(Self {
-            block_sender,
+            block_sender: block_and_rpc_sender,
             blocks_by_hash,
             blocks_by_number,
             by_name,
@@ -130,7 +130,7 @@ impl Web3Rpcs {
         let handle = {
             let connections = connections.clone();
 
-            tokio::spawn(connections.subscribe(block_receiver))
+            tokio::spawn(connections.subscribe(block_and_rpc_receiver))
         };
 
         Ok((connections, handle, consensus_connections_watcher))
@@ -313,7 +313,7 @@ impl Web3Rpcs {
     /// transaction ids from all the `Web3Rpc`s are deduplicated and forwarded to `pending_tx_sender`
     async fn subscribe(
         self: Arc<Self>,
-        block_receiver: mpsc::UnboundedReceiver<BlockAndRpc>,
+        block_and_rpc_receiver: mpsc::UnboundedReceiver<BlockAndRpc>,
     ) -> Web3ProxyResult<()> {
         let mut futures = vec![];
 
@@ -348,7 +348,7 @@ impl Web3Rpcs {
 
             let handle = tokio::task::Builder::default()
                 .name("process_incoming_blocks")
-                .spawn(async move { connections.process_incoming_blocks(block_receiver).await })?;
+                .spawn(async move { connections.process_incoming_blocks(block_and_rpc_receiver).await })?;
 
             futures.push(flatten_handle(handle));
         }

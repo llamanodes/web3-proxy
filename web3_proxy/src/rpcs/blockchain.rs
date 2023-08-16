@@ -408,7 +408,7 @@ impl Web3Rpcs {
 
     pub(super) async fn process_incoming_blocks(
         &self,
-        mut block_receiver: mpsc::UnboundedReceiver<BlockAndRpc>,
+        mut block_and_rpc_receiver: mpsc::UnboundedReceiver<BlockAndRpc>,
     ) -> Web3ProxyResult<()> {
         let mut consensus_finder =
             ConsensusFinder::new(Some(self.max_head_block_age), Some(self.max_head_block_lag));
@@ -419,7 +419,7 @@ impl Web3Rpcs {
         let mut had_first_success = false;
 
         loop {
-            match timeout(double_block_time, block_receiver.recv()).await {
+            match timeout(double_block_time, block_and_rpc_receiver.recv()).await {
                 Ok(Some((new_block, rpc))) => {
                     let rpc_name = rpc.name.clone();
                     let rpc_is_backup = rpc.backup;

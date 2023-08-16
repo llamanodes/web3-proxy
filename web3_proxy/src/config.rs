@@ -334,7 +334,7 @@ impl Web3RpcConfig {
         block_interval: Duration,
         http_client: Option<reqwest::Client>,
         blocks_by_hash_cache: BlocksByHashCache,
-        block_sender: Option<mpsc::UnboundedSender<BlockAndRpc>>,
+        block_and_rpc_sender: Option<mpsc::UnboundedSender<BlockAndRpc>>,
         max_head_block_age: Duration,
     ) -> anyhow::Result<(Arc<Web3Rpc>, Web3ProxyJoinHandle<()>)> {
         if !self.extra.is_empty() {
@@ -351,7 +351,7 @@ impl Web3RpcConfig {
             server_id,
             block_interval,
             blocks_by_hash_cache,
-            block_sender,
+            block_and_rpc_sender,
             max_head_block_age,
         )
         .await
