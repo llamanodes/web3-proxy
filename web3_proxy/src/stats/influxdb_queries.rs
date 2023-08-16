@@ -212,6 +212,7 @@ pub async fn query_user_influx_stats<'a>(
             "chain_id",
             "error_response",
             "rpc_secret_key_id",
+            "user_error_response",
         ]"#
         }
         StatType::Detailed => {
@@ -547,7 +548,7 @@ pub async fn query_user_influx_stats<'a>(
                             error!("error_response should always be a String!");
                         }
                     }
-                } else if stat_response_type == StatType::Detailed && key == "user_error_response" {
+                } else if key == "user_error_response" {
                     match value {
                         influxdb2_structmap::value::Value::String(inner) => {
                             out.insert(
