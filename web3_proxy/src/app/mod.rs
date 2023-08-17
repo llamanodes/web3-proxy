@@ -1169,6 +1169,9 @@ impl Web3ProxyApp {
                     request_metadata
                         .error_response
                         .store(false, Ordering::Release);
+                    request_metadata
+                        .user_error_response
+                        .store(false, Ordering::Release);
 
                     (StatusCode::OK, response_data)
                 }
@@ -1176,12 +1179,18 @@ impl Web3ProxyApp {
                     request_metadata
                         .error_response
                         .store(false, Ordering::Release);
+                    request_metadata
+                        .user_error_response
+                        .store(false, Ordering::Release);
 
                     err.as_response_parts()
                 }
                 Err(Web3ProxyError::JsonRpcResponse(response_data)) => {
                     request_metadata
                         .error_response
+                        .store(false, Ordering::Release);
+                    request_metadata
+                        .user_error_response
                         .store(response_data.is_error(), Ordering::Release);
 
                     (StatusCode::OK, response_data)
@@ -1198,6 +1207,9 @@ impl Web3ProxyApp {
                     request_metadata
                         .error_response
                         .store(true, Ordering::Release);
+                    request_metadata
+                        .user_error_response
+                        .store(false, Ordering::Release);
 
                     err.as_response_parts()
                 }
@@ -1302,12 +1314,10 @@ impl Web3ProxyApp {
             | "shh_post"
             | "shh_uninstallFilter"
             | "shh_version") => {
-                // i don't think we will ever support these methods. maybe do Forbidden?
-                // TODO: what error code?
-                JsonRpcErrorData::from(format!(
+                return Err(Web3ProxyError::MethodNotImplemented(format!(
                     "the method {} does not exist/is not available",
                     method
-                )).into()
+                ).into()));
             }
             // TODO: implement these commands
             method @ ("eth_getFilterChanges"
@@ -1317,13 +1327,10 @@ impl Web3ProxyApp {
             | "eth_newPendingTransactionFilter"
             | "eth_pollSubscriptions"
             | "eth_uninstallFilter") => {
-                // TODO: unsupported command stat. use the count to prioritize new features
-                // TODO: what error code?
-                JsonRpcErrorData::from(format!(
+                return Err(Web3ProxyError::MethodNotImplemented(format!(
                     "the method {} is not yet implemented. contact us if you need this",
                     method
-                ))
-                .into()
+                ).into()));
             }
             method @ ("eth_sendUserOperation"
             | "eth_estimateUserOperationGas"

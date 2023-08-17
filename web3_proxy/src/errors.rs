@@ -121,7 +121,7 @@ pub enum Web3ProxyError {
     NotFound,
     #[error(ignore)]
     #[from(ignore)]
-    NotImplemented(Cow<'static, str>),
+    MethodNotImplemented(Cow<'static, str>),
     NoVolatileRedisDatabase,
     /// make it easy to skip caching large results
     #[error(ignore)]
@@ -751,18 +751,17 @@ impl Web3ProxyError {
                     },
                 )
             }
-            Self::NotImplemented(msg) => {
-                warn!("NotImplemented: {}", msg);
+            Self::MethodNotImplemented(method) => {
+                warn!("NotImplemented: {}", method);
                 (
-                    StatusCode::NOT_IMPLEMENTED,
+                    StatusCode::OK,
                     JsonRpcErrorData {
-                        message: format!(
-                            "{} is not yet implemented. contact us if you need this",
-                            msg
-                        )
-                        .into(),
-                        code: StatusCode::NOT_IMPLEMENTED.as_u16().into(),
-                        data: None,
+                        message: "Method not found".into(),
+                        code: -32601,
+                        data: Some(json!({
+                            "method": method,
+                            "extra": "contact us if you need this",
+                        })),
                     },
                 )
             }
