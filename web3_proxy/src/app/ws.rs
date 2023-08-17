@@ -125,7 +125,7 @@ impl Web3ProxyApp {
             });
         } else {
             // TODO: make sure this gets a CU cost of unimplemented instead of the normal eth_subscribe cost?
-            return Err(Web3ProxyError::MethodNotImplemented(
+            return Err(Web3ProxyError::MethodNotFound(
                 subscribe_to.to_owned().into(),
             ));
         }

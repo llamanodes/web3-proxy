@@ -121,7 +121,7 @@ pub enum Web3ProxyError {
     NotFound,
     #[error(ignore)]
     #[from(ignore)]
-    MethodNotImplemented(Cow<'static, str>),
+    MethodNotFound(Cow<'static, str>),
     NoVolatileRedisDatabase,
     /// make it easy to skip caching large results
     #[error(ignore)]
@@ -618,6 +618,20 @@ impl Web3ProxyError {
                 // TODO: do this without clone? the Arc needed it though
                 (StatusCode::OK, jsonrpc_error_data.clone())
             }
+            Self::MethodNotFound(method) => {
+                warn!("MethodNotFound: {}", method);
+                (
+                    StatusCode::OK,
+                    JsonRpcErrorData {
+                        message: "Method not found".into(),
+                        code: -32601,
+                        data: Some(json!({
+                            "method": method,
+                            "extra": "contact us if you need this",
+                        })),
+                    },
+                )
+            }
             Self::MsgPackEncode(err) => {
                 warn!(?err, "MsgPackEncode");
                 (
@@ -748,20 +762,6 @@ impl Web3ProxyError {
                         message: "not found!".into(),
                         code: StatusCode::NOT_FOUND.as_u16().into(),
                         data: None,
-                    },
-                )
-            }
-            Self::MethodNotImplemented(method) => {
-                warn!("NotImplemented: {}", method);
-                (
-                    StatusCode::OK,
-                    JsonRpcErrorData {
-                        message: "Method not found".into(),
-                        code: -32601,
-                        data: Some(json!({
-                            "method": method,
-                            "extra": "contact us if you need this",
-                        })),
                     },
                 )
             }
