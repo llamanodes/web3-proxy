@@ -28,6 +28,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 [dev-dependencies]
 env_logger = "0.10"
 test-log = "0.2.12"
-tokio = { version = "1.31.0", features = ["full", "test-util"] }
+tokio = { version = "1.32.0", features = ["full", "test-util"] }
 tracing = {version = "0.1", default-features = false}
 tracing-subscriber = {version = "0.3", default-features = false, features = ["env-filter", "fmt"]}
