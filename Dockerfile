@@ -3,11 +3,12 @@ FROM debian:bullseye-slim as rust
 WORKDIR /app
 # sccache cannot cache incrementals, but we use --mount=type=cache and import caches so it should be helpful
 ENV CARGO_INCREMENTAL true
-ENV CARGO_UNSTABLE_SPARSE_REGISTRY true
+ENV CARGO_TARGET_DIR /target
 ENV CARGO_TERM_COLOR always
-SHELL [ "/bin/bash", "-c" ]
-ENV SHELL /bin/bash
+ENV CARGO_UNSTABLE_SPARSE_REGISTRY true
 ENV PATH "/root/.foundry/bin:/root/.cargo/bin:${PATH}"
+ENV SHELL /bin/bash
+SHELL [ "/bin/bash", "-c" ]
 
 # install rustup dependencies
 # also install web3-proxy system dependencies. most things are rust-only, but not everything
@@ -49,7 +50,6 @@ RUN --mount=type=cache,target=/root/.cargo/git \
 # cargo binstall
 RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/root/.cache/sccache \
     set -eux -o pipefail; \
     \
     curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh >/tmp/install-binstall.sh; \
@@ -83,15 +83,6 @@ ENV WEB3_PROXY_FEATURES "rdkafka-src"
 # copy the app
 COPY . .
 
-# fetch deps
-RUN --mount=type=cache,target=/root/.cargo/git \
-    --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/app/target \
-    set -eux -o pipefail; \
-    \
-    [ -e "$(pwd)/payment-contracts/src/contracts/mod.rs" ] || touch "$(pwd)/payment-contracts/build.rs"; \
-    cargo --locked --verbose fetch
-
 # build tests (done its in own FROM so that it can run in parallel)
 FROM rust_with_env as build_tests
 
@@ -101,7 +92,7 @@ COPY --from=rust_nextest /root/.cargo/bin/cargo-nextest* /root/.cargo/bin/
 # test the application with cargo-nextest
 RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/app/target \
+    --mount=type=cache,target=/target \
     set -eux -o pipefail; \
     \
     [ -e "$(pwd)/payment-contracts/src/contracts/mod.rs" ] || touch "$(pwd)/payment-contracts/build.rs"; \
@@ -121,7 +112,7 @@ FROM rust_with_env as build_app
 # TODO: use the "faster_release" profile which builds with `codegen-units = 1` (but compile is SLOW)
 RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/app/target \
+    --mount=type=cache,target=/target \
     set -eux -o pipefail; \
     \
     [ -e "$(pwd)/payment-contracts/src/contracts/mod.rs" ] || touch "$(pwd)/payment-contracts/build.rs"; \
