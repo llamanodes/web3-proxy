@@ -15,18 +15,32 @@ pub struct TestAnvil {
 }
 
 impl TestAnvil {
-    pub async fn spawn(chain_id: u64) -> Self {
+    pub async fn new(chain_id: Option<u64>, fork_rpc: Option<&str>) -> Self {
         info!(?chain_id);
 
-        // TODO: configurable rpc and block
-        let instance = Anvil::new()
-            .chain_id(chain_id)
-            // .fork("https://polygon.llamarpc.com@44300000")
-            .spawn();
+        let mut instance = Anvil::new();
+
+        if let Some(chain_id) = chain_id {
+            instance = instance.chain_id(chain_id);
+        }
+
+        if let Some(fork_rpc) = fork_rpc {
+            instance = instance.fork(fork_rpc);
+        }
+
+        let instance = instance.spawn();
 
         let provider = EthersHttpProvider::try_from(instance.endpoint()).unwrap();
 
         Self { instance, provider }
+    }
+
+    pub async fn spawn(chain_id: u64) -> Self {
+        Self::new(Some(chain_id), None).await
+    }
+
+    pub async fn spawn_fork(fork_rpc: &str) -> Self {
+        Self::new(None, Some(fork_rpc)).await
     }
 
     pub fn wallet(&self, id: usize) -> LocalWallet {

@@ -1,3 +1,4 @@
+use serde_json::Value;
 use std::{str::FromStr, time::Duration};
 use tokio::{
     task::yield_now,
@@ -111,14 +112,15 @@ async fn it_starts_and_stops() {
     x.wait_for_stop();
 }
 
-/// TODO: have another test that queries mainnet so the state is more interesting?
+/// TODO: have another test that queries mainnet so the state is more interesting
+/// TODO: have another test that makes sure error codes match
 #[test_log::test(tokio::test)]
 async fn it_matches_anvil() {
     let a = TestAnvil::spawn(31337).await;
 
     // TODO: send some test transactions
 
-    a.provider.request::<_, ()>("evm_mine", ()).await.unwrap();
+    a.provider.request::<_, U64>("evm_mine", ()).await.unwrap();
 
     let x = TestApp::spawn(&a, None, None, None).await;
 
@@ -152,6 +154,24 @@ async fn it_matches_anvil() {
         .await
         .unwrap();
     info!(?block_with_tx);
+
+    let fee_history: Value = quorum_provider
+        .request("eth_feeHistory", (4, "latest", [25, 75]))
+        .await
+        .unwrap();
+    info!(?fee_history);
+
+    let gas_price: U256 = quorum_provider.request("eth_gasPrice", ()).await.unwrap();
+    info!(%gas_price);
+
+    let balance: U256 = quorum_provider
+        .request(
+            "eth_getBalance",
+            (block_with_tx.unwrap().author.unwrap(), "latest"),
+        )
+        .await
+        .unwrap();
+    info!(%balance);
 
     // todo!("lots more requests");
 
