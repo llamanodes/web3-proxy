@@ -1,9 +1,13 @@
-use std::time::Duration;
+use std::{str::FromStr, time::Duration};
 use tokio::{
     task::yield_now,
     time::{sleep, Instant},
 };
-use web3_proxy::prelude::ethers::prelude::U256;
+use tracing::info;
+use web3_proxy::prelude::ethers::{
+    prelude::{Block, Transaction, TxHash, U256, U64},
+    providers::{Http, JsonRpcClient, Quorum, QuorumProvider, WeightedProvider},
+};
 use web3_proxy::prelude::http::StatusCode;
 use web3_proxy::prelude::reqwest;
 use web3_proxy::rpcs::blockchain::ArcBlock;
@@ -105,4 +109,51 @@ async fn it_starts_and_stops() {
 
     // most tests won't need to wait, but we should wait here to be sure all the shutdown logic works properly
     x.wait_for_stop();
+}
+
+/// TODO: have another test that queries mainnet so the state is more interesting?
+#[test_log::test(tokio::test)]
+async fn it_matches_anvil() {
+    let a = TestAnvil::spawn(31337).await;
+
+    // TODO: send some test transactions
+
+    a.provider.request::<_, ()>("evm_mine", ()).await.unwrap();
+
+    let x = TestApp::spawn(&a, None, None, None).await;
+
+    let weighted_anvil_provider =
+        WeightedProvider::new(Http::from_str(&a.instance.endpoint()).unwrap());
+    let weighted_proxy_provider =
+        WeightedProvider::new(Http::from_str(x.proxy_provider.url().as_str()).unwrap());
+
+    let quorum_provider = QuorumProvider::builder()
+        .add_providers([weighted_anvil_provider, weighted_proxy_provider])
+        .quorum(Quorum::All)
+        .build();
+
+    let chain_id: U64 = quorum_provider.request("eth_chainId", ()).await.unwrap();
+    info!(%chain_id);
+
+    let block_number: U64 = quorum_provider
+        .request("eth_blockNumber", ())
+        .await
+        .unwrap();
+    info!(%block_number);
+
+    let block_without_tx: Option<Block<TxHash>> = quorum_provider
+        .request("eth_getBlockByNumber", (block_number, false))
+        .await
+        .unwrap();
+    info!(?block_without_tx);
+
+    let block_with_tx: Option<Block<Transaction>> = quorum_provider
+        .request("eth_getBlockByNumber", (block_number, true))
+        .await
+        .unwrap();
+    info!(?block_with_tx);
+
+    // todo!("lots more requests");
+
+    // todo!("compare batch requests");
 }
