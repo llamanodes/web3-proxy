@@ -108,7 +108,8 @@ RUN --mount=type=bind,source=.,target=/app,rw \
     [ -e "$(pwd)/payment-contracts/src/contracts/mod.rs" ] || touch "$(pwd)/payment-contracts/build.rs"; \
     RUST_LOG=web3_proxy=trace,info \
     cargo \
-    --locked \
+    --frozen \
+    --offline \
     nextest run \
     --features "$WEB3_PROXY_FEATURES" --no-default-features \
     ; \
@@ -129,7 +130,8 @@ RUN --mount=type=bind,source=.,target=/app,rw \
     [ -e "$(pwd)/payment-contracts/src/contracts/mod.rs" ] || touch "$(pwd)/payment-contracts/build.rs"; \
     cargo install \
     --features "$WEB3_PROXY_FEATURES" \
-    --locked \
+    --frozen \
+    --offline \
     --no-default-features \
     --path ./web3_proxy_cli \
     --root /usr/local \
