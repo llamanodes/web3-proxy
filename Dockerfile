@@ -3,7 +3,6 @@ FROM debian:bullseye-slim as rust
 WORKDIR /app
 # sccache cannot cache incrementals, but we use --mount=type=cache and import caches so it should be helpful
 ENV CARGO_INCREMENTAL true
-ENV CARGO_TARGET_DIR /target
 ENV CARGO_TERM_COLOR always
 ENV CARGO_UNSTABLE_SPARSE_REGISTRY true
 ENV PATH "/root/.foundry/bin:/root/.cargo/bin:${PATH}"
@@ -80,9 +79,6 @@ FROM rust as rust_with_env
 # changing our features doesn't change any of the steps above
 ENV WEB3_PROXY_FEATURES "rdkafka-src"
 
-# copy the app
-COPY . .
-
 # build tests (done its in own FROM so that it can run in parallel)
 FROM rust_with_env as build_tests
 
@@ -90,11 +86,13 @@ COPY --from=rust_foundry /root/.foundry/bin/anvil /root/.foundry/bin/
 COPY --from=rust_nextest /root/.cargo/bin/cargo-nextest* /root/.cargo/bin/
 
 # test the application with cargo-nextest
-RUN --mount=type=cache,target=/root/.cargo/git \
+RUN --mount=type=bind,source=.,target=/app,rw \
+    --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/target \
+    --mount=type=cache,target=/app/target_test \
     set -eux -o pipefail; \
     \
+    export CARGO_TARGET_DIR=target_test; \
     [ -e "$(pwd)/payment-contracts/src/contracts/mod.rs" ] || touch "$(pwd)/payment-contracts/build.rs"; \
     RUST_LOG=web3_proxy=trace,info \
     cargo \
@@ -103,6 +101,7 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     nextest run \
     --features "$WEB3_PROXY_FEATURES" --no-default-features \
     ; \
+    [ -d target_test/debug ]; \
     touch /test_success
 
 FROM rust_with_env as build_app
@@ -110,9 +109,10 @@ FROM rust_with_env as build_app
 # build the release application
 # using a "release" profile (which install does by default) is **very** important
 # TODO: use the "faster_release" profile which builds with `codegen-units = 1` (but compile is SLOW)
-RUN --mount=type=cache,target=/root/.cargo/git \
+RUN --mount=type=bind,source=.,target=/app,rw \
+    --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/target \
+    --mount=type=cache,target=/app/target \
     set -eux -o pipefail; \
     \
     [ -e "$(pwd)/payment-contracts/src/contracts/mod.rs" ] || touch "$(pwd)/payment-contracts/build.rs"; \
