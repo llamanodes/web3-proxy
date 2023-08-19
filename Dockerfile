@@ -79,6 +79,18 @@ FROM rust as rust_with_env
 # changing our features doesn't change any of the steps above
 ENV WEB3_PROXY_FEATURES "rdkafka-src"
 
+# fill the package caches
+RUN --mount=type=bind,source=.,target=/app,rw \
+    --mount=type=cache,target=/root/.cargo/git \
+    --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/app/target \
+    set -eux -o pipefail; \
+    \
+    [ -e "$(pwd)/payment-contracts/src/contracts/mod.rs" ] || touch "$(pwd)/payment-contracts/build.rs"; \
+    cargo \
+    --locked \
+    fetch
+
 # build tests (done its in own FROM so that it can run in parallel)
 FROM rust_with_env as build_tests
 
