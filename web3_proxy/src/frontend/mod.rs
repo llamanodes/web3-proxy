@@ -81,9 +81,19 @@ pub async fn serve(
             post(rpc_proxy_http::proxy_web3_rpc_with_key)
                 .get(rpc_proxy_ws::websocket_handler_with_key),
         )
+        .route(
+            "/rpc/:rpc_key/",
+            post(rpc_proxy_http::proxy_web3_rpc_with_key)
+                .get(rpc_proxy_ws::websocket_handler_with_key),
+        )
         // authenticated debug route
         .route(
             "/debug/:rpc_key",
+            post(rpc_proxy_http::debug_proxy_web3_rpc_with_key)
+                .get(rpc_proxy_ws::debug_websocket_handler_with_key),
+        )
+        .route(
+            "/debug/:rpc_key/",
             post(rpc_proxy_http::debug_proxy_web3_rpc_with_key)
                 .get(rpc_proxy_ws::debug_websocket_handler_with_key),
         )
@@ -93,9 +103,19 @@ pub async fn serve(
             post(rpc_proxy_http::fastest_proxy_web3_rpc)
                 .get(rpc_proxy_ws::fastest_websocket_handler),
         )
+        .route(
+            "/fastest/",
+            post(rpc_proxy_http::fastest_proxy_web3_rpc)
+                .get(rpc_proxy_ws::fastest_websocket_handler),
+        )
         // authenticated fastest with and without trailing slash
         .route(
             "/fastest/:rpc_key",
+            post(rpc_proxy_http::fastest_proxy_web3_rpc_with_key)
+                .get(rpc_proxy_ws::fastest_websocket_handler_with_key),
+        )
+        .route(
+            "/fastest/:rpc_key/",
             post(rpc_proxy_http::fastest_proxy_web3_rpc_with_key)
                 .get(rpc_proxy_ws::fastest_websocket_handler_with_key),
         )
@@ -104,9 +124,18 @@ pub async fn serve(
             "/versus",
             post(rpc_proxy_http::versus_proxy_web3_rpc).get(rpc_proxy_ws::versus_websocket_handler),
         )
+        .route(
+            "/versus/",
+            post(rpc_proxy_http::versus_proxy_web3_rpc).get(rpc_proxy_ws::versus_websocket_handler),
+        )
         // authenticated versus
         .route(
             "/versus/:rpc_key",
+            post(rpc_proxy_http::versus_proxy_web3_rpc_with_key)
+                .get(rpc_proxy_ws::versus_websocket_handler_with_key),
+        )
+        .route(
+            "/versus/:rpc_key/",
             post(rpc_proxy_http::versus_proxy_web3_rpc_with_key)
                 .get(rpc_proxy_ws::versus_websocket_handler_with_key),
         )
