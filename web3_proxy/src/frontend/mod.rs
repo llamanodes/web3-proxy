@@ -17,12 +17,14 @@ use axum::{
     routing::{get, post},
     BoxError, Extension, Router,
 };
-use http::{header::AUTHORIZATION, Request};
+use http::{header::AUTHORIZATION, Request, StatusCode};
 use hyper::Body;
 use listenfd::ListenFd;
+use moka::future::{Cache, CacheBuilder};
 use std::sync::Arc;
 use std::{iter::once, time::Duration};
 use std::{net::SocketAddr, sync::atomic::Ordering};
+use strum::{EnumCount, EnumIter};
 use tokio::sync::broadcast;
 use tower::timeout::TimeoutLayer;
 use tower::ServiceBuilder;
@@ -31,12 +33,32 @@ use tower_http::{cors::CorsLayer, normalize_path::NormalizePathLayer, trace::Tra
 use tracing::{error_span, info};
 use ulid::Ulid;
 
+/// simple keys for caching responses
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, EnumCount, EnumIter)]
+pub enum ResponseCacheKey {
+    BackupsNeeded,
+    Health,
+    Status,
+}
+
+pub type ResponseCache = Cache<ResponseCacheKey, (StatusCode, &'static str, axum::body::Bytes)>;
+
 /// Start the frontend server.
 pub async fn serve(
     app: Arc<Web3ProxyApp>,
     mut shutdown_receiver: broadcast::Receiver<()>,
     shutdown_complete_sender: broadcast::Sender<()>,
 ) -> Web3ProxyResult<()> {
+    // setup caches for whatever the frontend needs
+    // no need for max items since it is limited by the enum key
+    // TODO: latest moka allows for different ttls for different
+    let response_cache_size = ResponseCacheKey::COUNT;
+
+    let response_cache: ResponseCache = CacheBuilder::new(response_cache_size as u64)
+        .name("frontend_response")
+        .time_to_live(Duration::from_secs(1))
+        .build();
+
     // TODO: read config for if fastest/versus should be available publicly. default off
 
     // build our axum Router
@@ -242,6 +264,8 @@ pub async fn serve(
         .layer(CorsLayer::very_permissive())
         // application state
         .layer(Extension(app.clone()))
+        // frontend caches
+        .layer(Extension(Arc::new(response_cache)))
         // request timeout
         .layer(
             ServiceBuilder::new()
