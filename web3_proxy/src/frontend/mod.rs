@@ -56,7 +56,7 @@ pub async fn serve(
 
     let response_cache: ResponseCache = CacheBuilder::new(response_cache_size as u64)
         .name("frontend_response")
-        .time_to_live(Duration::from_secs(1))
+        .time_to_live(Duration::from_millis(100))
         .build();
 
     // TODO: read config for if fastest/versus should be available publicly. default off

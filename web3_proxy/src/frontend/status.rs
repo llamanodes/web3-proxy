@@ -80,7 +80,7 @@ pub async fn health(
     Extension(cache): Extension<Arc<ResponseCache>>,
 ) -> Result<impl IntoResponse, Web3ProxyError> {
     let (code, content_type, body) = timeout(
-        Duration::from_secs(3),
+        Duration::from_secs(1),
         cache.get_with(ResponseCacheKey::Health, async move { _health(app).await }),
     )
     .await?;
@@ -117,7 +117,7 @@ pub async fn backups_needed(
     Extension(cache): Extension<Arc<ResponseCache>>,
 ) -> Result<impl IntoResponse, Web3ProxyError> {
     let (code, content_type, body) = timeout(
-        Duration::from_secs(3),
+        Duration::from_secs(1),
         cache.get_with(ResponseCacheKey::BackupsNeeded, async move {
             _backups_needed(app).await
         }),
@@ -168,7 +168,7 @@ pub async fn status(
     Extension(cache): Extension<Arc<ResponseCache>>,
 ) -> Result<impl IntoResponse, Web3ProxyError> {
     let (code, content_type, body) = timeout(
-        Duration::from_secs(3),
+        Duration::from_secs(1),
         cache.get_with(ResponseCacheKey::Status, async move { _status(app).await }),
     )
     .await?;
