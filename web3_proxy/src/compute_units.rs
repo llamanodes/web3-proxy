@@ -31,7 +31,7 @@ impl ComputeUnit {
             return Self::subscription_response(response_bytes);
         }
 
-        let cu = if method.starts_with("admin_") {
+        let cu = if method.starts_with("admin_") || method.starts_with("alchemy_") {
             // maybe charge extra since they are doing things they aren't supposed to
             return Self::unimplemented();
         } else {
