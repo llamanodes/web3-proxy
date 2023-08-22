@@ -1,6 +1,9 @@
 {
+    "rust-analyzer.server.extraEnv": {
+        "CARGO_TARGET_DIR": "target/rust-analyzer"
+    },
     "rust-analyzer.checkOnSave.extraArgs": [
         "--target-dir",
-        "${workspaceFolder}/target/check"
+        "target/rust-analyzer"
     ]
 }
