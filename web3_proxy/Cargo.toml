@@ -75,12 +75,12 @@ pagerduty-rs = { version = "0.1.6", default-features = false, features = ["async
 parking_lot = { version = "0.12.1", features = ["arc_lock", "nightly"] }
 rdkafka = { version = "0.33.2", features = ["tracing"] }
 regex = "1.9.3"
-reqwest = { version = "0.11.18", default-features = false, features = ["deflate", "gzip", "json", "tokio-rustls"] }
+reqwest = { version = "0.11.19", default-features = false, features = ["deflate", "gzip", "json", "tokio-rustls"] }
 rmp-serde = "1.1.2"
 rust_decimal = { version = "1.31.0", features = ["maths"] }
 sentry = { version = "0.31.5", default-features = false, features = ["anyhow", "backtrace", "contexts", "panic", "reqwest", "rustls", "serde_json", "tracing"] }
 sentry-tracing = "0.31.5"
-serde = { version = "1.0.183" }
+serde = { version = "1.0.185" }
 serde-inline-default = "0.1.1"
 serde_json = { version = "1.0.105", default-features = false, features = ["raw_value"] }
 serde_prometheus = "0.2.3"
