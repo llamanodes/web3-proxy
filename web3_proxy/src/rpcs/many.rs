@@ -83,7 +83,8 @@ impl Web3Rpcs {
         Web3ProxyJoinHandle<()>,
         watch::Receiver<Option<Arc<RankedRpcs>>>,
     )> {
-        let (block_and_rpc_sender, block_and_rpc_receiver) = mpsc::unbounded_channel::<BlockAndRpc>();
+        let (block_and_rpc_sender, block_and_rpc_receiver) =
+            mpsc::unbounded_channel::<BlockAndRpc>();
 
         // these blocks don't have full transactions, but they do have rather variable amounts of transaction hashes
         // TODO: actual weighter on this
@@ -348,7 +349,11 @@ impl Web3Rpcs {
 
             let handle = tokio::task::Builder::default()
                 .name("process_incoming_blocks")
-                .spawn(async move { connections.process_incoming_blocks(block_and_rpc_receiver).await })?;
+                .spawn(async move {
+                    connections
+                        .process_incoming_blocks(block_and_rpc_receiver)
+                        .await
+                })?;
 
             futures.push(flatten_handle(handle));
         }
