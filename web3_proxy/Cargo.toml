@@ -1,6 +1,6 @@
 [package]
 name = "web3_proxy"
-version = "1.42.11"
+version = "1.42.13"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -50,7 +50,7 @@ counter = "0.5.7"
 derivative = "2.2.0"
 derive_more = { version = "0.99.17", features = ["nightly"] }
 ethbloom = { version = "0.13.0" }
-ethers = { version = "2.0.8", default-features = false, features = ["rustls", "ws"] }
+ethers = { version = "2.0.9", default-features = false, features = ["rustls", "ws"] }
 fdlimit = "0.2.1"
 fstrings = "0.2"
 futures = { version = "0.3.28" }
@@ -75,12 +75,12 @@ pagerduty-rs = { version = "0.1.6", default-features = false, features = ["async
 parking_lot = { version = "0.12.1", features = ["arc_lock", "nightly"] }
 rdkafka = { version = "0.33.2", features = ["tracing"] }
 regex = "1.9.3"
-reqwest = { version = "0.11.19", default-features = false, features = ["deflate", "gzip", "json", "tokio-rustls"] }
+reqwest = { version = "0.11.20", default-features = false, features = ["deflate", "gzip", "json", "tokio-rustls"] }
 rmp-serde = "1.1.2"
-rust_decimal = { version = "1.31.0", features = ["maths"] }
+rust_decimal = { version = "1.32.0", features = ["maths"] }
 sentry = { version = "0.31.5", default-features = false, features = ["anyhow", "backtrace", "contexts", "panic", "reqwest", "rustls", "serde_json", "tracing"] }
 sentry-tracing = "0.31.5"
-serde = { version = "1.0.185" }
+serde = { version = "1.0.186" }
 serde-inline-default = "0.1.1"
 serde_json = { version = "1.0.105", default-features = false, features = ["raw_value"] }
 serde_prometheus = "0.2.3"
