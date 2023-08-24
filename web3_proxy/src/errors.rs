@@ -847,32 +847,26 @@ impl Web3ProxyError {
             Self::RateLimited(authorization, retry_at) => {
                 // TODO: emit a stat
 
-                let retry_msg = if let Some(retry_at) = retry_at {
-                    let retry_in = retry_at.duration_since(Instant::now()).as_secs();
-
-                    format!(" Retry in {} seconds", retry_in)
+                let retry_after = if let Some(retry_at) = retry_at {
+                    retry_at.duration_since(Instant::now()).as_secs()
                 } else {
-                    "".to_string()
+                    // TODO: what should we default to?
+                    60
                 };
 
                 // create a string with either the IP or the rpc_key_id
-                let msg = if authorization.checks.rpc_secret_key_id.is_none() {
-                    format!("too many requests from {}.{}", authorization.ip, retry_msg)
+                let retry_data = if authorization.checks.rpc_secret_key_id.is_none() {
+                    json!({"retry_after": retry_after, "ip": authorization.ip})
                 } else {
-                    format!(
-                        "too many requests from rpc key #{}.{}",
-                        authorization.checks.rpc_secret_key_id.unwrap(),
-                        retry_msg,
-                    )
+                    json!({"retry_after": retry_after, "ip": authorization.ip, "key_id": authorization.checks.rpc_secret_key_id.unwrap()})
                 };
 
                 (
                     StatusCode::TOO_MANY_REQUESTS,
                     JsonRpcErrorData {
-                        message: msg.into(),
+                        message: "too many requests".into(),
                         code: StatusCode::TOO_MANY_REQUESTS.as_u16().into(),
-                        // TODO: use a generic message with details in the data
-                        data: None,
+                        data: Some(retry_data),
                     },
                 )
             }
