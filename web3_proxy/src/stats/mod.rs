@@ -421,7 +421,8 @@ impl BufferedRpcQueryStats {
 
                         let now = Utc::now();
                         let valid_until =
-                            DateTime::<Utc>::from_utc(referral_start_date, Utc) + Months::new(12);
+                            DateTime::<Utc>::from_naive_utc_and_offset(referral_start_date, Utc)
+                                + Months::new(12);
 
                         // If the referrer ever had premium, provide credits to them
                         // Also only works if the referrer referred the person less than 1 year ago
