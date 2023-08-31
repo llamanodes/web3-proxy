@@ -42,9 +42,9 @@ async-trait = "0.1.73"
 axum = { version = "0.6.20", features = ["headers", "tracing", "ws"] }
 axum-client-ip = "0.4.1"
 axum-macros = "0.3.8"
-base64 = "0.21.2"
+base64 = "0.21.3"
 check-if-email-exists = "0.9.0"
-chrono = { version = "0.4.26" }
+chrono = { version = "0.4.28" }
 console-subscriber = { version = "0.1.10", features = ["env-filter", "parking_lot"], optional = true }
 counter = "0.5.7"
 derivative = "2.2.0"
@@ -64,7 +64,7 @@ hyper = { version = "0.14.27", features = ["full", "nightly"] }
 ipnet = { version = "2.8.0", features = ["json"] }
 itertools = "0.11.0"
 listenfd = "1.0.1"
-mimalloc = { version = "0.1.37", optional = true}
+mimalloc = { version = "0.1.38", optional = true}
 moka = { version = "0.11.3", default-features = false, features = ["atomic64", "future", "parking_lot", "quanta", "triomphe"] }
 nanorand = { version = "0.7.0", default-features = false, features = ["std", "tls", "wyrand"] }
 num = { version = "0.4.1" }
@@ -74,13 +74,13 @@ ordered-float = {version = "3.9.1" }
 pagerduty-rs = { version = "0.1.6", default-features = false, features = ["async", "rustls", "sync"] }
 parking_lot = { version = "0.12.1", features = ["arc_lock", "nightly"] }
 rdkafka = { version = "0.33.2", features = ["tracing"] }
-regex = "1.9.3"
+regex = "1.9.4"
 reqwest = { version = "0.11.20", default-features = false, features = ["deflate", "gzip", "json", "tokio-rustls"] }
 rmp-serde = "1.1.2"
 rust_decimal = { version = "1.32.0", features = ["maths"] }
-sentry = { version = "0.31.5", default-features = false, features = ["anyhow", "backtrace", "contexts", "panic", "reqwest", "rustls", "serde_json", "tracing"] }
-sentry-tracing = "0.31.5"
-serde = { version = "1.0.186" }
+sentry = { version = "0.31.6", default-features = false, features = ["anyhow", "backtrace", "contexts", "panic", "reqwest", "rustls", "serde_json", "tracing"] }
+sentry-tracing = "0.31.6"
+serde = { version = "1.0.188" }
 serde-inline-default = "0.1.1"
 serde_json = { version = "1.0.105", default-features = false, features = ["raw_value"] }
 serde_prometheus = "0.2.3"
@@ -94,8 +94,8 @@ toml = "0.7.6"
 tower = { version = "0.4.13", features = ["timeout", "tracing"] }
 tower-http = { version = "0.4.3", features = ["cors", "normalize-path", "sensitive-headers", "trace"] }
 tracing = "0.1"
-ulid = { version = "1.0.0", features = ["rand", "uuid", "serde"] }
-url = { version = "2.4.0" }
+ulid = { version = "1.0.1", features = ["rand", "uuid", "serde"] }
+url = { version = "2.4.1" }
 uuid = { version = "1.4.1", default-features = false, features = ["fast-rng", "v4", "zerocopy"] }
 
 # TODO: why doesn't this work in dev-dependencies
