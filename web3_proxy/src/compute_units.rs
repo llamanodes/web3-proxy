@@ -14,8 +14,8 @@ pub fn default_usd_per_cu(chain_id: u64) -> Decimal {
     match chain_id {
         // TODO: only include if `cfg(test)`?
         999_001_999 => Decimal::from_str("0.10").unwrap(),
-        137 => Decimal::from_str("0.000000533333333333333").unwrap(),
-        _ => Decimal::from_str("0.000000400000000000000").unwrap(),
+        1 => Decimal::from_str("0.000000400000000000000").unwrap(),
+        _ => Decimal::from_str("0.000000533333333333333").unwrap(),
     }
 }
 
