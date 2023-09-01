@@ -1424,7 +1424,7 @@ impl Web3ProxyApp {
 
                 // if we got "null", it is probably because the tx is old. retry on nodes with old block data
                 let try_archive = if let Ok(value) = &response_data {
-                    value.get() == "null"
+                    value.get() == "null" || value.get() == "" || value.get() == "\"\""
                 } else {
                     true
                 };
