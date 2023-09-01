@@ -1,6 +1,6 @@
 [package]
 name = "web3_proxy"
-version = "1.42.14"
+version = "1.42.15"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -55,7 +55,7 @@ fdlimit = "0.2.1"
 fstrings = "0.2"
 futures = { version = "0.3.28" }
 glob = "0.3.1"
-handlebars = "4.3.7"
+handlebars = "4.4.0"
 hashbrown = { version = "0.14.0", features = ["serde", "nightly"] }
 hdrhistogram = "7.5.2"
 hostname = "0.3.1"
@@ -92,7 +92,7 @@ tokio-console = { version = "0.1.9", optional = true }
 tokio-stream = { version = "0.1.14", features = ["sync"] }
 toml = "0.7.6"
 tower = { version = "0.4.13", features = ["timeout", "tracing"] }
-tower-http = { version = "0.4.3", features = ["cors", "normalize-path", "sensitive-headers", "trace"] }
+tower-http = { version = "0.4.4", features = ["cors", "normalize-path", "sensitive-headers", "trace"] }
 tracing = "0.1"
 ulid = { version = "1.0.1", features = ["rand", "uuid", "serde"] }
 url = { version = "2.4.1" }
