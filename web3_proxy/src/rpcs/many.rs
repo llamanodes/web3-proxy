@@ -538,6 +538,18 @@ impl Web3Rpcs {
             .and_then(|x| x.authorization.clone())
             .unwrap_or_default();
 
+        if self.watch_head_block.is_none() {
+            // if this group of servers is not watching the head block, we don't know what is "best" based on block height
+            // TODO: do this without cloning here
+            let potential_rpcs = self.by_name.read().values().cloned().collect::<Vec<_>>();
+
+            let x = self
+                ._best_available_rpc(&authorization, error_handler, &potential_rpcs, skip_rpcs)
+                .await;
+
+            return Ok(x);
+        }
+
         let mut watch_ranked_rpcs = self.watch_ranked_rpcs.subscribe();
 
         let mut potential_rpcs = Vec::new();
