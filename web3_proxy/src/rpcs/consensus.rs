@@ -300,6 +300,11 @@ impl RankedRpcs {
             return false;
         }
 
+        if rpc.backup && !self.backups_needed {
+            // skip backups unless backups are needed for ranked_rpcs to exist
+            return false;
+        }
+
         if let Some(min_block_needed) = min_block_needed {
             if !self.has_block_data(rpc, min_block_needed) {
                 trace!(
