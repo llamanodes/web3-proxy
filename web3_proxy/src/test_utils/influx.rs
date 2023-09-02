@@ -158,7 +158,7 @@ impl TestInflux {
                 break;
             };
 
-            // not open wait. sleep and then try again
+            // not open yet. sleep and then try again
             sleep(Duration::from_secs(1)).await;
         }
 

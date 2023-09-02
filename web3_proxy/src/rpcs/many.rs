@@ -365,9 +365,7 @@ impl Web3Rpcs {
             let handle = tokio::task::Builder::default()
                 .name("noop")
                 .spawn(async move {
-                    loop {
-                        sleep(Duration::from_secs(600)).await;
-                    }
+                    futures::future::pending::<()>().await;
                 })?;
 
             futures.push(flatten_handle(handle));

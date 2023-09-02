@@ -1198,8 +1198,9 @@ impl Web3ProxyApp {
                 Err(err) => {
                     tries += 1;
                     if tries < max_tries {
-                        // try again
-                        yield_now().await;
+                        // try again after a short delay
+                        // TODO: tune this delay
+                        sleep(Duration::from_millis(100)).await;
 
                         continue;
                     }
@@ -1340,13 +1341,15 @@ impl Web3ProxyApp {
                 Some(bundler_4337_rpcs) => {
                     // TODO: timeout
                     let x = bundler_4337_rpcs
-                        .try_proxy_connection::<_, Box<RawValue>>(
+                        .try_send_all_synced_connections::<Box<RawValue>>(
                             method,
                             params,
                             Some(request_metadata),
+                            None,
+                            None,
                             Some(Duration::from_secs(30)),
-                            None,
-                            None,
+                            Some(Level::DEBUG.into()),
+                            Some(1),
                         )
                         .await?;
 
