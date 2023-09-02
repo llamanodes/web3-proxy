@@ -32,7 +32,7 @@ use std::sync::Arc;
 use tokio::select;
 use tokio::sync::{mpsc, watch};
 use tokio::task::yield_now;
-use tokio::time::{sleep, sleep_until, timeout, Duration, Instant};
+use tokio::time::{sleep_until, timeout, Duration, Instant};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 /// A collection of web3 connections. Sends requests either the current best server or all servers.
@@ -366,6 +366,8 @@ impl Web3Rpcs {
                 .name("noop")
                 .spawn(async move {
                     futures::future::pending::<()>().await;
+
+                    Ok(())
                 })?;
 
             futures.push(flatten_handle(handle));

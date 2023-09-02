@@ -1340,20 +1340,20 @@ impl Web3ProxyApp {
             | "eth_supportedEntryPoints"
             | "web3_bundlerVersion") => match self.bundler_4337_rpcs.as_ref() {
                 Some(bundler_4337_rpcs) => {
-                    let x = bundler_4337_rpcs
-                        .try_send_all_synced_connections::<Box<RawValue>>(
-                            method,
-                            params,
-                            Some(request_metadata),
-                            None,
-                            None,
-                            Some(Duration::from_secs(30)),
-                            Some(Level::DEBUG.into()),
-                            Some(1),
-                        )
-                        .await?;
-
-                    x.into()
+                    // let x = bundler_4337_rpcs
+                    //     .try_send_all_synced_connections::<Box<RawValue>>(
+                    //         method,
+                    //         params,
+                    //         Some(request_metadata),
+                    //         None,
+                    //         None,
+                    //         Some(Duration::from_secs(30)),
+                    //         Some(Level::DEBUG.into()),
+                    //         Some(1),
+                    //     )
+                    //     .await?;
+                    // x.into()
+                    todo!("wip");
                 }
                 None => {
                     // TODO: stats even when we error!
