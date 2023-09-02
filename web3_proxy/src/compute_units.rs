@@ -120,6 +120,7 @@ impl ComputeUnit {
                 (_, "trace_transaction") => 26,
                 (_, "invalid_method") => 100,
                 (_, "web3_clientVersion") => 15,
+                (_, "web3_bundlerVersion") => 15,
                 (_, "web3_sha3") => 15,
                 (_, "ots_getInternalOperations") => 1000,
                 (_, "ots_hasCode") => 1000,
