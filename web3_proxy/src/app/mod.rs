@@ -1339,7 +1339,6 @@ impl Web3ProxyApp {
             | "eth_getUserOperationReceipt"
             | "eth_supportedEntryPoints") => match self.bundler_4337_rpcs.as_ref() {
                 Some(bundler_4337_rpcs) => {
-                    // TODO: timeout
                     let x = bundler_4337_rpcs
                         .try_send_all_synced_connections::<Box<RawValue>>(
                             method,
