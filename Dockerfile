@@ -31,25 +31,17 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     ;
 
 # install rustup
-RUN --mount=type=cache,target=/root/.cargo/git \
-    --mount=type=cache,target=/root/.cargo/registry \
-    set -eux -o pipefail; \
+RUN set -eux -o pipefail; \
     \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none --profile=minimal
 
 # run a cargo command to install our desired version of rust
 # it is expected to exit code 101 since no Cargo.toml exists
 COPY rust-toolchain.toml ./
-RUN --mount=type=cache,target=/root/.cargo/git \
-    --mount=type=cache,target=/root/.cargo/registry \
-    set -eux -o pipefail; \
-    \
-    cargo check || [ "$?" -eq 101 ]
+RUN cargo check || [ "$?" -eq 101 ]
 
 # cargo binstall
-RUN --mount=type=cache,target=/root/.cargo/git \
-    --mount=type=cache,target=/root/.cargo/registry \
-    set -eux -o pipefail; \
+RUN set -eux -o pipefail; \
     \
     curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh >/tmp/install-binstall.sh; \
     bash /tmp/install-binstall.sh; \
@@ -59,18 +51,12 @@ RUN --mount=type=cache,target=/root/.cargo/git \
 # TODO: i'd like to use binaries for these, but i had trouble with arm and binstall
 FROM rust as rust_nextest
 
-RUN --mount=type=cache,target=/root/.cargo/git \
-    --mount=type=cache,target=/root/.cargo/registry \
-    set -eux -o pipefail; \
-    \
-    cargo binstall -y cargo-nextest
+RUN cargo binstall -y cargo-nextest
 
 # foundry/anvil are needed to run tests (done its in own FROM so that it can run in parallel)
 FROM rust as rust_foundry
 
-RUN --mount=type=cache,target=/root/.cargo/git \
-    --mount=type=cache,target=/root/.cargo/registry \
-    set -eux -o pipefail; \
+RUN set -eux -o pipefail; \
     \
     curl -L https://foundry.paradigm.xyz | bash && foundryup
 
@@ -79,12 +65,11 @@ FROM rust as rust_with_env
 # changing our features doesn't change any of the steps above
 ENV WEB3_PROXY_FEATURES "rdkafka-src"
 
+# copy the app
+COPY . .
+
 # fill the package caches
-RUN --mount=type=bind,source=.,target=/app,rw \
-    --mount=type=cache,target=/root/.cargo/git \
-    --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/app/target \
-    set -eux -o pipefail; \
+RUN set -eux -o pipefail; \
     \
     [ -e "$(pwd)/payment-contracts/src/contracts/mod.rs" ] || touch "$(pwd)/payment-contracts/build.rs"; \
     cargo \
@@ -98,11 +83,7 @@ COPY --from=rust_foundry /root/.foundry/bin/anvil /root/.foundry/bin/
 COPY --from=rust_nextest /root/.cargo/bin/cargo-nextest* /root/.cargo/bin/
 
 # test the application with cargo-nextest
-RUN --mount=type=bind,source=.,target=/app,rw \
-    --mount=type=cache,target=/root/.cargo/git \
-    --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/app/target_test \
-    set -eux -o pipefail; \
+RUN set -eux -o pipefail; \
     \
     export CARGO_TARGET_DIR=target_test; \
     [ -e "$(pwd)/payment-contracts/src/contracts/mod.rs" ] || touch "$(pwd)/payment-contracts/build.rs"; \
@@ -121,11 +102,7 @@ FROM rust_with_env as build_app
 # build the release application
 # using a "release" profile (which install does by default) is **very** important
 # TODO: use the "faster_release" profile which builds with `codegen-units = 1` (but compile is SLOW)
-RUN --mount=type=bind,source=.,target=/app,rw \
-    --mount=type=cache,target=/root/.cargo/git \
-    --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/app/target \
-    set -eux -o pipefail; \
+RUN set -eux -o pipefail; \
     \
     [ -e "$(pwd)/payment-contracts/src/contracts/mod.rs" ] || touch "$(pwd)/payment-contracts/build.rs"; \
     cargo install \
