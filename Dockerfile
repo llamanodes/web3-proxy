@@ -69,7 +69,8 @@ ENV WEB3_PROXY_FEATURES "rdkafka-src"
 COPY . .
 
 # fill the package caches
-RUN set -eux -o pipefail; \
+RUN --mount=type=cache,target=/app/target,rw \
+    set -eux -o pipefail; \
     \
     [ -e "$(pwd)/payment-contracts/src/contracts/mod.rs" ] || touch "$(pwd)/payment-contracts/build.rs"; \
     cargo \
@@ -83,7 +84,8 @@ COPY --from=rust_foundry /root/.foundry/bin/anvil /root/.foundry/bin/
 COPY --from=rust_nextest /root/.cargo/bin/cargo-nextest* /root/.cargo/bin/
 
 # test the application with cargo-nextest
-RUN set -eux -o pipefail; \
+RUN --mount=type=cache,target=/app/target,rw \
+    set -eux -o pipefail; \
     \
     export CARGO_TARGET_DIR=target_test; \
     [ -e "$(pwd)/payment-contracts/src/contracts/mod.rs" ] || touch "$(pwd)/payment-contracts/build.rs"; \
@@ -102,7 +104,8 @@ FROM rust_with_env as build_app
 # build the release application
 # using a "release" profile (which install does by default) is **very** important
 # TODO: use the "faster_release" profile which builds with `codegen-units = 1` (but compile is SLOW)
-RUN set -eux -o pipefail; \
+RUN --mount=type=cache,target=/app/target,rw \
+    set -eux -o pipefail; \
     \
     [ -e "$(pwd)/payment-contracts/src/contracts/mod.rs" ] || touch "$(pwd)/payment-contracts/build.rs"; \
     cargo install \
