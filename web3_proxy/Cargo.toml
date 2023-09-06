@@ -1,6 +1,6 @@
 [package]
 name = "web3_proxy"
-version = "1.42.17"
+version = "1.42.18"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -44,7 +44,7 @@ axum-client-ip = "0.4.1"
 axum-macros = "0.3.8"
 base64 = "0.21.3"
 check-if-email-exists = "0.9.0"
-chrono = { version = "0.4.28" }
+chrono = { version = "0.4.29" }
 console-subscriber = { version = "0.1.10", features = ["env-filter", "parking_lot"], optional = true }
 counter = "0.5.7"
 derivative = "2.2.0"
