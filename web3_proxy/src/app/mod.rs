@@ -1315,10 +1315,7 @@ impl Web3ProxyApp {
             | "shh_post"
             | "shh_uninstallFilter"
             | "shh_version") => {
-                return Err(Web3ProxyError::MethodNotFound(format!(
-                    "the method {} does not exist/is not available",
-                    method
-                ).into()));
+                return Err(Web3ProxyError::MethodNotFound(method.to_owned().into()));
             }
             // TODO: implement these commands
             method @ ("eth_getFilterChanges"
@@ -1328,10 +1325,7 @@ impl Web3ProxyApp {
             | "eth_newPendingTransactionFilter"
             | "eth_pollSubscriptions"
             | "eth_uninstallFilter") => {
-                return Err(Web3ProxyError::MethodNotFound(format!(
-                    "the method {} is not yet implemented. contact us if you need this",
-                    method
-                ).into()));
+                return Err(Web3ProxyError::MethodNotFound(method.to_owned().into()));
             }
             method @ ("eth_sendUserOperation"
             | "eth_estimateUserOperationGas"
