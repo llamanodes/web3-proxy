@@ -19,16 +19,17 @@ pub struct PopularityContestSubCommand {
 
 #[derive(Debug)]
 struct BackendRpcData<'a> {
-    name: &'a str,
-    tier: u64,
+    active_requests: u64,
     backup: bool,
     block_data_limit: u64,
-    head_block: u64,
-    active_requests: u64,
-    internal_requests: u64,
     external_requests: u64,
+    head_block: u64,
     head_delay_ms: f64,
+    internal_requests: u64,
+    median_latency_ms: f64,
+    name: &'a str,
     peak_latency_ms: f64,
+    tier: u64,
     weighted_latency_ms: f64,
 }
 
@@ -104,6 +105,11 @@ impl PopularityContestSubCommand {
                 .and_then(|x| x.as_f64())
                 .unwrap_or_default();
 
+            let median_latency_ms = conn
+                .get("median_latency_ms")
+                .and_then(|x| x.as_f64())
+                .unwrap_or_default();
+
             let peak_latency_ms = conn
                 .get("peak_latency_ms")
                 .and_then(|x| x.as_f64())
@@ -115,16 +121,17 @@ impl PopularityContestSubCommand {
                 .unwrap_or_default();
 
             let x = BackendRpcData {
-                name,
-                tier,
+                active_requests,
                 backup,
                 block_data_limit,
-                active_requests,
-                internal_requests,
                 external_requests,
                 head_block,
                 head_delay_ms,
+                internal_requests,
+                median_latency_ms,
+                name,
                 peak_latency_ms,
+                tier,
                 weighted_latency_ms,
             };
 
@@ -136,7 +143,7 @@ impl PopularityContestSubCommand {
         rpc_data.sort_by_key(|x| {
             (
                 Reverse(x.external_requests),
-                OrderedFloat(x.weighted_latency_ms),
+                OrderedFloat(x.median_latency_ms),
             )
         });
 
@@ -151,6 +158,7 @@ impl PopularityContestSubCommand {
             "lag",
             "block_data_limit",
             "head_ms",
+            "median_ms",
             "peak_ms",
             "weighted_ms",
             "tier",
@@ -186,6 +194,7 @@ impl PopularityContestSubCommand {
                 lag,
                 block_data_limit,
                 format!("{:.3}", rpc.head_delay_ms),
+                rpc.median_latency_ms,
                 rpc.peak_latency_ms,
                 format!("{:.3}", rpc.weighted_latency_ms),
                 tier,
