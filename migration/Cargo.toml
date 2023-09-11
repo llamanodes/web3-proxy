@@ -1,6 +1,6 @@
 [package]
 name = "migration"
-version = "0.42.0"
+version = "0.43.0"
 edition = "2021"
 publish = false
 
@@ -10,7 +10,7 @@ path = "src/lib.rs"
 
 [dependencies]
 tokio = { version = "1.32.0", features = ["full", "tracing"] }
-chrono = "0.4.29"
+chrono = "0.4.30"
 sea-orm = { version = "0.12.2", features = ["with-chrono"]}
 
 [dependencies.sea-orm-migration]
