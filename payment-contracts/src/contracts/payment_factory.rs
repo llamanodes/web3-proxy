@@ -1748,136 +1748,124 @@ pub mod payment_factory {
             data: impl AsRef<[u8]>,
         ) -> ::core::result::Result<Self, ::ethers::core::abi::AbiError> {
             let data = data.as_ref();
-            if let Ok(decoded)
-                = <ProxyImplementationCall as ::ethers::core::abi::AbiDecode>::decode(
-                    data,
-                ) {
+            if let Ok(decoded) = <ProxyImplementationCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
                 return Ok(Self::ProxyImplementation(decoded));
             }
-            if let Ok(decoded)
-                = <AcceptTransferOwnershipCall as ::ethers::core::abi::AbiDecode>::decode(
-                    data,
-                ) {
+            if let Ok(decoded) = <AcceptTransferOwnershipCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
                 return Ok(Self::AcceptTransferOwnership(decoded));
             }
-            if let Ok(decoded)
-                = <AccountToPaymentAddressCall as ::ethers::core::abi::AbiDecode>::decode(
-                    data,
-                ) {
+            if let Ok(decoded) = <AccountToPaymentAddressCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
                 return Ok(Self::AccountToPaymentAddress(decoded));
             }
-            if let Ok(decoded)
-                = <CommitNewReceiverCall as ::ethers::core::abi::AbiDecode>::decode(
-                    data,
-                ) {
+            if let Ok(decoded) = <CommitNewReceiverCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
                 return Ok(Self::CommitNewReceiver(decoded));
             }
-            if let Ok(decoded)
-                = <CommitNewSweeperImplementationCall as ::ethers::core::abi::AbiDecode>::decode(
-                    data,
-                ) {
+            if let Ok(decoded) = <CommitNewSweeperImplementationCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
                 return Ok(Self::CommitNewSweeperImplementation(decoded));
             }
-            if let Ok(decoded)
-                = <CommitTransferOwnershipCall as ::ethers::core::abi::AbiDecode>::decode(
-                    data,
-                ) {
+            if let Ok(decoded) = <CommitTransferOwnershipCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
                 return Ok(Self::CommitTransferOwnership(decoded));
             }
-            if let Ok(decoded)
-                = <CreatePaymentAddressCall as ::ethers::core::abi::AbiDecode>::decode(
-                    data,
-                ) {
+            if let Ok(decoded) = <CreatePaymentAddressCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
                 return Ok(Self::CreatePaymentAddress(decoded));
             }
-            if let Ok(decoded)
-                = <CreatePaymentAddressWithAccountCall as ::ethers::core::abi::AbiDecode>::decode(
-                    data,
-                ) {
+            if let Ok(decoded) = <CreatePaymentAddressWithAccountCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
                 return Ok(Self::CreatePaymentAddressWithAccount(decoded));
             }
-            if let Ok(decoded)
-                = <FinalizeNewReceiverCall as ::ethers::core::abi::AbiDecode>::decode(
-                    data,
-                ) {
+            if let Ok(decoded) = <FinalizeNewReceiverCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
                 return Ok(Self::FinalizeNewReceiver(decoded));
             }
-            if let Ok(decoded)
-                = <FinalizeNewSweeperImplementationCall as ::ethers::core::abi::AbiDecode>::decode(
-                    data,
-                ) {
+            if let Ok(decoded) = <FinalizeNewSweeperImplementationCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
                 return Ok(Self::FinalizeNewSweeperImplementation(decoded));
             }
-            if let Ok(decoded)
-                = <FutureOwnerCall as ::ethers::core::abi::AbiDecode>::decode(data) {
+            if let Ok(decoded) = <FutureOwnerCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
                 return Ok(Self::FutureOwner(decoded));
             }
-            if let Ok(decoded)
-                = <FutureReceiverCall as ::ethers::core::abi::AbiDecode>::decode(data) {
+            if let Ok(decoded) = <FutureReceiverCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
                 return Ok(Self::FutureReceiver(decoded));
             }
-            if let Ok(decoded)
-                = <FutureSweeperImplementationCall as ::ethers::core::abi::AbiDecode>::decode(
-                    data,
-                ) {
+            if let Ok(decoded) = <FutureSweeperImplementationCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
                 return Ok(Self::FutureSweeperImplementation(decoded));
             }
-            if let Ok(decoded)
-                = <GetApprovedTokensCall as ::ethers::core::abi::AbiDecode>::decode(
-                    data,
-                ) {
+            if let Ok(decoded) = <GetApprovedTokensCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
                 return Ok(Self::GetApprovedTokens(decoded));
             }
-            if let Ok(decoded)
-                = <IsApprovedTokenCall as ::ethers::core::abi::AbiDecode>::decode(data) {
+            if let Ok(decoded) = <IsApprovedTokenCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
                 return Ok(Self::IsApprovedToken(decoded));
             }
-            if let Ok(decoded)
-                = <NewReceiverTimestampCall as ::ethers::core::abi::AbiDecode>::decode(
-                    data,
-                ) {
+            if let Ok(decoded) = <NewReceiverTimestampCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
                 return Ok(Self::NewReceiverTimestamp(decoded));
             }
-            if let Ok(decoded)
-                = <NewSweeperTimestampCall as ::ethers::core::abi::AbiDecode>::decode(
-                    data,
-                ) {
+            if let Ok(decoded) = <NewSweeperTimestampCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
                 return Ok(Self::NewSweeperTimestamp(decoded));
             }
-            if let Ok(decoded)
-                = <OwnerCall as ::ethers::core::abi::AbiDecode>::decode(data) {
+            if let Ok(decoded) = <OwnerCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
                 return Ok(Self::Owner(decoded));
             }
-            if let Ok(decoded)
-                = <PaymentAddressToAccountCall as ::ethers::core::abi::AbiDecode>::decode(
-                    data,
-                ) {
+            if let Ok(decoded) = <PaymentAddressToAccountCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
                 return Ok(Self::PaymentAddressToAccount(decoded));
             }
-            if let Ok(decoded)
-                = <PaymentReceivedCall as ::ethers::core::abi::AbiDecode>::decode(data) {
+            if let Ok(decoded) = <PaymentReceivedCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
                 return Ok(Self::PaymentReceived(decoded));
             }
-            if let Ok(decoded)
-                = <ReceiverCall as ::ethers::core::abi::AbiDecode>::decode(data) {
+            if let Ok(decoded) = <ReceiverCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
                 return Ok(Self::Receiver(decoded));
             }
-            if let Ok(decoded)
-                = <SetTokenApprovalsCall as ::ethers::core::abi::AbiDecode>::decode(
-                    data,
-                ) {
+            if let Ok(decoded) = <SetTokenApprovalsCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
                 return Ok(Self::SetTokenApprovals(decoded));
             }
-            if let Ok(decoded)
-                = <SweeperImplementationCall as ::ethers::core::abi::AbiDecode>::decode(
-                    data,
-                ) {
+            if let Ok(decoded) = <SweeperImplementationCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
                 return Ok(Self::SweeperImplementation(decoded));
             }
-            if let Ok(decoded)
-                = <TransferOwnershipTimestampCall as ::ethers::core::abi::AbiDecode>::decode(
-                    data,
-                ) {
+            if let Ok(decoded) = <TransferOwnershipTimestampCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
                 return Ok(Self::TransferOwnershipTimestamp(decoded));
             }
             Err(::ethers::core::abi::Error::InvalidData.into())
