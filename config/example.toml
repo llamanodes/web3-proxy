@@ -74,7 +74,7 @@ response_cache_max_bytes = 10_000_000_000
 
     [balanced_rpcs.ankr]
     display_name = "Ankr"
-    block_data_limit.Limit = "64"
+    block_data_limit = "64"
     http_url = "https://rpc.ankr.com/eth"
     soft_limit = 1_000
 

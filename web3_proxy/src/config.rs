@@ -280,6 +280,7 @@ pub fn average_block_interval(chain_id: u64) -> Duration {
 
 #[derive(Clone, Debug, Derivative, Deserialize, PartialEq, Eq)]
 #[derivative(Default(bound = ""))]
+#[serde(untagged)]
 pub enum BlockDataLimit {
     /// archive nodes can return all data
     Archive,
