@@ -3,14 +3,14 @@ use crate::compute_units::default_usd_per_cu;
 use crate::rpcs::blockchain::{BlocksByHashCache, Web3ProxyBlock};
 use crate::rpcs::one::Web3Rpc;
 use argh::FromArgs;
-use derivative::Derivative;
 use ethers::prelude::{Address, TxHash};
 use ethers::types::{U256, U64};
 use hashbrown::HashMap;
 use migration::sea_orm::prelude::Decimal;
 use sentry::types::Dsn;
-use serde::Deserialize;
+use serde::{de, Deserialize, Deserializer};
 use serde_inline_default::serde_inline_default;
+use std::fmt;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
@@ -278,25 +278,59 @@ pub fn average_block_interval(chain_id: u64) -> Duration {
     }
 }
 
-#[derive(Clone, Debug, Derivative, Deserialize, PartialEq, Eq)]
-#[derivative(Default(bound = ""))]
-#[serde(untagged)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum BlockDataLimit {
     /// archive nodes can return all data
     Archive,
     /// prune nodes don't have all the data
     /// some devs will argue about what "prune" means but we use it to mean that any of the data is gone.
-    Limit(u64),
+    /// TODO: this is too simple. erigon can prune the different types of data differently
+    Set(u64),
     /// Automatically detect the limit
-    #[derivative(Default)]
+    #[default]
     Unknown,
+}
+
+impl<'de> Deserialize<'de> for BlockDataLimit {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct BlockDataLimitVisitor;
+
+        impl<'de> de::Visitor<'de> for BlockDataLimitVisitor {
+            type Value = BlockDataLimit;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a string 'archive', 'unknown' or an positive signed 64-bit integer. 0 means automatically detect")
+            }
+
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                match value.to_ascii_lowercase().as_str() {
+                    "archive" => Ok(BlockDataLimit::Archive),
+                    "unknown" => Ok(BlockDataLimit::Unknown),
+                    _ => Err(de::Error::custom(format!("Unexpected value {}", value))),
+                }
+            }
+
+            fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
+                if v < 0 {
+                    Err(de::Error::custom("Negative values are not allowed"))
+                } else {
+                    Ok(BlockDataLimit::Set(v as u64))
+                }
+            }
+        }
+
+        deserializer.deserialize_any(BlockDataLimitVisitor)
+    }
 }
 
 impl From<BlockDataLimit> for AtomicU64 {
     fn from(value: BlockDataLimit) -> Self {
         match value {
             BlockDataLimit::Archive => AtomicU64::new(u64::MAX),
-            BlockDataLimit::Limit(limit) => AtomicU64::new(limit),
+            BlockDataLimit::Set(limit) => AtomicU64::new(limit),
             BlockDataLimit::Unknown => AtomicU64::new(0),
         }
     }
