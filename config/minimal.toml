@@ -17,7 +17,6 @@ response_cache_max_bytes = 1_000_000_000
 [balanced_rpcs]
 
     [balanced_rpcs.llama_public_both]
-    # TODO: what should we do if all rpcs are disabled? warn and wait for a config change?
     disabled = false
     display_name = "LlamaNodes Both"
     ws_url = "wss://eth.llamarpc.com/"
