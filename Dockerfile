@@ -79,9 +79,11 @@ FROM rust as rust_with_env
 # changing our features doesn't change any of the steps above
 ENV WEB3_PROXY_FEATURES "rdkafka-src"
 
+# copy the app
+COPY . .
+
 # fill the package caches
-RUN --mount=type=bind,source=.,target=/app,rw \
-    --mount=type=cache,target=/root/.cargo/git \
+RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/app/target \
     set -eux -o pipefail; \
@@ -98,8 +100,7 @@ COPY --from=rust_foundry /root/.foundry/bin/anvil /root/.foundry/bin/
 COPY --from=rust_nextest /root/.cargo/bin/cargo-nextest* /root/.cargo/bin/
 
 # test the application with cargo-nextest
-RUN --mount=type=bind,source=.,target=/app,rw \
-    --mount=type=cache,target=/root/.cargo/git \
+RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/app/target_test \
     set -eux -o pipefail; \
@@ -121,8 +122,7 @@ FROM rust_with_env as build_app
 # build the release application
 # using a "release" profile (which install does by default) is **very** important
 # TODO: use the "faster_release" profile which builds with `codegen-units = 1` (but compile is SLOW)
-RUN --mount=type=bind,source=.,target=/app,rw \
-    --mount=type=cache,target=/root/.cargo/git \
+RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/app/target \
     set -eux -o pipefail; \
