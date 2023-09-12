@@ -3,6 +3,7 @@ use crate::compute_units::default_usd_per_cu;
 use crate::rpcs::blockchain::{BlocksByHashCache, Web3ProxyBlock};
 use crate::rpcs::one::Web3Rpc;
 use argh::FromArgs;
+use derivative::Derivative;
 use ethers::prelude::{Address, TxHash};
 use ethers::types::{U256, U64};
 use hashbrown::HashMap;
@@ -10,6 +11,7 @@ use migration::sea_orm::prelude::Decimal;
 use sentry::types::Dsn;
 use serde::Deserialize;
 use serde_inline_default::serde_inline_default;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -276,6 +278,29 @@ pub fn average_block_interval(chain_id: u64) -> Duration {
     }
 }
 
+#[derive(Clone, Debug, Derivative, Deserialize, PartialEq, Eq)]
+#[derivative(Default(bound = ""))]
+pub enum BlockDataLimit {
+    /// archive nodes can return all data
+    Archive,
+    /// prune nodes don't have all the data
+    /// some devs will argue about what "prune" means but we use it to mean that any of the data is gone.
+    Limit(u64),
+    /// Automatically detect the limit
+    #[derivative(Default)]
+    Unknown,
+}
+
+impl From<BlockDataLimit> for AtomicU64 {
+    fn from(value: BlockDataLimit) -> Self {
+        match value {
+            BlockDataLimit::Archive => AtomicU64::new(u64::MAX),
+            BlockDataLimit::Limit(limit) => AtomicU64::new(limit),
+            BlockDataLimit::Unknown => AtomicU64::new(0),
+        }
+    }
+}
+
 /// Configuration for a backend web3 RPC server
 #[serde_inline_default]
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -290,7 +315,8 @@ pub struct Web3RpcConfig {
     /// while not absolutely required, a http:// or https:// connection will allow erigon to stream JSON
     pub http_url: Option<String>,
     /// block data limit. If None, will be queried
-    pub block_data_limit: Option<u64>,
+    #[serde(default = "Default::default")]
+    pub block_data_limit: BlockDataLimit,
     /// the requests per second at which the server starts slowing down
     #[serde_inline_default(1u32)]
     pub soft_limit: u32,

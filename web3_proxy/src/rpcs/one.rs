@@ -134,7 +134,7 @@ impl Web3Rpc {
 
         let backup = config.backup;
 
-        let block_data_limit: AtomicU64 = config.block_data_limit.unwrap_or_default().into();
+        let block_data_limit: AtomicU64 = config.block_data_limit.into();
         let automatic_block_limit = (block_data_limit.load(atomic::Ordering::Acquire) == 0)
             && block_and_rpc_sender.is_some();
 
