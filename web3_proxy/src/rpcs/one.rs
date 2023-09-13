@@ -838,8 +838,7 @@ impl Web3Rpc {
                 }
 
                 pending_txid_firehose
-                    .send(x)
-                    .await
+                    .try_send(x)
                     .context("pending_txid_firehose failed sending")?;
             }
         } else {
