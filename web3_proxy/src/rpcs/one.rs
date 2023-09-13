@@ -38,6 +38,7 @@ pub struct Web3Rpc {
     pub block_interval: Duration,
     pub display_name: Option<String>,
     pub db_conn: Option<DatabaseConnection>,
+    pub subscribe_txs: bool,
     /// most all requests prefer use the http_provider
     pub(super) http_provider: Option<EthersHttpProvider>,
     /// the websocket url is only used for subscriptions
@@ -200,6 +201,7 @@ impl Web3Rpc {
             peak_latency: Some(peak_latency),
             median_latency: Some(median_request_latency),
             soft_limit: config.soft_limit,
+            subscribe_txs: config.subscribe_txs,
             ws_url,
             disconnect_watch: Some(disconnect_watch),
             ..Default::default()
@@ -805,8 +807,8 @@ impl Web3Rpc {
     ) -> Web3ProxyResult<()> {
         trace!("subscribing to new transactions on {}", self);
 
-        // TODO: rpcs should opt-into this. self.backup isn't a good enough filter
-        if self.backup {
+        // rpcs opt-into subscribing to transactions. its a lot of bandwidth
+        if !self.subscribe_txs {
             loop {
                 if *subscribe_stop_rx.borrow() {
                     trace!("stopping ws block subscription on {}", self);

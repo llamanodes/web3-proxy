@@ -66,6 +66,8 @@ impl Web3ProxyApp {
                 let app = self.clone();
 
                 tokio::spawn(async move {
+                    trace!("newHeads subscription {:?}", subscription_id);
+
                     let mut head_block_receiver = Abortable::new(
                         WatchStream::new(head_block_receiver),
                         subscription_registration,
