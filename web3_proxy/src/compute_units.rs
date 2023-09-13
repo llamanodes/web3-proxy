@@ -7,7 +7,7 @@
 //! TODO: script that queries influx and calculates observed relative costs
 
 use migration::sea_orm::prelude::Decimal;
-use std::str::FromStr;
+use std::{ops::Add, str::FromStr};
 use tracing::{instrument, trace, warn};
 
 pub fn default_usd_per_cu(chain_id: u64) -> Decimal {
@@ -21,6 +21,17 @@ pub fn default_usd_per_cu(chain_id: u64) -> Decimal {
 
 #[derive(Debug)]
 pub struct ComputeUnit(Decimal);
+
+impl<T> Add<T> for ComputeUnit
+where
+    T: Into<Decimal>,
+{
+    type Output = Self;
+
+    fn add(self, rhs: T) -> Self::Output {
+        Self(self.0 + rhs.into())
+    }
+}
 
 impl ComputeUnit {
     /// costs can vary widely depending on method and chain
@@ -92,9 +103,18 @@ impl ComputeUnit {
                 (_, "eth_getUserOperationByHash") => 17,
                 (_, "eth_getUserOperationReceipt") => 15,
                 (_, "eth_maxPriorityFeePerGas") => 10,
-                (_, "eth_newBlockFilter") => 20,
-                (_, "eth_newFilter") => 20,
-                (_, "eth_newPendingTransactionFilter") => 20,
+                (_, "eth_newBlockFilter") => {
+                    // TODO: 20
+                    return Self::unimplemented();
+                }
+                (_, "eth_newFilter") => {
+                    // TODO: 20
+                    return Self::unimplemented();
+                }
+                (_, "eth_newPendingTransactionFilter") => {
+                    // TODO: 20
+                    return Self::unimplemented();
+                }
                 (_, "eth_pollSubscriptions") => {
                     return Self::unimplemented();
                 }
@@ -118,6 +138,9 @@ impl ComputeUnit {
                 (_, "trace_replayBlockTransactions") => 2983,
                 (_, "trace_replayTransaction") => 2983,
                 (_, "trace_transaction") => 26,
+                (_, "txpool_content") => {
+                    return Self::subscription_response(response_bytes) + 1000;
+                }
                 (_, "invalid_method") => 100,
                 (_, "web3_clientVersion") => 15,
                 (_, "web3_bundlerVersion") => 15,
@@ -152,6 +175,7 @@ impl ComputeUnit {
     /// notifications and subscription responses cost per-byte
     #[instrument(level = "trace")]
     pub fn subscription_response<D: Into<Decimal> + std::fmt::Debug>(num_bytes: D) -> Self {
+        // TODO: get multiplier from config
         let cu = num_bytes.into() * Decimal::new(4, 2);
 
         Self(cu)
