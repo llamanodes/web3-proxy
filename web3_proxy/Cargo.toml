@@ -14,6 +14,7 @@ tests-needing-docker = []
 tokio-console = ["dep:tokio-console", "dep:console-subscriber"]
 
 [dependencies]
+deduped_broadcast = { path = "../deduped_broadcast" }
 deferred-rate-limiter = { path = "../deferred-rate-limiter" }
 entities = { path = "../entities" }
 latency = { path = "../latency" }
@@ -90,7 +91,7 @@ time_03 = { package = "time", version = "0.3" }
 tokio = { version = "1.32.0", features = ["full", "tracing"] }
 tokio-console = { version = "0.1.9", optional = true }
 tokio-stream = { version = "0.1.14", features = ["sync"] }
-toml = "0.7.8"
+toml = "0.8.0"
 tower = { version = "0.4.13", features = ["timeout", "tracing"] }
 tower-http = { version = "0.4.4", features = ["cors", "normalize-path", "sensitive-headers", "trace"] }
 tracing = "0.1"

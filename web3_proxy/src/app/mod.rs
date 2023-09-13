@@ -26,11 +26,11 @@ use crate::stats::{AppStat, FlushedStats, StatBuffer};
 use anyhow::Context;
 use axum::http::StatusCode;
 use chrono::Utc;
+use deduped_broadcast::DedupedBroadcaster;
 use deferred_rate_limiter::DeferredRateLimiter;
 use entities::user;
 use ethers::core::utils::keccak256;
-use ethers::prelude::{Address, Bytes, Transaction, H256, U64};
-use ethers::types::U256;
+use ethers::prelude::{Address, Bytes, Transaction, TxHash, H256, U256, U64};
 use ethers::utils::rlp::{Decodable, Rlp};
 use futures::future::join_all;
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -88,6 +88,8 @@ pub struct Web3ProxyApp {
     /// don't drop this or the sender will stop working
     /// TODO: broadcast channel instead?
     pub watch_consensus_head_receiver: watch::Receiver<Option<Web3ProxyBlock>>,
+    /// rpc clients that subscribe to newPendingTransactions use this channel
+    pub pending_txid_firehose: deduped_broadcast::DedupedBroadcaster<TxHash>,
     pub hostname: Option<String>,
     pub frontend_port: Arc<AtomicU16>,
     /// rate limit anonymous users
@@ -407,6 +409,9 @@ impl Web3ProxyApp {
 
         let chain_id = top_config.app.chain_id;
 
+        let deduped_txid_firehose =
+            DedupedBroadcaster::new(10_000, 10_000, Some(Duration::from_secs(5 * 60)));
+
         // TODO: remove this. it should only be done by apply_top_config
         let (balanced_rpcs, balanced_handle, consensus_connections_watcher) = Web3Rpcs::spawn(
             chain_id,
@@ -415,6 +420,7 @@ impl Web3ProxyApp {
             top_config.app.min_sum_soft_limit,
             "balanced rpcs".into(),
             Some(watch_consensus_head_sender),
+            Some(deduped_txid_firehose.sender().clone()),
         )
         .await
         .web3_context("spawning balanced rpcs")?;
@@ -441,6 +447,7 @@ impl Web3ProxyApp {
                 // however, they are well connected to miners/validators. so maybe using them as a safety check would be good
                 // TODO: but maybe we could include privates in the "backup" tier
                 None,
+                None,
             )
             .await
             .web3_context("spawning private_rpcs")?;
@@ -466,6 +473,7 @@ impl Web3ProxyApp {
                 0,
                 "eip4337 rpcs".into(),
                 None,
+                None,
             )
             .await
             .web3_context("spawning bundler_4337_rpcs")?;
@@ -483,6 +491,7 @@ impl Web3ProxyApp {
             balanced_rpcs,
             bundler_4337_rpcs,
             config: top_config.app.clone(),
+            pending_txid_firehose: deduped_txid_firehose,
             frontend_port: frontend_port.clone(),
             frontend_ip_rate_limiter,
             frontend_registered_user_rate_limiter,

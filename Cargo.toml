@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "deduped_broadcast",
   "deferred-rate-limiter",
   "entities",
   "latency",

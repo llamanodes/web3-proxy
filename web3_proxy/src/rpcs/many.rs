@@ -12,7 +12,7 @@ use crate::frontend::status::MokaCacheSerializer;
 use crate::jsonrpc::{JsonRpcErrorData, JsonRpcParams, JsonRpcResultData};
 use counter::Counter;
 use derive_more::From;
-use ethers::prelude::U64;
+use ethers::prelude::{TxHash, U64};
 use futures::future::try_join_all;
 use futures::stream::FuturesUnordered;
 use futures::{StreamExt, TryFutureExt};
@@ -67,6 +67,8 @@ pub struct Web3Rpcs {
     /// how old our consensus head block we can be before we stop serving requests
     /// calculated based on max_head_block_lag and averge block times
     pub(super) max_head_block_age: Duration,
+    /// all of the pending txids for all of the rpcs. this still has duplicates
+    pub(super) pending_txid_firehose_sender: Option<mpsc::Sender<TxHash>>,
 }
 
 impl Web3Rpcs {
@@ -78,6 +80,7 @@ impl Web3Rpcs {
         min_sum_soft_limit: u32,
         name: Cow<'static, str>,
         watch_consensus_head_sender: Option<watch::Sender<Option<Web3ProxyBlock>>>,
+        pending_txid_firehose_sender: Option<mpsc::Sender<TxHash>>,
     ) -> anyhow::Result<(
         Arc<Self>,
         Web3ProxyJoinHandle<()>,
@@ -124,6 +127,7 @@ impl Web3Rpcs {
             min_synced_rpcs: min_head_rpcs,
             min_sum_soft_limit,
             name,
+            pending_txid_firehose_sender,
             watch_head_block: watch_consensus_head_sender,
             watch_ranked_rpcs: watch_consensus_rpcs_sender,
         });
@@ -187,7 +191,7 @@ impl Web3Rpcs {
                 let http_client = app.http_client.clone();
                 let vredis_pool = app.vredis_pool.clone();
 
-                let block_sender = if self.watch_head_block.is_some() {
+                let block_and_rpc_sender = if self.watch_head_block.is_some() {
                     Some(self.block_sender.clone())
                 } else {
                     None
@@ -207,7 +211,8 @@ impl Web3Rpcs {
                     block_interval,
                     http_client,
                     blocks_by_hash_cache,
-                    block_sender,
+                    block_and_rpc_sender,
+                    self.pending_txid_firehose_sender.clone(),
                     self.max_head_block_age,
                 ));
 
@@ -318,30 +323,7 @@ impl Web3Rpcs {
     ) -> Web3ProxyResult<()> {
         let mut futures = vec![];
 
-        // // setup the transaction funnel
-        // // it skips any duplicates (unless they are being orphaned)
-        // // fetches new transactions from the notifying rpc
-        // // forwards new transacitons to pending_tx_receipt_sender
-        // if let Some(pending_tx_sender) = pending_tx_sender.clone() {
-        //     let clone = self.clone();
-        //     let handle = tokio::task::spawn(async move {
-        //         // TODO: set up this future the same as the block funnel
-        //         while let Some((pending_tx_id, rpc)) =
-        //             clone.pending_tx_id_receiver.write().await.recv().await
-        //         {
-        //             let f = clone.clone().process_incoming_tx_id(
-        //                 rpc,
-        //                 pending_tx_id,
-        //                 pending_tx_sender.clone(),
-        //             );
-        //             tokio::spawn(f);
-        //         }
-
-        //         Ok(())
-        //     });
-
-        //     futures.push(flatten_handle(handle));
-        // }
+        // TODO: do we need anything here to set up the transaction funnel
 
         // setup the block funnel
         if self.watch_head_block.is_some() {
@@ -1546,6 +1528,7 @@ mod tests {
             max_head_block_age: Duration::from_secs(60),
             // TODO: test max_head_block_lag?
             max_head_block_lag: 5.into(),
+            pending_txid_firehose_sender: None,
             min_synced_rpcs: 1,
             min_sum_soft_limit: 1,
         };
@@ -1795,6 +1778,7 @@ mod tests {
             min_sum_soft_limit: 4_000,
             min_synced_rpcs: 1,
             name: "test".into(),
+            pending_txid_firehose_sender: None,
             watch_head_block: Some(watch_consensus_head_sender),
             watch_ranked_rpcs,
         };
@@ -1959,6 +1943,7 @@ mod tests {
             min_sum_soft_limit: 1_000,
             min_synced_rpcs: 1,
             name: "test".into(),
+            pending_txid_firehose_sender: None,
             watch_head_block: Some(watch_consensus_head_sender),
             watch_ranked_rpcs,
         };

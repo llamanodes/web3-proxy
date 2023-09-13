@@ -437,7 +437,7 @@ mod test {
         let head_block = Web3ProxyBlock::try_new(Arc::new(head_block)).unwrap();
 
         let (empty, _handle, _ranked_rpc_reciver) =
-            Web3Rpcs::spawn(1, None, 1, 1, "test".into(), None)
+            Web3Rpcs::spawn(1, None, 1, 1, "test".into(), None, None)
                 .await
                 .unwrap();
 

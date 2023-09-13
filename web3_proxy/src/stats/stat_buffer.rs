@@ -198,6 +198,7 @@ impl StatBuffer {
             }
         }
 
+        // TODO: wait on the frontend to shutdown
         // TODO: wait on all websockets to close
         // TODO: wait on all pending external requests to finish
         info!("waiting 5 seconds for remaining stats to arrive");

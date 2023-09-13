@@ -18,6 +18,7 @@ use std::sync::atomic::{self, AtomicU64};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
+use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::WatchStream;
 use tracing::{error, trace};
 
@@ -56,79 +57,150 @@ impl Web3ProxyApp {
                 Web3ProxyError::BadRequest("unable to subscribe using these params".into())
             })?;
 
-        // TODO: calling json! on every request is probably not fast. but we can only match against
+        // TODO: calling `json!` on every request is probably not fast. but it works for now
         // TODO: i think we need a stricter EthSubscribeRequest type that JsonRpcRequest can turn into
-        if subscribe_to == "newHeads" {
-            let head_block_receiver = self.watch_consensus_head_receiver.clone();
-            let app = self.clone();
+        // TODO: DRY This up. lots of duplication between newHeads and newPendingTransactions
+        match subscribe_to {
+            "newHeads" => {
+                let head_block_receiver = self.watch_consensus_head_receiver.clone();
+                let app = self.clone();
 
-            tokio::spawn(async move {
-                let mut head_block_receiver = Abortable::new(
-                    WatchStream::new(head_block_receiver),
-                    subscription_registration,
-                );
+                tokio::spawn(async move {
+                    trace!("newHeads subscription {:?}", subscription_id);
 
-                while let Some(new_head) = head_block_receiver.next().await {
-                    let new_head = if let Some(new_head) = new_head {
-                        new_head
-                    } else {
-                        continue;
-                    };
+                    let mut head_block_receiver = Abortable::new(
+                        WatchStream::new(head_block_receiver),
+                        subscription_registration,
+                    );
 
-                    let subscription_request_metadata = RequestMetadata::new(
-                        &app,
-                        authorization.clone(),
-                        RequestOrMethod::Method("eth_subscribe(newHeads)", 0),
-                        Some(&new_head),
-                    )
-                    .await;
+                    while let Some(new_head) = head_block_receiver.next().await {
+                        let new_head = if let Some(new_head) = new_head {
+                            new_head
+                        } else {
+                            continue;
+                        };
 
-                    if let Some(close_message) = app
-                        .rate_limit_close_websocket(&subscription_request_metadata)
-                        .await
-                    {
-                        let _ = response_sender.send(close_message).await;
-                        break;
+                        let subscription_request_metadata = RequestMetadata::new(
+                            &app,
+                            authorization.clone(),
+                            RequestOrMethod::Method("eth_subscribe(newHeads)", 0),
+                            Some(&new_head),
+                        )
+                        .await;
+
+                        if let Some(close_message) = app
+                            .rate_limit_close_websocket(&subscription_request_metadata)
+                            .await
+                        {
+                            let _ = response_sender.send(close_message).await;
+                            break;
+                        }
+
+                        // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
+                        let response_json = json!({
+                            "jsonrpc": "2.0",
+                            "method":"eth_subscription",
+                            "params": {
+                                "subscription": subscription_id,
+                                // TODO: option to include full transaction objects instead of just the hashes?
+                                "result": new_head.block,
+                            },
+                        });
+
+                        let response_str = serde_json::to_string(&response_json)
+                            .expect("this should always be valid json");
+
+                        // we could use JsonRpcForwardedResponseEnum::num_bytes() here, but since we already have the string, this is easier
+                        let response_bytes = response_str.len();
+
+                        // TODO: do clients support binary messages?
+                        // TODO: can we check a content type header?
+                        let response_msg = Message::Text(response_str);
+
+                        if response_sender.send(response_msg).await.is_err() {
+                            // TODO: increment error_response? i don't think so. i think this will happen once every time a client disconnects.
+                            // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
+                            break;
+                        };
+
+                        subscription_request_metadata.add_response(response_bytes);
                     }
 
-                    // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
-                    let response_json = json!({
-                        "jsonrpc": "2.0",
-                        "method":"eth_subscription",
-                        "params": {
-                            "subscription": subscription_id,
-                            // TODO: option to include full transaction objects instead of just the hashes?
-                            "result": new_head.block,
-                        },
-                    });
+                    trace!("closed newHeads subscription {:?}", subscription_id);
+                });
+            }
+            // TODO: bring back the other custom subscription types that had the full transaction object
+            "newPendingTransactions" => {
+                let pending_txid_firehose = self.pending_txid_firehose.subscribe();
+                let app = self.clone();
 
-                    let response_str = serde_json::to_string(&response_json)
-                        .expect("this should always be valid json");
+                tokio::spawn(async move {
+                    let mut pending_txid_firehose = Abortable::new(
+                        BroadcastStream::new(pending_txid_firehose),
+                        subscription_registration,
+                    );
 
-                    // we could use JsonRpcForwardedResponseEnum::num_bytes() here, but since we already have the string, this is easier
-                    let response_bytes = response_str.len();
+                    while let Some(Ok(new_txid)) = pending_txid_firehose.next().await {
+                        // TODO: include the head_block here?
+                        let subscription_request_metadata = RequestMetadata::new(
+                            &app,
+                            authorization.clone(),
+                            RequestOrMethod::Method("eth_subscribe(newPendingTransactions)", 0),
+                            None,
+                        )
+                        .await;
 
-                    // TODO: do clients support binary messages?
-                    // TODO: can we check a content type header?
-                    let response_msg = Message::Text(response_str);
+                        // check if we should close the websocket connection
+                        if let Some(close_message) = app
+                            .rate_limit_close_websocket(&subscription_request_metadata)
+                            .await
+                        {
+                            let _ = response_sender.send(close_message).await;
+                            break;
+                        }
 
-                    if response_sender.send(response_msg).await.is_err() {
-                        // TODO: increment error_response? i don't think so. i think this will happen once every time a client disconnects.
-                        // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
-                        break;
-                    };
+                        // TODO: make a struct/helper function for this
+                        let response_json = json!({
+                            "jsonrpc": "2.0",
+                            "method":"eth_subscription",
+                            "params": {
+                                "subscription": subscription_id,
+                                "result": new_txid,
+                            },
+                        });
 
-                    subscription_request_metadata.add_response(response_bytes);
-                }
+                        let response_str = serde_json::to_string(&response_json)
+                            .expect("this should always be valid json");
 
-                trace!("closed newHeads subscription {:?}", subscription_id);
-            });
-        } else {
-            // TODO: make sure this gets a CU cost of unimplemented instead of the normal eth_subscribe cost?
-            return Err(Web3ProxyError::MethodNotFound(
-                subscribe_to.to_owned().into(),
-            ));
-        }
+                        // we could use JsonRpcForwardedResponseEnum::num_bytes() here, but since we already have the string, this is easier
+                        let response_bytes = response_str.len();
+
+                        subscription_request_metadata.add_response(response_bytes);
+
+                        // TODO: do clients support binary messages?
+                        // TODO: can we check a content type header?
+                        let response_msg = Message::Text(response_str);
+
+                        if response_sender.send(response_msg).await.is_err() {
+                            // TODO: increment error_response? i don't think so. i think this will happen once every time a client disconnects.
+                            // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
+                            break;
+                        };
+                    }
+
+                    trace!(
+                        "closed newPendingTransactions subscription {:?}",
+                        subscription_id
+                    );
+                });
+            }
+            _ => {
+                // TODO: make sure this gets a CU cost of unimplemented instead of the normal eth_subscribe cost?
+                return Err(Web3ProxyError::MethodNotFound(
+                    subscribe_to.to_owned().into(),
+                ));
+            }
+        };
 
         // TODO: do something with subscription_join_handle?
 

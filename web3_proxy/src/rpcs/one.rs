@@ -10,8 +10,7 @@ use crate::jsonrpc::{JsonRpcParams, JsonRpcResultData};
 use crate::rpcs::request::RequestErrorHandler;
 use anyhow::{anyhow, Context};
 use arc_swap::ArcSwapOption;
-use ethers::prelude::{Bytes, Middleware, U64};
-use ethers::types::{Address, Transaction, U256};
+use ethers::prelude::{Address, Bytes, Middleware, Transaction, TxHash, U256, U64};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use latency::{EwmaLatency, PeakEwmaLatency, RollingQuantileLatency};
@@ -39,6 +38,7 @@ pub struct Web3Rpc {
     pub block_interval: Duration,
     pub display_name: Option<String>,
     pub db_conn: Option<DatabaseConnection>,
+    pub subscribe_txs: bool,
     /// most all requests prefer use the http_provider
     pub(super) http_provider: Option<EthersHttpProvider>,
     /// the websocket url is only used for subscriptions
@@ -100,6 +100,7 @@ impl Web3Rpc {
         block_interval: Duration,
         block_map: BlocksByHashCache,
         block_and_rpc_sender: Option<mpsc::UnboundedSender<BlockAndRpc>>,
+        pending_txid_firehose_sender: Option<mpsc::Sender<TxHash>>,
         max_head_block_age: Duration,
     ) -> anyhow::Result<(Arc<Web3Rpc>, Web3ProxyJoinHandle<()>)> {
         let created_at = Instant::now();
@@ -200,6 +201,7 @@ impl Web3Rpc {
             peak_latency: Some(peak_latency),
             median_latency: Some(median_request_latency),
             soft_limit: config.soft_limit,
+            subscribe_txs: config.subscribe_txs,
             ws_url,
             disconnect_watch: Some(disconnect_watch),
             ..Default::default()
@@ -213,7 +215,12 @@ impl Web3Rpc {
             let new_connection = new_connection.clone();
             tokio::spawn(async move {
                 new_connection
-                    .subscribe_with_reconnect(block_map, block_and_rpc_sender, chain_id)
+                    .subscribe_with_reconnect(
+                        block_map,
+                        block_and_rpc_sender,
+                        pending_txid_firehose_sender,
+                        chain_id,
+                    )
                     .await
             })
         };
@@ -588,12 +595,18 @@ impl Web3Rpc {
         self: Arc<Self>,
         block_map: BlocksByHashCache,
         block_and_rpc_sender: Option<mpsc::UnboundedSender<BlockAndRpc>>,
+        pending_txid_firehose_sender: Option<mpsc::Sender<TxHash>>,
         chain_id: u64,
     ) -> Web3ProxyResult<()> {
         loop {
             if let Err(err) = self
                 .clone()
-                .subscribe(block_map.clone(), block_and_rpc_sender.clone(), chain_id)
+                .subscribe(
+                    block_map.clone(),
+                    block_and_rpc_sender.clone(),
+                    pending_txid_firehose_sender.clone(),
+                    chain_id,
+                )
                 .await
             {
                 if self.should_disconnect() {
@@ -625,6 +638,7 @@ impl Web3Rpc {
         self: Arc<Self>,
         block_map: BlocksByHashCache,
         block_and_rpc_sender: Option<mpsc::UnboundedSender<BlockAndRpc>>,
+        pending_txid_firehose_sender: Option<mpsc::Sender<TxHash>>,
         chain_id: u64,
     ) -> Web3ProxyResult<()> {
         let error_handler = if self.backup {
@@ -750,6 +764,20 @@ impl Web3Rpc {
             futures.push(flatten_handle(tokio::spawn(f)));
         }
 
+        // subscribe to new transactions
+        if let Some(pending_txid_firehose) = pending_txid_firehose_sender.clone() {
+            let clone = self.clone();
+            let subscribe_stop_rx = subscribe_stop_tx.subscribe();
+
+            let f = async move {
+                clone
+                    .subscribe_new_transactions(pending_txid_firehose, subscribe_stop_rx)
+                    .await
+            };
+
+            futures.push(flatten_handle(tokio::spawn(f)));
+        }
+
         // exit if any of the futures exit
         // TODO: have an enum for which one exited?
         let first_exit = futures.next().await;
@@ -768,6 +796,60 @@ impl Web3Rpc {
 
         // TODO: tell ethers to disconnect?
         self.ws_provider.store(None);
+
+        Ok(())
+    }
+
+    async fn subscribe_new_transactions(
+        self: &Arc<Self>,
+        pending_txid_firehose: mpsc::Sender<TxHash>,
+        mut subscribe_stop_rx: watch::Receiver<bool>,
+    ) -> Web3ProxyResult<()> {
+        trace!("subscribing to new transactions on {}", self);
+
+        // rpcs opt-into subscribing to transactions. its a lot of bandwidth
+        if !self.subscribe_txs {
+            loop {
+                if *subscribe_stop_rx.borrow() {
+                    trace!("stopping ws block subscription on {}", self);
+                    return Ok(());
+                }
+                subscribe_stop_rx.changed().await?;
+            }
+        }
+
+        if let Some(ws_provider) = self.ws_provider.load().as_ref() {
+            // todo: move subscribe_blocks onto the request handle
+            let authorization = Default::default();
+
+            let error_handler = Some(Level::ERROR.into());
+
+            let active_request_handle = self
+                .wait_for_request_handle(&authorization, None, error_handler)
+                .await;
+
+            let mut pending_txs_sub = ws_provider.subscribe_pending_txs().await?;
+
+            drop(active_request_handle);
+
+            while let Some(x) = pending_txs_sub.next().await {
+                if *subscribe_stop_rx.borrow() {
+                    // TODO: this is checking way too often. have this on a timer instead
+                    trace!("stopping ws block subscription on {}", self);
+                    break;
+                }
+
+                // this should always work
+                if let Err(err) = pending_txid_firehose.try_send(x) {
+                    error!(
+                        ?err,
+                        "pending_txid_firehose failed sending. it must be full"
+                    );
+                }
+            }
+        } else {
+            unimplemented!();
+        }
 
         Ok(())
     }
