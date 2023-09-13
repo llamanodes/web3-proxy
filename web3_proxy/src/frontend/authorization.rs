@@ -313,7 +313,7 @@ impl KafkaDebugLogger {
         let payload =
             rmp_serde::to_vec(&request).expect("requests should always serialize with rmp");
 
-        self.num_requests.fetch_add(1, atomic::Ordering::AcqRel);
+        self.num_requests.fetch_add(1, atomic::Ordering::Relaxed);
 
         self.background_log(payload)
     }
@@ -325,12 +325,13 @@ impl KafkaDebugLogger {
         let payload =
             rmp_serde::to_vec(&response).expect("requests should always serialize with rmp");
 
-        self.num_responses.fetch_add(1, atomic::Ordering::AcqRel);
+        self.num_responses.fetch_add(1, atomic::Ordering::Relaxed);
 
         self.background_log(payload)
     }
 }
 
+/// TODO: instead of a bunch of atomics, this should probably use a RwLock
 #[derive(Debug, Derivative)]
 #[derivative(Default)]
 pub struct RequestMetadata {
@@ -568,16 +569,16 @@ impl RequestMetadata {
         let num_bytes = response.num_bytes() as u64;
 
         self.response_bytes
-            .fetch_add(num_bytes, atomic::Ordering::AcqRel);
+            .fetch_add(num_bytes, atomic::Ordering::Relaxed);
 
         self.response_millis.fetch_add(
             self.start_instant.elapsed().as_millis() as u64,
-            atomic::Ordering::AcqRel,
+            atomic::Ordering::Relaxed,
         );
 
         // TODO: record first or last timestamp? really, we need multiple
         self.response_timestamp
-            .store(Utc::now().timestamp(), atomic::Ordering::Release);
+            .store(Utc::now().timestamp(), atomic::Ordering::Relaxed);
 
         // TODO: set user_error_response and error_response here instead of outside this function
 

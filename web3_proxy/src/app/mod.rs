@@ -1177,30 +1177,30 @@ impl Web3ProxyApp {
                 Ok(response_data) => {
                     request_metadata
                         .error_response
-                        .store(false, Ordering::Release);
+                        .store(false, Ordering::Relaxed);
                     request_metadata
                         .user_error_response
-                        .store(false, Ordering::Release);
+                        .store(false, Ordering::Relaxed);
 
                     (StatusCode::OK, response_data)
                 }
                 Err(err @ Web3ProxyError::NullJsonRpcResult) => {
                     request_metadata
                         .error_response
-                        .store(false, Ordering::Release);
+                        .store(false, Ordering::Relaxed);
                     request_metadata
                         .user_error_response
-                        .store(false, Ordering::Release);
+                        .store(false, Ordering::Relaxed);
 
                     err.as_response_parts()
                 }
                 Err(Web3ProxyError::JsonRpcResponse(response_data)) => {
                     request_metadata
                         .error_response
-                        .store(false, Ordering::Release);
+                        .store(false, Ordering::Relaxed);
                     request_metadata
                         .user_error_response
-                        .store(response_data.is_error(), Ordering::Release);
+                        .store(response_data.is_error(), Ordering::Relaxed);
 
                     (StatusCode::OK, response_data)
                 }
@@ -1216,10 +1216,10 @@ impl Web3ProxyApp {
 
                     request_metadata
                         .error_response
-                        .store(true, Ordering::Release);
+                        .store(true, Ordering::Relaxed);
                     request_metadata
                         .user_error_response
-                        .store(false, Ordering::Release);
+                        .store(false, Ordering::Relaxed);
 
                     err.as_response_parts()
                 }
@@ -1436,7 +1436,7 @@ impl Web3ProxyApp {
                 if try_archive {
                     request_metadata
                         .archive_request
-                        .store(true, atomic::Ordering::Release);
+                        .store(true, atomic::Ordering::Relaxed);
 
                     response_data = self
                         .balanced_rpcs
@@ -1687,7 +1687,7 @@ impl Web3ProxyApp {
 
                             request_metadata
                                 .archive_request
-                                .store(true, atomic::Ordering::Release);
+                                .store(true, atomic::Ordering::Relaxed);
                         }
 
                         Some(JsonRpcQueryCacheKey::new(
@@ -1710,7 +1710,7 @@ impl Web3ProxyApp {
 
                             request_metadata
                                 .archive_request
-                                .store(true, atomic::Ordering::Release);
+                                .store(true, atomic::Ordering::Relaxed);
                         }
 
                         Some(JsonRpcQueryCacheKey::new(

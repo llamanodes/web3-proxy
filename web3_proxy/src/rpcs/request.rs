@@ -127,7 +127,7 @@ impl Drop for OpenRequestHandle {
     fn drop(&mut self) {
         self.rpc
             .active_requests
-            .fetch_sub(1, atomic::Ordering::AcqRel);
+            .fetch_sub(1, atomic::Ordering::Relaxed);
     }
 }
 
@@ -141,7 +141,7 @@ impl OpenRequestHandle {
         // TODO: attach a unique id to this? customer requests have one, but not internal queries
         // TODO: what ordering?!
         rpc.active_requests
-            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         let error_handler = error_handler.unwrap_or_default();
 

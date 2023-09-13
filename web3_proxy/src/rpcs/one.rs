@@ -136,7 +136,7 @@ impl Web3Rpc {
         let backup = config.backup;
 
         let block_data_limit: AtomicU64 = config.block_data_limit.into();
-        let automatic_block_limit = (block_data_limit.load(atomic::Ordering::Acquire) == 0)
+        let automatic_block_limit = (block_data_limit.load(atomic::Ordering::Relaxed) == 0)
             && block_and_rpc_sender.is_some();
 
         // have a sender for tracking hard limit anywhere. we use this in case we
@@ -292,8 +292,12 @@ impl Web3Rpc {
             Duration::from_secs(1)
         };
 
+        // TODO: what scaling?
+        // TODO: figure out how many requests add what level of latency
+        let request_scaling = 0.01;
         // TODO: what ordering?
-        let active_requests = self.active_requests.load(atomic::Ordering::Acquire) as f32 + 1.0;
+        let active_requests =
+            self.active_requests.load(atomic::Ordering::Relaxed) as f32 * request_scaling + 1.0;
 
         peak_latency.mul_f32(active_requests)
     }
@@ -367,7 +371,7 @@ impl Web3Rpc {
             }
 
             self.block_data_limit
-                .store(limit, atomic::Ordering::Release);
+                .store(limit, atomic::Ordering::Relaxed);
         }
 
         if limit == Some(u64::MAX) {

@@ -631,7 +631,7 @@ impl Web3Rpcs {
         }
 
         if let Some(request_metadata) = request_metadata {
-            request_metadata.no_servers.fetch_add(1, Ordering::AcqRel);
+            request_metadata.no_servers.fetch_add(1, Ordering::Relaxed);
         }
 
         if let Some(retry_at) = earliest_retry_at {
@@ -814,15 +814,15 @@ impl Web3Rpcs {
                             if let Some(request_metadata) = request_metadata {
                                 request_metadata
                                     .response_from_backup_rpc
-                                    .store(is_backup_response, Ordering::Release);
+                                    .store(is_backup_response, Ordering::Relaxed);
 
                                 request_metadata
                                     .user_error_response
-                                    .store(false, Ordering::Release);
+                                    .store(false, Ordering::Relaxed);
 
                                 request_metadata
                                     .error_response
-                                    .store(false, Ordering::Release);
+                                    .store(false, Ordering::Relaxed);
                             }
 
                             return Ok(response);
@@ -834,7 +834,7 @@ impl Web3Rpcs {
                                     if let Some(request_metadata) = request_metadata {
                                         request_metadata
                                             .user_error_response
-                                            .store(true, Ordering::Release);
+                                            .store(true, Ordering::Relaxed);
                                     }
                                     x
                                 }
@@ -844,11 +844,11 @@ impl Web3Rpcs {
                                     if let Some(request_metadata) = request_metadata {
                                         request_metadata
                                             .error_response
-                                            .store(true, Ordering::Release);
+                                            .store(true, Ordering::Relaxed);
 
                                         request_metadata
                                             .user_error_response
-                                            .store(false, Ordering::Release);
+                                            .store(false, Ordering::Relaxed);
                                     }
 
                                     last_provider_error = Some(error);
@@ -979,7 +979,7 @@ impl Web3Rpcs {
 
                     // TODO: have a separate column for rate limited?
                     if let Some(request_metadata) = request_metadata {
-                        request_metadata.no_servers.fetch_add(1, Ordering::AcqRel);
+                        request_metadata.no_servers.fetch_add(1, Ordering::Relaxed);
                     }
 
                     select! {
@@ -999,7 +999,7 @@ impl Web3Rpcs {
                     if let Some(request_metadata) = request_metadata {
                         request_metadata
                             .error_response
-                            .store(true, Ordering::Release);
+                            .store(true, Ordering::Relaxed);
                     }
                     break;
                 }
@@ -1010,11 +1010,11 @@ impl Web3Rpcs {
             if let Some(request_metadata) = request_metadata {
                 request_metadata
                     .error_response
-                    .store(false, Ordering::Release);
+                    .store(false, Ordering::Relaxed);
 
                 request_metadata
                     .user_error_response
-                    .store(true, Ordering::Release);
+                    .store(true, Ordering::Relaxed);
             }
 
             // this error response is likely the user's fault
@@ -1138,7 +1138,7 @@ impl Web3Rpcs {
 
                         request_metadata
                             .response_from_backup_rpc
-                            .store(only_backups_used, Ordering::Release);
+                            .store(only_backups_used, Ordering::Relaxed);
                     }
 
                     let x = self
@@ -1162,7 +1162,7 @@ impl Web3Rpcs {
 
                     if let Some(request_metadata) = &request_metadata {
                         // TODO: if this times out, i think we drop this
-                        request_metadata.no_servers.fetch_add(1, Ordering::AcqRel);
+                        request_metadata.no_servers.fetch_add(1, Ordering::Relaxed);
                     }
 
                     let max_sleep = if let Some(max_wait) = max_wait {
@@ -1190,7 +1190,7 @@ impl Web3Rpcs {
                 }
                 Err(Some(retry_at)) => {
                     if let Some(request_metadata) = &request_metadata {
-                        request_metadata.no_servers.fetch_add(1, Ordering::AcqRel);
+                        request_metadata.no_servers.fetch_add(1, Ordering::Relaxed);
                     }
 
                     if let Some(max_wait) = max_wait {
