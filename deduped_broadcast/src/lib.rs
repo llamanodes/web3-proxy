@@ -1,5 +1,6 @@
 use moka::future::{Cache, CacheBuilder};
 use std::sync::Arc;
+use std::time::Duration;
 use std::{
     collections::hash_map::DefaultHasher,
     fmt::Debug,
@@ -51,11 +52,17 @@ impl<T> DedupedBroadcaster<T>
 where
     T: Clone + Debug + Hash + Send + Sync + 'static,
 {
-    pub fn new(capacity: usize, cache_capacity: u64) -> Self {
+    pub fn new(capacity: usize, cache_capacity: u64, cache_ttl: Option<Duration>) -> Self {
         let (unfiltered_tx, unfiltered_rx) = mpsc::channel::<T>(capacity);
         let (broadcast_filtered_tx, _) = broadcast::channel(capacity);
 
-        let cache = CacheBuilder::new(cache_capacity).build();
+        let mut cache = CacheBuilder::new(cache_capacity);
+
+        if let Some(cache_ttl) = cache_ttl {
+            cache = cache.time_to_live(cache_ttl);
+        }
+
+        let cache = cache.build();
 
         let broadcast_filtered_tx = Arc::new(broadcast_filtered_tx);
 
@@ -90,7 +97,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_deduped_broadcaster() {
-        let broadcaster = DedupedBroadcaster::new(10, 10);
+        let broadcaster = DedupedBroadcaster::new(10, 10, None);
 
         let mut receiver = broadcaster.subscribe();
 
