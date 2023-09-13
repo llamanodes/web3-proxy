@@ -14,6 +14,7 @@ tests-needing-docker = []
 tokio-console = ["dep:tokio-console", "dep:console-subscriber"]
 
 [dependencies]
+deduped_broadcast = { path = "../deduped_broadcast" }
 deferred-rate-limiter = { path = "../deferred-rate-limiter" }
 entities = { path = "../entities" }
 latency = { path = "../latency" }
