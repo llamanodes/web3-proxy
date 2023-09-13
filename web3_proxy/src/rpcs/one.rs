@@ -837,9 +837,13 @@ impl Web3Rpc {
                     break;
                 }
 
-                pending_txid_firehose
-                    .try_send(x)
-                    .context("pending_txid_firehose failed sending")?;
+                // this should always work
+                if let Err(err) = pending_txid_firehose.try_send(x) {
+                    error!(
+                        ?err,
+                        "pending_txid_firehose failed sending. it must be full"
+                    );
+                }
             }
         } else {
             unimplemented!();

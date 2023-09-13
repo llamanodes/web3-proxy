@@ -41,7 +41,7 @@ where
             // we don't actually care what the return value is. we just want to send only if the cache is empty
             self.cache
                 .get_with(hashed, async {
-                    self.broadcast_filtered_tx.send(item).unwrap();
+                    let _ = self.broadcast_filtered_tx.send(item);
                 })
                 .await;
         }
