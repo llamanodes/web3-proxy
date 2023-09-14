@@ -852,7 +852,14 @@ impl Web3Rpc {
                 }
             }
         } else {
-            unimplemented!();
+            // TODO: what should we do here?
+            loop {
+                if *subscribe_stop_rx.borrow() {
+                    trace!("stopping ws block subscription on {}", self);
+                    return Ok(());
+                }
+                subscribe_stop_rx.changed().await?;
+            }
         }
 
         Ok(())
