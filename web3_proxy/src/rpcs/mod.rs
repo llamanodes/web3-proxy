@@ -5,3 +5,4 @@ pub mod many;
 pub mod one;
 pub mod provider;
 pub mod request;
+pub mod streaming;

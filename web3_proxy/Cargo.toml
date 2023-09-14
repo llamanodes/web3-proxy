@@ -100,6 +100,7 @@ uuid = { version = "1.4.1", default-features = false, features = ["fast-rng", "v
 
 # TODO: why doesn't this work in dev-dependencies
 test-log = { version = "0.2.12", default-features = false, features = ["trace"] }
+bytes = "1.5.0"
 
 [dev-dependencies]
 env_logger = "0.10"

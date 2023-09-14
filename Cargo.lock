@@ -7276,6 +7276,7 @@ dependencies = [
  "axum-client-ip",
  "axum-macros",
  "base64 0.21.4",
+ "bytes",
  "check-if-email-exists",
  "chrono",
  "console-subscriber",

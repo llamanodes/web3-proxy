@@ -3,6 +3,7 @@ use super::blockchain::{BlocksByHashCache, BlocksByNumberCache, Web3ProxyBlock};
 use super::consensus::{RankedRpcs, ShouldWaitForBlock};
 use super::one::Web3Rpc;
 use super::request::{OpenRequestHandle, OpenRequestResult, RequestErrorHandler};
+use super::streaming::StreamingResponse;
 use crate::app::{flatten_handle, Web3ProxyApp, Web3ProxyJoinHandle};
 use crate::config::{average_block_interval, BlockAndRpc, Web3RpcConfig};
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
@@ -10,6 +11,7 @@ use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::frontend::status::MokaCacheSerializer;
 use crate::jsonrpc::{JsonRpcErrorData, JsonRpcParams, JsonRpcResultData};
+use anyhow::Context;
 use counter::Counter;
 use derive_more::From;
 use ethers::prelude::U64;
@@ -771,6 +773,11 @@ impl Web3Rpcs {
         // TODO: no request_metadata means we won't have stats on this internal request.
         self.request_with_metadata(method, params, None, max_wait, None, None)
             .await
+            .and_then(|resp| {
+                resp.into_inner()
+                    .context("response too long")
+                    .map_err(Into::into)
+            })
     }
 
     /// Make a request with stat tracking.
@@ -782,7 +789,7 @@ impl Web3Rpcs {
         max_wait: Option<Duration>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
-    ) -> Web3ProxyResult<R> {
+    ) -> Web3ProxyResult<StreamingResponse<R>> {
         let mut skip_rpcs = vec![];
         let mut method_not_available_response = None;
 
@@ -1265,7 +1272,7 @@ impl Web3Rpcs {
         max_wait: Option<Duration>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
-    ) -> Web3ProxyResult<R> {
+    ) -> Web3ProxyResult<StreamingResponse<R>> {
         let proxy_mode = request_metadata.map(|x| x.proxy_mode()).unwrap_or_default();
 
         match proxy_mode {

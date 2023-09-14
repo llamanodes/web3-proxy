@@ -2,7 +2,8 @@ use super::one::Web3Rpc;
 use crate::errors::{Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, AuthorizationType};
 use crate::globals::{global_db_conn, DB_CONN};
-use crate::jsonrpc::{JsonRpcParams, JsonRpcResultData};
+use crate::jsonrpc::{JsonRpcId, JsonRpcParams, JsonRpcRequest, JsonRpcResultData};
+use crate::rpcs::streaming::StreamingResponse;
 use chrono::Utc;
 use derive_more::From;
 use entities::revert_log;
@@ -169,7 +170,7 @@ impl OpenRequestHandle {
         self,
         method: &str,
         params: &P,
-    ) -> Result<R, ProviderError> {
+    ) -> Result<StreamingResponse<R>, ProviderError> {
         // TODO: use tracing spans
         // TODO: including params in this log is way too verbose
         // trace!(rpc=%self.rpc, %method, "request");
@@ -194,15 +195,35 @@ impl OpenRequestHandle {
 
         // TODO: replace ethers-rs providers with our own that supports streaming the responses
         // TODO: replace ethers-rs providers with our own that handles "id" being null
-        let response: Result<R, _> = if let Some(ref p) = self.rpc.http_provider {
-            p.request(method, params).await
-        } else if let Some(p) = self.rpc.ws_provider.load().as_ref() {
-            p.request(method, params).await
-        } else {
-            return Err(ProviderError::CustomError(
-                "no provider configured!".to_string(),
-            ));
-        };
+        let response: Result<StreamingResponse<R>, _> =
+            if let Some(ref client) = self.rpc.http_client {
+                let id = self
+                    .rpc
+                    .next_id
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let payload = JsonRpcRequest::new(
+                    JsonRpcId::Number(id),
+                    method.to_string(),
+                    serde_json::to_value(params)?,
+                )
+                .unwrap();
+                // TODO no early return
+                let resp = client
+                    .post(self.rpc.http_url.clone().expect("must have url"))
+                    .json(&payload)
+                    .send()
+                    .await?;
+                // TODO configurable size
+                StreamingResponse::read_if_short(resp, 1024).await
+            } else if let Some(p) = self.rpc.ws_provider.load().as_ref() {
+                p.request(method, params)
+                    .await
+                    .map(StreamingResponse::Buffer)
+            } else {
+                return Err(ProviderError::CustomError(
+                    "no provider configured!".to_string(),
+                ));
+            };
 
         // measure successes and errors
         // originally i thought we wouldn't want errors, but I think it's a more accurate number including all requests

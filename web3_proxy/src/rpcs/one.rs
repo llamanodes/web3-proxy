@@ -2,6 +2,7 @@
 use super::blockchain::{ArcBlock, BlocksByHashCache, Web3ProxyBlock};
 use super::provider::{connect_http, connect_ws, EthersHttpProvider, EthersWsProvider};
 use super::request::{OpenRequestHandle, OpenRequestResult};
+use super::streaming::StreamingResponse;
 use crate::app::{flatten_handle, Web3ProxyJoinHandle};
 use crate::config::{BlockAndRpc, Web3RpcConfig};
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
@@ -40,7 +41,8 @@ pub struct Web3Rpc {
     pub display_name: Option<String>,
     pub db_conn: Option<DatabaseConnection>,
     /// most all requests prefer use the http_provider
-    pub(super) http_provider: Option<EthersHttpProvider>,
+    pub(super) http_url: Option<Url>,
+    pub(super) http_client: Option<reqwest::Client>,
     /// the websocket url is only used for subscriptions
     pub(super) ws_url: Option<Url>,
     /// the websocket provider is only used for subscriptions
@@ -83,6 +85,8 @@ pub struct Web3Rpc {
     pub(super) disconnect_watch: Option<watch::Sender<bool>>,
     /// created_at is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) created_at: Option<Instant>,
+    /// id for next request, atomically incremented
+    pub(super) next_id: AtomicU64,
 }
 
 impl Web3Rpc {
@@ -164,6 +168,7 @@ impl Web3Rpc {
 
         let median_request_latency = RollingQuantileLatency::spawn_median(1_000).await;
 
+        /*
         let http_provider = if let Some(http_url) = config.http_url {
             let http_url = http_url.parse::<Url>()?;
 
@@ -173,6 +178,7 @@ impl Web3Rpc {
         } else {
             None
         };
+        */
 
         let ws_url = if let Some(ws_url) = config.ws_url {
             let ws_url = ws_url.parse::<Url>()?;
@@ -194,7 +200,6 @@ impl Web3Rpc {
             hard_limit,
             hard_limit_until: Some(hard_limit_until),
             head_block: Some(head_block),
-            http_provider,
             max_head_block_age,
             name,
             peak_latency: Some(peak_latency),
@@ -804,7 +809,7 @@ impl Web3Rpc {
             // TODO: how does this get wrapped in an arc? does ethers handle that?
             // TODO: send this request to the ws_provider instead of the http_provider
             let latest_block: Result<Option<ArcBlock>, _> = self
-                .internal_request(
+                .internal_request::<_, Option<ArcBlock>>(
                     "eth_getBlockByNumber",
                     &("latest", false),
                     error_handler,
@@ -826,7 +831,7 @@ impl Web3Rpc {
                 self.send_head_block_result(Ok(Some(block)), &block_sender, &block_map)
                     .await?;
             }
-        } else if self.http_provider.is_some() {
+        } else if self.http_url.is_some() {
             // there is a "watch_blocks" function, but a lot of public nodes (including llamanodes) do not support the necessary rpc endpoints
             // TODO: is 1/2 the block time okay?
             let mut i = interval(self.block_interval / 2);
@@ -990,6 +995,11 @@ impl Web3Rpc {
 
         self.authorized_request(method, params, &authorization, error_handler, max_wait)
             .await
+            .and_then(|resp| {
+                resp.into_inner()
+                    .context("response too long")
+                    .map_err(Into::into)
+            })
     }
 
     pub async fn authorized_request<P: JsonRpcParams, R: JsonRpcResultData>(
@@ -999,7 +1009,7 @@ impl Web3Rpc {
         authorization: &Arc<Authorization>,
         error_handler: Option<RequestErrorHandler>,
         max_wait: Option<Duration>,
-    ) -> Web3ProxyResult<R> {
+    ) -> Web3ProxyResult<StreamingResponse<R>> {
         let handle = self
             .wait_for_request_handle(authorization, max_wait, error_handler)
             .await?;
@@ -1020,7 +1030,7 @@ impl Hash for Web3Rpc {
         self.name.hash(state);
 
         // TODO: url does NOT include the authorization data. i think created_at should protect us if auth changes without anything else
-        self.http_provider.as_ref().map(|x| x.url()).hash(state);
+        self.http_url.hash(state);
         // TODO: figure out how to get the url for the ws provider
         // self.ws_provider.map(|x| x.url()).hash(state);
 
