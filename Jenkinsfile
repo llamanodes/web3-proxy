@@ -18,24 +18,34 @@ pipeline {
         LATEST_BRANCH="main"
     }
     stages {
-        stage('Check and Cancel Old Builds') {
-            steps {
-                script {
-                    def currentBuildNumber = currentBuild.number
-
-                    // Check all build from same project
-                    for (build in currentBuild.rawBuild.getParent().getBuilds()) {
-                        // Check if an older build is still running and cancel it in favor of the new one
-                        if (build.number < currentBuildNumber && build.building) {
-                            echo "Cancelling build ${build.number}"
-                            build.doStop()
-                        }
-                    }
-                }
-            }
-        }
         stage('build and push') {
             parallel {
+                // stage('build and push amd64_epyc2 image') {
+                //     agent {
+                //         label 'amd64_epyc2'
+                //     }
+                //     environment {
+                //         ARCH="amd64_epyc2"
+                //     }
+                //     steps {
+                //         script {
+                //             myBuildandPush.buildAndPush()
+                //         }
+                //     }
+                // }
+                // stage('build and push amd64_epyc3 image') {
+                //     agent {
+                //         label 'amd64_epyc3'
+                //     }
+                //     environment {
+                //         ARCH="amd64_epyc3"
+                //     }
+                //     steps {
+                //         script {
+                //             myBuildandPush.buildAndPush()
+                //         }
+                //     }
+                // }
                 stage('Build and push arm64_graviton2 image') {
                     agent {
                         label 'arm64_graviton2'
@@ -49,6 +59,19 @@ pipeline {
                         }
                     }
                 }
+                // stage('Build and push intel_xeon3 image') {
+                //     agent {
+                //         label 'intel_xeon3'
+                //     }
+                //     environment {
+                //         ARCH="intel_xeon3"
+                //     }
+                //     steps {
+                //         script {
+                //             myBuildandPush.buildAndPush()
+                //         }
+                //     }
+                // }
             }
         }
         stage('push latest') {
