@@ -53,7 +53,7 @@ use std::time::Duration;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc, oneshot, watch, Semaphore};
 use tokio::task::{yield_now, JoinHandle};
-use tokio::time::sleep;
+use tokio::time::{sleep, Instant};
 use tracing::{error, info, trace, warn, Level};
 
 // TODO: make this customizable?
@@ -119,6 +119,8 @@ pub struct Web3ProxyApp {
     pub vredis_pool: Option<RedisPool>,
     /// channel for sending stats in a background task
     pub stat_sender: Option<mpsc::UnboundedSender<AppStat>>,
+    /// when the app started
+    pub start: Instant,
 
     /// Optional time series database for making pretty graphs that load quickly
     influxdb_client: Option<influxdb2::Client>,
@@ -491,9 +493,8 @@ impl Web3ProxyApp {
             balanced_rpcs,
             bundler_4337_rpcs,
             config: top_config.app.clone(),
-            pending_txid_firehose: deduped_txid_firehose,
-            frontend_port: frontend_port.clone(),
             frontend_ip_rate_limiter,
+            frontend_port: frontend_port.clone(),
             frontend_registered_user_rate_limiter,
             hostname,
             http_client,
@@ -503,9 +504,11 @@ impl Web3ProxyApp {
             jsonrpc_response_cache,
             kafka_producer,
             login_rate_limiter,
+            pending_txid_firehose: deduped_txid_firehose,
             private_rpcs,
             prometheus_port: prometheus_port.clone(),
             rpc_secret_key_cache,
+            start: Instant::now(),
             stat_sender,
             user_balance_cache,
             user_semaphores,
