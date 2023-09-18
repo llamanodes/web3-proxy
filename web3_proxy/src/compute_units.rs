@@ -19,6 +19,10 @@ pub fn default_usd_per_cu(chain_id: u64) -> Decimal {
     }
 }
 
+pub fn default_cu_per_byte(_chain_id: u64) -> Decimal {
+    Decimal::new(4, 2).unwrap()
+}
+
 #[derive(Debug)]
 pub struct ComputeUnit(Decimal);
 
@@ -39,7 +43,7 @@ impl ComputeUnit {
     pub fn new(method: &str, chain_id: u64, response_bytes: u64) -> Self {
         // TODO: this works, but this is fragile. think of a better way to check the method is a subscription
         if method.ends_with(')') {
-            return Self::subscription_response(response_bytes);
+            return Self::variable_price(chain_id, method, response_bytes);
         }
 
         let cu = if method.starts_with("admin_") || method.starts_with("alchemy_") {
@@ -139,7 +143,7 @@ impl ComputeUnit {
                 (_, "trace_replayTransaction") => 2983,
                 (_, "trace_transaction") => 26,
                 (_, "txpool_content") => {
-                    return Self::subscription_response(response_bytes) + 1000;
+                    return Self::variable_price(chain_id, method, response_bytes) + 1000;
                 }
                 (_, "invalid_method") => 100,
                 (_, "web3_clientVersion") => 15,
@@ -174,9 +178,12 @@ impl ComputeUnit {
 
     /// notifications and subscription responses cost per-byte
     #[instrument(level = "trace")]
-    pub fn subscription_response<D: Into<Decimal> + std::fmt::Debug>(num_bytes: D) -> Self {
-        // TODO: get multiplier from config
-        let cu = num_bytes.into() * Decimal::new(4, 2);
+    pub fn variable_price<D: Into<Decimal> + std::fmt::Debug>(
+        chain_id: u64,
+        method: &str,
+        num_bytes: D,
+    ) -> Self {
+        let cu = num_bytes.into() * default_cu_per_byte(chain_id);
 
         Self(cu)
     }
