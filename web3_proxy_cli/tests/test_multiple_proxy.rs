@@ -4,7 +4,7 @@ use std::time::Duration;
 use tracing::{info, warn};
 use web3_proxy::prelude::futures::future::try_join_all;
 use web3_proxy::prelude::reqwest;
-use web3_proxy::prelude::rust_decimal::Decimal;
+use web3_proxy::prelude::rust_decimal::{Decimal, RoundingStrategy};
 use web3_proxy::prelude::tokio::time::sleep;
 use web3_proxy::rpcs::blockchain::ArcBlock;
 use web3_proxy::test_utils::TestInflux;
@@ -204,6 +204,7 @@ async fn test_multiple_proxies_stats_add_up() {
                 .replace('"', "")
         )
         .unwrap()
+        .round_dp_with_strategy(10, RoundingStrategy::ToNegativeInfinity)
     );
     assert_eq!(
         Decimal::from_str(
@@ -218,6 +219,7 @@ async fn test_multiple_proxies_stats_add_up() {
                 .replace('"', "")
         )
         .unwrap()
+        .round_dp_with_strategy(10, RoundingStrategy::ToNegativeInfinity)
     );
     assert_eq!(
         Decimal::from_str(&mysql_stats["sum_request_bytes"].to_string()).unwrap(),

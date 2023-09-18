@@ -12,15 +12,17 @@ use tracing::{instrument, trace, warn};
 
 pub fn default_usd_per_cu(chain_id: u64) -> Decimal {
     match chain_id {
-        // TODO: only include if `cfg(test)`?
         999_001_999 => Decimal::from_str("0.10").unwrap(),
         1 | 31337 => Decimal::from_str("0.000000400000000000000").unwrap(),
         _ => Decimal::from_str("0.000000533333333333333").unwrap(),
     }
 }
 
-pub fn default_cu_per_byte(_chain_id: u64) -> Decimal {
-    Decimal::new(4, 2)
+pub fn default_cu_per_byte(_chain_id: u64, method: &str) -> Decimal {
+    match method {
+        "eth_subscribe(newPendingTransactions)" => Decimal::new(16, 2),
+        _ => Decimal::new(4, 2),
+    }
 }
 
 #[derive(Debug)]
@@ -183,7 +185,7 @@ impl ComputeUnit {
         method: &str,
         num_bytes: D,
     ) -> Self {
-        let cu = num_bytes.into() * default_cu_per_byte(chain_id);
+        let cu = num_bytes.into() * default_cu_per_byte(chain_id, method);
 
         Self(cu)
     }
