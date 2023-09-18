@@ -300,7 +300,7 @@ impl JsonRpcResponseWeigher {
 mod tests {
     use super::JsonRpcResponseEnum;
     use crate::response_cache::JsonRpcResponseWeigher;
-    use moka::future::{Cache, CacheBuilder, ConcurrentCacheExt};
+    use moka::future::{Cache, CacheBuilder};
     use serde_json::value::RawValue;
     use std::{sync::Arc, time::Duration};
 
@@ -340,25 +340,25 @@ mod tests {
 
         test_cache.insert(0, small_data).await;
 
-        test_cache.get(&0).unwrap();
+        test_cache.get(&0).await.unwrap();
 
         test_cache.insert(1, max_sized_data).await;
 
-        test_cache.get(&0).unwrap();
-        test_cache.get(&1).unwrap();
+        test_cache.get(&0).await.unwrap();
+        test_cache.get(&1).await.unwrap();
 
         test_cache.insert(2, oversized_data).await;
 
-        test_cache.get(&0).unwrap();
-        test_cache.get(&1).unwrap();
+        test_cache.get(&0).await.unwrap();
+        test_cache.get(&1).await.unwrap();
 
         // oversized data will be in the cache temporarily (it should just be an arc though, so that should be fine)
-        test_cache.get(&2).unwrap();
+        test_cache.get(&2).await.unwrap();
 
         // sync should do necessary cleanup
-        test_cache.sync();
+        test_cache.run_pending_tasks().await;
 
         // now it should be empty
-        assert!(test_cache.get(&2).is_none());
+        assert!(test_cache.get(&2).await.is_none());
     }
 }

@@ -6,6 +6,6 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.75"
-chrono = "0.4.30"
+chrono = "0.4.31"
 deadpool-redis = { version = "0.12.0", features = ["rt_tokio_1", "serde"] }
 tokio = "1.32.0"

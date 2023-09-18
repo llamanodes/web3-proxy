@@ -45,7 +45,7 @@ axum-client-ip = "0.4.2"
 axum-macros = "0.3.8"
 base64 = "0.21.4"
 check-if-email-exists = "0.9.0"
-chrono = { version = "0.4.30" }
+chrono = { version = "0.4.31" }
 console-subscriber = { version = "0.1.10", features = ["env-filter", "parking_lot"], optional = true }
 counter = "0.5.7"
 derivative = "2.2.0"
@@ -66,7 +66,7 @@ ipnet = { version = "2.8.0", features = ["json"] }
 itertools = "0.11.0"
 listenfd = "1.0.1"
 mimalloc = { version = "0.1.39", optional = true}
-moka = { version = "0.11.3", default-features = false, features = ["atomic64", "future", "parking_lot", "quanta", "triomphe"] }
+moka = { version = "0.12.0", default-features = false, features = ["atomic64", "future", "quanta"] }
 nanorand = { version = "0.7.0", default-features = false, features = ["std", "tls", "wyrand"] }
 num = { version = "0.4.1" }
 num-traits = "0.2.16"
@@ -86,8 +86,7 @@ serde-inline-default = "0.1.1"
 serde_json = { version = "1.0.107", default-features = false, features = ["raw_value"] }
 serde_prometheus = "0.2.4"
 strum = { version = "0.25.0", features = ["derive"] }
-time_01 = { package = "time", version = "0.1.45" }
-time_03 = { package = "time", version = "0.3" }
+time = { version = "0.3" }
 tokio = { version = "1.32.0", features = ["full", "tracing"] }
 tokio-console = { version = "0.1.9", optional = true }
 tokio-stream = { version = "0.1.14", features = ["sync"] }

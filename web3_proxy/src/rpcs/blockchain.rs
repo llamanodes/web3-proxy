@@ -237,7 +237,7 @@ impl Web3Rpcs {
                         .await;
 
                     // try to check the parent of this ancestor
-                    if let Some(ancestor_block) = self.blocks_by_hash.get(&ancestor.hash) {
+                    if let Some(ancestor_block) = self.blocks_by_hash.get(&ancestor.hash).await {
                         match ancestor_block.number().checked_sub(1.into()) {
                             None => break,
                             Some(ancestor_parent_num) => {
@@ -273,7 +273,7 @@ impl Web3Rpcs {
         // first, try to get the hash from our cache
         // the cache is set last, so if its here, its everywhere
         // TODO: use try_get_with
-        if let Some(block) = self.blocks_by_hash.get(hash) {
+        if let Some(block) = self.blocks_by_hash.get(hash).await {
             // double check that it matches the blocks_by_number cache
             let cached_hash = self
                 .blocks_by_number
@@ -351,7 +351,7 @@ impl Web3Rpcs {
         // TODO: if theres multiple, use petgraph to find the one on the main chain (and remove the others if they have enough confirmations)
 
         // try to get the hash from our cache
-        if let Some(block_hash) = self.blocks_by_number.get(num) {
+        if let Some(block_hash) = self.blocks_by_number.get(num).await {
             // TODO: sometimes this needs to fetch the block. why? i thought block_numbers would only be set if the block hash was set
             // TODO: configurable max wait and rpc
             return self.block(&block_hash, None, None).await;

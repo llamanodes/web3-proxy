@@ -35,7 +35,7 @@ use siwe::{Message, VerificationOpts};
 use std::ops::Add;
 use std::str::FromStr;
 use std::sync::Arc;
-use time_03::{Duration, OffsetDateTime};
+use time::{Duration, OffsetDateTime};
 use tracing::{info, trace, warn};
 use ulid::Ulid;
 
