@@ -16,11 +16,12 @@ use axum::{
     Extension, Json, TypedHeader,
 };
 use axum_macros::debug_handler;
-use check_if_email_exists::{check_email, CheckEmailInput, Reachable};
 use entities::{self, referee, referrer, user};
 use migration::sea_orm::{self, ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
 use serde::Deserialize;
 use std::sync::Arc;
+
+// TODO: use check_if_email_exists::{check_email, CheckEmailInput, Reachable};
 
 /// `GET /user` -- Use a bearer token to get the user's profile.
 ///
@@ -64,20 +65,18 @@ pub async fn user_post(
         if x.is_empty() {
             user.email = sea_orm::Set(None);
         } else {
-            // TODO: enable this once we figure out why it is hanging forever
-            if false {
-                // Make a quick check if the e-mail provide is active
-                let check_email_input = CheckEmailInput::new(x.clone());
-                // Verify this input, using async/await syntax.
-                let result = check_email(&check_email_input).await;
+            // // TODO: enable this once we figure out why it is hanging forever
+            // // Make a quick check if the e-mail provide is active
+            // let check_email_input = CheckEmailInput::new(x.clone());
+            // // Verify this input, using async/await syntax.
+            // let result = check_email(&check_email_input).await;
 
-                // Let's be very chill about the validity of e-mails, and only error if the Syntax / SMPT / MX does not work
-                if let Reachable::Invalid = result.is_reachable {
-                    return Err(Web3ProxyError::BadRequest(
-                        "The e-mail address you provided seems invalid".into(),
-                    ));
-                }
-            }
+            // // Let's be very chill about the validity of e-mails, and only error if the Syntax / SMPT / MX does not work
+            // if let Reachable::Invalid = result.is_reachable {
+            //     return Err(Web3ProxyError::BadRequest(
+            //         "The e-mail address you provided seems invalid".into(),
+            //     ));
+            // }
 
             // TODO: send a confirmation email first before marking this email address as validated
             user.email = sea_orm::Set(Some(x));

@@ -23,7 +23,7 @@ payment-contracts = { path = "../payment-contracts" }
 redis-rate-limiter = { path = "../redis-rate-limiter" }
 
 #ethers = { git = "https://github.com/llamanodes/ethers-rs/", rev = "eb68f5d60850008cd302762bd3a5a4bdcfecc713", default-features = false, features = ["rustls", "ws"] }
-influxdb2 = { git = "https://github.com/llamanodes/influxdb2", features = ["rustls"], rev = "2d125128696a29d7e0b9abc052c928937e7c0579" }
+influxdb2 = { git = "https://github.com/llamanodes/influxdb2", default-features = false, features = ["rustls"], rev = "2d125128696a29d7e0b9abc052c928937e7c0579" }
 influxdb2-structmap = { git = "https://github.com/llamanodes/influxdb2/", rev = "2d125128696a29d7e0b9abc052c928937e7c0579"}
 
 # TODO: we can't actually use 0.6 because they want a Provider and we have an Arc<Provider>
@@ -44,7 +44,6 @@ axum = { version = "0.6.20", features = ["headers", "tracing", "ws"] }
 axum-client-ip = "0.4.2"
 axum-macros = "0.3.8"
 base64 = "0.21.4"
-check-if-email-exists = "0.9.0"
 chrono = { version = "0.4.31" }
 console-subscriber = { version = "0.1.10", features = ["env-filter", "parking_lot"], optional = true }
 counter = "0.5.7"
@@ -100,6 +99,9 @@ uuid = { version = "1.4.1", default-features = false, features = ["fast-rng", "v
 
 # TODO: why doesn't this work in dev-dependencies
 test-log = { version = "0.2.12", default-features = false, features = ["trace"] }
+
+# # TODO: bring this back
+# check-if-email-exists = "0.9.0"
 
 [dev-dependencies]
 env_logger = "0.10"
