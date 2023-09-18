@@ -258,12 +258,16 @@ pub fn average_block_interval(chain_id: u64) -> Duration {
         1 => Duration::from_secs(12),
         // ethereum-goerli
         5 => Duration::from_secs(12),
+        // optimism
+        10 => Duration::from_secs(2),
         // binance
         56 => Duration::from_secs(3),
         // polygon
         137 => Duration::from_secs(2),
         // fantom
         250 => Duration::from_secs(1),
+        // base
+        8453 => Duration::from_secs(2),
         // arbitrum
         42161 => Duration::from_millis(500),
         // anything else
