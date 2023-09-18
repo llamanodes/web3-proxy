@@ -20,7 +20,7 @@ pub fn default_usd_per_cu(chain_id: u64) -> Decimal {
 }
 
 pub fn default_cu_per_byte(_chain_id: u64) -> Decimal {
-    Decimal::new(4, 2).unwrap()
+    Decimal::new(4, 2)
 }
 
 #[derive(Debug)]

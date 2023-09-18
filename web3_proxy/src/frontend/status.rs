@@ -203,12 +203,13 @@ async fn _status(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, Bytes) {
             MokaCacheSerializer(&app.user_semaphores),
         ],
         "chain_id": app.config.chain_id,
-        "head_block_num": head_block.as_ref().map(|x| x.number()),
         "head_block_hash": head_block.as_ref().map(|x| x.hash()),
+        "head_block_num": head_block.as_ref().map(|x| x.number()),
         "hostname": app.hostname,
         "payment_factory_address": app.config.deposit_factory_contract,
         "pending_txid_firehose": app.pending_txid_firehose,
         "private_rpcs": app.private_rpcs,
+        "uptime": app.start.elapsed().as_secs(),
         "version": APP_USER_AGENT,
     });
 
