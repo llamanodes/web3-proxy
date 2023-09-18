@@ -252,6 +252,7 @@ impl AppConfig {
 }
 
 /// TODO: we can't query a provider because we need this to create a provider
+/// TODO: cache this
 pub fn average_block_interval(chain_id: u64) -> Duration {
     match chain_id {
         // ethereum
@@ -266,6 +267,8 @@ pub fn average_block_interval(chain_id: u64) -> Duration {
         137 => Duration::from_secs(2),
         // fantom
         250 => Duration::from_secs(1),
+        // zkevm polygon
+        1101 => Duration::from_secs(7),
         // base
         8453 => Duration::from_secs(2),
         // arbitrum
