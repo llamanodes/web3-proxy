@@ -266,16 +266,6 @@ pub async fn serve(
         .layer(Extension(app.clone()))
         // frontend caches
         .layer(Extension(Arc::new(response_cache)))
-        // request timeout
-        .layer(
-            ServiceBuilder::new()
-                // this middleware goes above `TimeoutLayer` because it will receive
-                // errors returned by `TimeoutLayer`
-                .layer(HandleErrorLayer::new(|_: BoxError| async {
-                    Web3ProxyError::Timeout(Some(Duration::from_secs(5 * 60)))
-                }))
-                .layer(TimeoutLayer::new(Duration::from_secs(5 * 60))),
-        )
         // request id
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &Request<Body>| {
