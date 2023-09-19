@@ -594,15 +594,16 @@ impl Web3Rpcs {
 
                     match ranked_rpcs.should_wait_for_block(waiting_for, skip_rpcs) {
                         ShouldWaitForBlock::NeverReady => break,
-                        ShouldWaitForBlock::Ready => {
-                            if start.elapsed() > max_wait {
-                                break;
-                            }
-                            // TODO: i don't see how we can get here. something feels wrong if this is common.
-                            // maybe from a race? maybe _best_available_rpc returned NotReady just as a node synced
-                            yield_now().await;
-                        }
-                        ShouldWaitForBlock::Wait { .. } => select! {
+                        // TODO: think about this more. but for now lets always wait for ranked to change
+                        // ShouldWaitForBlock::Ready => {
+                        //     if start.elapsed() > max_wait {
+                        //         break;
+                        //     }
+                        //     // TODO: i don't see how we can get here. something feels wrong if this is common.
+                        //     // maybe from a race? maybe _best_available_rpc returned NotReady just as a node synced
+                        //     yield_now().await;
+                        // }
+                        ShouldWaitForBlock::Ready | ShouldWaitForBlock::Wait { .. } => select! {
                             _ = watch_ranked_rpcs.changed() => {
                                 // no need to borrow_and_update because we do that at the top of the loop
                                 // TODO: wait until watched_ranked_rpcs is on the right block?
