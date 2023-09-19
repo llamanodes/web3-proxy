@@ -8,6 +8,7 @@ use std::{
     hash::{Hash, Hasher},
 };
 use tokio::sync::{broadcast, mpsc};
+use tokio::task::yield_now;
 
 struct DedupedBroadcasterTask<T>
 where
@@ -58,6 +59,8 @@ where
                     self.total_broadcasts.fetch_add(x, Ordering::Relaxed);
                 }
             });
+
+            yield_now().await;
         }
     }
 }
