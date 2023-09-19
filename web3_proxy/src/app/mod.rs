@@ -1441,6 +1441,7 @@ impl Web3ProxyApp {
                 };
 
                 if try_archive {
+                    // TODO: only charge for archive if it gave a result
                     request_metadata
                         .archive_request
                         .store(true, atomic::Ordering::Relaxed);
@@ -1454,7 +1455,8 @@ impl Web3ProxyApp {
                             Some(Duration::from_secs(30)),
                             // TODO: should this be block 0 instead?
                             Some(&U64::one()),
-                            None,
+                            // TODO: is this a good way to allow lagged archive nodes a try
+                            Some(&head_block.unwrap().number().saturating_sub(5.into()).clamp(U64::one(), U64::MAX)),
                         )
                         .await;
                 }
