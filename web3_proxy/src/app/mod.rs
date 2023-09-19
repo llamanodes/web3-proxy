@@ -1743,13 +1743,11 @@ impl Web3ProxyApp {
 
                     // TODO: try to fetch out of s3
 
-                    self
+                    timeout(Duration::from_secs(300), self
                         .jsonrpc_response_cache
                         .try_get_with::<_, Web3ProxyError>(cache_key.hash(), async {
                             // TODO: think more about this timeout. we should probably have a `request_expires_at` Duration on the request_metadata
-                            let proxy_with_timeout= timeout(
-                                Duration::from_secs(300),
-                                self.balanced_rpcs
+                            let response_data = self.balanced_rpcs
                                 .try_proxy_connection::<_, Arc<RawValue>>(
                                     method,
                                     params,
@@ -1757,38 +1755,30 @@ impl Web3ProxyApp {
                                     max_wait,
                                     from_block_num.as_ref(),
                                     to_block_num.as_ref(),
-                                )
-                            );
+                            ).await;
 
-                            match proxy_with_timeout.await {
-                                Ok(response_data) => {
-                                    if !cache_jsonrpc_errors && let Err(err) = response_data {
-                                        // if we are not supposed to cache jsonrpc errors,
-                                        // then we must not convert Provider errors into a JsonRpcResponseEnum
-                                        // return all the errors now. moka will not cache Err results
-                                        Err(err)
-                                    } else {
-                                        // convert jsonrpc errors into JsonRpcResponseEnum, but leave the rest as errors
-                                        let response_data: JsonRpcResponseEnum<Arc<RawValue>> = response_data.try_into()?;
+                            if !cache_jsonrpc_errors && let Err(err) = response_data {
+                                // if we are not supposed to cache jsonrpc errors,
+                                // then we must not convert Provider errors into a JsonRpcResponseEnum
+                                // return all the errors now. moka will not cache Err results
+                                Err(err)
+                            } else {
+                                // convert jsonrpc errors into JsonRpcResponseEnum, but leave the rest as errors
+                                let response_data: JsonRpcResponseEnum<Arc<RawValue>> = response_data.try_into()?;
 
-                                        if response_data.is_null() {
-                                            // don't ever cache "null" as a success. its too likely to be a problem
-                                            Err(Web3ProxyError::NullJsonRpcResult)
-                                        } else if response_data.num_bytes() > max_response_cache_bytes {
-                                            // don't cache really large requests
-                                            // TODO: emit a stat
-                                            Err(Web3ProxyError::JsonRpcResponse(response_data))
-                                        } else {
-                                            // TODO: response data should maybe be Arc<JsonRpcResponseEnum<Box<RawValue>>>, but that's more work
-                                            Ok(response_data)
-                                        }
-                                    }
-                                }
-                                Err(err) => {
-                                    Err(Web3ProxyError::from(err))
+                                if response_data.is_null() {
+                                    // don't ever cache "null" as a success. its too likely to be a problem
+                                    Err(Web3ProxyError::NullJsonRpcResult)
+                                } else if response_data.num_bytes() > max_response_cache_bytes {
+                                    // don't cache really large requests
+                                    // TODO: emit a stat
+                                    Err(Web3ProxyError::JsonRpcResponse(response_data))
+                                } else {
+                                    // TODO: response data should maybe be Arc<JsonRpcResponseEnum<Box<RawValue>>>, but that's more work
+                                    Ok(response_data)
                                 }
                             }
-                        }).await?
+                        })).await??
                 } else {
                     let x = timeout(
                         Duration::from_secs(300),
