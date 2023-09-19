@@ -993,7 +993,6 @@ impl Web3Rpcs {
 
                         }
                     }
-                    yield_now().await;
                 }
                 OpenRequestResult::NotReady => {
                     if let Some(request_metadata) = request_metadata {
@@ -1032,7 +1031,7 @@ impl Web3Rpcs {
         let needed = min_block_needed.max(max_block_needed);
 
         let head_block_num = watch_consensus_rpcs
-            .borrow()
+            .borrow_and_update()
             .as_ref()
             .map(|x| *x.head_block.number());
 

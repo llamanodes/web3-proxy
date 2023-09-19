@@ -814,7 +814,7 @@ impl Web3Rpc {
         // rpcs opt-into subscribing to transactions. its a lot of bandwidth
         if !self.subscribe_txs {
             loop {
-                if *subscribe_stop_rx.borrow() {
+                if *subscribe_stop_rx.borrow_and_update() {
                     trace!("stopping ws block subscription on {}", self);
                     return Ok(());
                 }
@@ -837,7 +837,7 @@ impl Web3Rpc {
             drop(active_request_handle);
 
             while let Some(x) = pending_txs_sub.next().await {
-                if *subscribe_stop_rx.borrow() {
+                if *subscribe_stop_rx.borrow_and_update() {
                     // TODO: this is checking way too often. have this on a timer instead
                     trace!("stopping ws block subscription on {}", self);
                     break;
@@ -854,7 +854,7 @@ impl Web3Rpc {
         } else {
             // TODO: what should we do here?
             loop {
-                if *subscribe_stop_rx.borrow() {
+                if *subscribe_stop_rx.borrow_and_update() {
                     trace!("stopping ws block subscription on {}", self);
                     return Ok(());
                 }
@@ -870,7 +870,7 @@ impl Web3Rpc {
         self: &Arc<Self>,
         block_sender: mpsc::UnboundedSender<BlockAndRpc>,
         block_map: BlocksByHashCache,
-        subscribe_stop_rx: watch::Receiver<bool>,
+        mut subscribe_stop_rx: watch::Receiver<bool>,
     ) -> Web3ProxyResult<()> {
         trace!("subscribing to new heads on {}", self);
 
@@ -926,7 +926,7 @@ impl Web3Rpc {
             i.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
             loop {
-                if *subscribe_stop_rx.borrow() {
+                if *subscribe_stop_rx.borrow_and_update() {
                     trace!(%self, "stopping http block subscription");
                     break;
                 }
@@ -992,8 +992,6 @@ impl Web3Rpc {
                     }
 
                     sleep_until(retry_at).await;
-
-                    yield_now().await;
                 }
                 Ok(OpenRequestResult::NotReady) => {
                     // TODO: when can this happen? log? emit a stat?

@@ -10,12 +10,11 @@ pub mod rpc_proxy_ws;
 pub mod status;
 pub mod users;
 
+use crate::app::Web3ProxyApp;
 use crate::errors::Web3ProxyResult;
-use crate::{app::Web3ProxyApp, errors::Web3ProxyError};
 use axum::{
-    error_handling::HandleErrorLayer,
     routing::{get, post},
-    BoxError, Extension, Router,
+    Extension, Router,
 };
 use http::{header::AUTHORIZATION, Request, StatusCode};
 use hyper::Body;
@@ -26,8 +25,6 @@ use std::{iter::once, time::Duration};
 use std::{net::SocketAddr, sync::atomic::Ordering};
 use strum::{EnumCount, EnumIter};
 use tokio::sync::broadcast;
-use tower::timeout::TimeoutLayer;
-use tower::ServiceBuilder;
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 use tower_http::{cors::CorsLayer, normalize_path::NormalizePathLayer, trace::TraceLayer};
 use tracing::{error_span, info};
