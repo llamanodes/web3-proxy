@@ -598,10 +598,14 @@ impl Web3Rpcs {
                             if start.elapsed() > max_wait {
                                 break;
                             }
+                            // TODO: i don't see how we can get here. something feels wrong if this is common.
+                            // maybe from a race? maybe _best_available_rpc returned NotReady just as a node synced
+                            yield_now().await;
                         }
                         ShouldWaitForBlock::Wait { .. } => select! {
                             _ = watch_ranked_rpcs.changed() => {
                                 // no need to borrow_and_update because we do that at the top of the loop
+                                // TODO: wait until watched_ranked_rpcs is on the right block?
                                 trace!("watch ranked rpcs changed");
                             },
                             _ = sleep_until(start + max_wait) => break,
@@ -623,8 +627,6 @@ impl Web3Rpcs {
                 trace!("no potential rpcs and set to not wait");
                 break;
             }
-
-            yield_now().await;
 
             // clear for the next loop
             potential_rpcs.clear();
@@ -1127,7 +1129,7 @@ impl Web3Rpcs {
                                 let rpc = x.clone_connection();
 
                                 if !rpc.backup {
-                                    // TODO: its possible we serve from a synced connection though. think about this more
+                                    // TODO: even if a backup is included, it is possible the response is still from a primary connection. think about this more
                                     only_backups_used = false;
                                 }
 
