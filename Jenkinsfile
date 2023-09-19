@@ -18,22 +18,22 @@ pipeline {
         LATEST_BRANCH="main"
     }
     stages {
-        stage('Check and Cancel Old Builds') {
-            steps {
-                script {
-                    def currentBuildNumber = currentBuild.number
+        // stage('Check and Cancel Old Builds') {
+        //     steps {
+        //         script {
+        //             def currentBuildNumber = currentBuild.number
 
-                    // Check all build from same project
-                    for (build in currentBuild.rawBuild.getParent().getBuilds()) {
-                        // Check if an older build is still running and cancel it in favor of the new one
-                        if (build.number < currentBuildNumber && build.building) {
-                            echo "Cancelling build ${build.number}"
-                            build.doStop()
-                        }
-                    }
-                }
-            }
-        }
+        //             // Check all build from same project
+        //             for (build in currentBuild.rawBuild.getParent().getBuilds()) {
+        //                 // Check if an older build is still running and cancel it in favor of the new one
+        //                 if (build.number < currentBuildNumber && build.building) {
+        //                     echo "Cancelling build ${build.number}"
+        //                     build.doStop()
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
         stage('build and push') {
             parallel {
                 stage('Build and push arm64_graviton2 image') {
