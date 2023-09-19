@@ -1456,7 +1456,7 @@ impl Web3ProxyApp {
                                 // TODO: should this be block 0 instead?
                                 Some(&U64::one()),
                                 // TODO: is this a good way to allow lagged archive nodes a try
-                                Some(head_block_num.saturating_sub(5.into()).clamp(U64::one(), U64::MAX)),
+                                Some(&ead_block_num.saturating_sub(5.into()).clamp(U64::one(), U64::MAX)),
                             )
                             .await;
                     }
