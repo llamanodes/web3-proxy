@@ -1440,24 +1440,26 @@ impl Web3ProxyApp {
                 };
 
                 if try_archive {
-                    // TODO: only charge for archive if it gave a result
-                    request_metadata
-                        .archive_request
-                        .store(true, atomic::Ordering::Relaxed);
+                    if let Some(head_block_num) = head_block.map(|x| x.number()) {
+                        // TODO: only charge for archive if it gave a result
+                        request_metadata
+                            .archive_request
+                            .store(true, atomic::Ordering::Relaxed);
 
-                    response_data = self
-                        .balanced_rpcs
-                        .try_proxy_connection::<_, Box<RawValue>>(
-                            method,
-                            params,
-                            Some(request_metadata),
-                            Some(Duration::from_secs(30)),
-                            // TODO: should this be block 0 instead?
-                            Some(&U64::one()),
-                            // TODO: is this a good way to allow lagged archive nodes a try
-                            Some(&head_block.unwrap().number().saturating_sub(5.into()).clamp(U64::one(), U64::MAX)),
-                        )
-                        .await;
+                        response_data = self
+                            .balanced_rpcs
+                            .try_proxy_connection::<_, Box<RawValue>>(
+                                method,
+                                params,
+                                Some(request_metadata),
+                                Some(Duration::from_secs(30)),
+                                // TODO: should this be block 0 instead?
+                                Some(&U64::one()),
+                                // TODO: is this a good way to allow lagged archive nodes a try
+                                Some(head_block_num.saturating_sub(5.into()).clamp(U64::one(), U64::MAX)),
+                            )
+                            .await;
+                    }
                 }
 
                 response_data.try_into()?
