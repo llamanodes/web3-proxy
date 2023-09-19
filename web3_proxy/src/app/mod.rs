@@ -1164,10 +1164,16 @@ impl Web3ProxyApp {
         // TODO: trace/kafka log request.params before we send them to _proxy_request_with_caching which might modify them
 
         // turn some of the Web3ProxyErrors into Ok results
-        // TODO: move this into a helper function
         let max_tries = 3;
         let mut tries = 0;
         loop {
+            if tries > 0 {
+                // exponential backoff with jitter
+                sleep(Duration::from_millis(100)).await;
+            }
+
+            tries += 1;
+
             let (code, response_data) = match self
                 ._proxy_request_with_caching(
                     &request.method,
@@ -1208,14 +1214,12 @@ impl Web3ProxyApp {
                     (StatusCode::OK, response_data)
                 }
                 Err(err) => {
-                    tries += 1;
-                    if tries < max_tries {
-                        // try again after a short delay
-                        // TODO: tune this delay
-                        sleep(Duration::from_millis(100)).await;
-
+                    if tries <= max_tries {
+                        // TODO: log the error before retrying
                         continue;
                     }
+
+                    // max tries exceeded. return the error
 
                     request_metadata
                         .error_response
