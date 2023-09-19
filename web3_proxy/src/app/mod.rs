@@ -411,8 +411,7 @@ impl Web3ProxyApp {
 
         let chain_id = top_config.app.chain_id;
 
-        let deduped_txid_firehose =
-            DedupedBroadcaster::new(10_000, 10_000, Some(Duration::from_secs(5 * 60)));
+        let deduped_txid_firehose = DedupedBroadcaster::new(5_000, 5_000);
 
         // TODO: remove this. it should only be done by apply_top_config
         let (balanced_rpcs, balanced_handle, consensus_connections_watcher) = Web3Rpcs::spawn(

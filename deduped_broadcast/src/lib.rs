@@ -2,7 +2,6 @@ use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 use std::{
     collections::hash_map::DefaultHasher,
     fmt::Debug,
@@ -51,16 +50,14 @@ where
 
             // we don't actually care what the return value is. we just want to send only if the cache is empty
             // TODO: count new vs unique
-            self.cache
-                .get_or_insert(hashed, || {
-                    self.total_filtered
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.cache.get_or_insert(hashed, || {
+                self.total_filtered
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-                    if let Ok(x) = self.broadcast_filtered_tx.send(item) {
-                        self.total_broadcasts.fetch_add(x, Ordering::Relaxed);
-                    }
-                })
-                .await;
+                if let Ok(x) = self.broadcast_filtered_tx.send(item) {
+                    self.total_broadcasts.fetch_add(x, Ordering::Relaxed);
+                }
+            });
         }
     }
 }
@@ -69,7 +66,7 @@ impl<T> DedupedBroadcaster<T>
 where
     T: Clone + Debug + Hash + Send + Sync + 'static,
 {
-    pub fn new(capacity: usize, cache_capacity: u64) -> Self {
+    pub fn new(capacity: usize, cache_capacity: usize) -> Self {
         let (unfiltered_tx, unfiltered_rx) = mpsc::channel::<T>(capacity);
         let (broadcast_filtered_tx, _) = broadcast::channel(capacity);
 
@@ -175,7 +172,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_deduped_broadcaster() {
-        let broadcaster = DedupedBroadcaster::new(10, 10, None);
+        let broadcaster = DedupedBroadcaster::new(10, 10);
 
         let mut receiver_1 = broadcaster.subscribe();
         let _receiver_2 = broadcaster.subscribe();
