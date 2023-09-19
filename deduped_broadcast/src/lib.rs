@@ -1,4 +1,3 @@
-use moka::future::{Cache, CacheBuilder};
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -17,7 +16,7 @@ where
 {
     unfiltered_rx: mpsc::Receiver<T>,
     broadcast_filtered_tx: Arc<broadcast::Sender<T>>,
-    cache: Cache<u64, ()>,
+    cache: lru::LruCache<u64, ()>,
     total_unfiltered: Arc<AtomicUsize>,
     total_filtered: Arc<AtomicUsize>,
     total_broadcasts: Arc<AtomicUsize>,
@@ -53,7 +52,7 @@ where
             // we don't actually care what the return value is. we just want to send only if the cache is empty
             // TODO: count new vs unique
             self.cache
-                .get_with(hashed, async {
+                .get_or_insert(hashed, || {
                     self.total_filtered
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
@@ -70,17 +69,11 @@ impl<T> DedupedBroadcaster<T>
 where
     T: Clone + Debug + Hash + Send + Sync + 'static,
 {
-    pub fn new(capacity: usize, cache_capacity: u64, cache_ttl: Option<Duration>) -> Self {
+    pub fn new(capacity: usize, cache_capacity: u64) -> Self {
         let (unfiltered_tx, unfiltered_rx) = mpsc::channel::<T>(capacity);
         let (broadcast_filtered_tx, _) = broadcast::channel(capacity);
 
-        let mut cache = CacheBuilder::new(cache_capacity);
-
-        if let Some(cache_ttl) = cache_ttl {
-            cache = cache.time_to_live(cache_ttl);
-        }
-
-        let cache = cache.build();
+        let cache = lru::LruCache::new(cache_capacity.try_into().unwrap());
 
         let broadcast_filtered_tx = Arc::new(broadcast_filtered_tx);
 
