@@ -39,12 +39,16 @@ RUN --mount=type=cache,target=/root/.cargo/git \
 
 # run a cargo command to install our desired version of rust
 # it is expected to exit code 101 since no Cargo.toml exists
+# the rm is there because `cargo clean` can't run without a Cargo.toml, but a new version of rust likely needs a clean target dir
 COPY rust-toolchain.toml ./
 RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/app/target \
+    --mount=type=cache,target=/app/target_test \
     set -eux -o pipefail; \
     \
-    cargo check || [ "$?" -eq 101 ]
+    cargo check || [ "$?" -eq 101 ]; \
+    rm -rf /app/target/* /app/target_test/*
 
 # cargo binstall
 RUN --mount=type=cache,target=/root/.cargo/git \
