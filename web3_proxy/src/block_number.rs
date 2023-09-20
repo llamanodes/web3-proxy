@@ -113,6 +113,15 @@ pub async fn clean_block_number(
                     // TODO: "BlockNumber" needs a better name
                     // TODO: move this to a helper function?
                     if let Ok(block_num) = serde_json::from_value::<U64>(x.clone()) {
+                        let head_block_num = *latest_block.number();
+
+                        if block_num > head_block_num {
+                            return Err(Web3ProxyError::UnknownBlockNumber {
+                                known: head_block_num,
+                                unknown: block_num,
+                            });
+                        }
+
                         let block_hash = rpcs
                             .block_hash(&block_num)
                             .await
@@ -455,5 +464,40 @@ mod test {
 
         // "latest" should have been changed to the block number
         assert_eq!(params.get(1), Some(&json!(head_block.number())));
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_eth_call_latest() {
+        let method = "eth_call";
+
+        let mut params = json!([{"data": "0xdeadbeef", "to": "0x0000000000000000000000000000000000000000"}, "latest"]);
+
+        let head_block = Block {
+            number: Some(18173997.into()),
+            hash: Some(H256::random()),
+            ..Default::default()
+        };
+
+        let head_block = Web3ProxyBlock::try_new(Arc::new(head_block)).unwrap();
+
+        let (empty, _handle, _ranked_rpc_reciver) =
+            Web3Rpcs::spawn(1, None, 1, 1, "test".into(), None, None)
+                .await
+                .unwrap();
+
+        let x = CacheMode::try_new(method, &mut params, &head_block, &empty)
+            .await
+            .unwrap();
+
+        // "latest" should have been changed to the block number
+        assert_eq!(params.get(1), Some(&json!(head_block.number())));
+
+        assert_eq!(
+            x,
+            CacheMode::Cache {
+                block: (&head_block).into(),
+                cache_errors: true
+            }
+        );
     }
 }
