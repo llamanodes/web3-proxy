@@ -44,11 +44,11 @@ COPY rust-toolchain.toml ./
 RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/app/target \
-    --mount=type=cache,target=/app/target_test \
     set -eux -o pipefail; \
     \
     cargo check || [ "$?" -eq 101 ]; \
-    rm -rf /app/target/* /app/target_test/*
+    [ -e /app/target/rust-toolchain.toml ] && [ "$(cat /app/target/rust-toolchain.toml)" != "$(cat ./rust-toolchain.toml)" ] && rm -rf /app/target/*; \
+    cp ./rust-toolchain.toml /app/target/rust-toolchain.toml
 
 # cargo binstall
 RUN --mount=type=cache,target=/root/.cargo/git \
@@ -106,10 +106,9 @@ COPY --from=rust_nextest /root/.cargo/bin/cargo-nextest* /root/.cargo/bin/
 # test the application with cargo-nextest
 RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/app/target_test \
+    --mount=type=cache,target=/app/target \
     set -eux -o pipefail; \
     \
-    export CARGO_TARGET_DIR=target_test; \
     [ -e "$(pwd)/payment-contracts/src/contracts/mod.rs" ] || touch "$(pwd)/payment-contracts/build.rs"; \
     RUST_LOG=web3_proxy=trace,info \
     cargo \
@@ -118,7 +117,6 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     nextest run \
     --features "$WEB3_PROXY_FEATURES" --no-default-features \
     ; \
-    [ -d target_test/debug ]; \
     touch /test_success
 
 FROM rust_with_env as build_app
