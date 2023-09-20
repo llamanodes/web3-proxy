@@ -83,11 +83,15 @@ ENV WEB3_PROXY_FEATURES "rdkafka-src"
 COPY . .
 
 # fill the package caches
+# TODO: clean needed because of rust upgrade and jenkins caches :'(
 RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/app/target \
+    --mount=type=cache,target=/app/target_test \
     set -eux -o pipefail; \
     \
+    rm -rf /app/target/*; \
+    rm -rf /app/target_test/*; \
     [ -e "$(pwd)/payment-contracts/src/contracts/mod.rs" ] || touch "$(pwd)/payment-contracts/build.rs"; \
     cargo \
     --locked \
