@@ -1285,7 +1285,7 @@ dependencies = [
 
 [[package]]
 name = "deduped_broadcast"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "lru",
  "serde",

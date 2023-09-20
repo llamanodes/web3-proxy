@@ -59,8 +59,6 @@ where
                     self.total_broadcasts.fetch_add(x, Ordering::Relaxed);
                 }
             });
-
-            yield_now().await;
         }
     }
 }
