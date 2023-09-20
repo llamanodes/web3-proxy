@@ -14,7 +14,7 @@ use std::{
 
 #[derive(Clone, Debug, Eq, From)]
 pub struct JsonRpcQueryCacheKey {
-    /// hashed inputs
+    /// hashed params
     hash: u64,
     from_block: Option<BlockNumAndHash>,
     to_block: Option<BlockNumAndHash>,
