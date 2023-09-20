@@ -240,7 +240,7 @@ pub async fn user_balance_post(
 
     let uncle_hashes: HashSet<_> = uncle_hashes
         .into_iter()
-        .map(|x| serde_json::from_str(x.block_hash.as_str()).unwrap())
+        .filter_map(|x| serde_json::from_str(x.block_hash.as_str()).ok())
         .collect();
 
     {
