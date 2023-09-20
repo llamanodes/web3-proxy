@@ -1745,17 +1745,17 @@ impl Web3ProxyApp {
 
                     // TODO: try to fetch out of s3
 
-                    // TODO: clone less. is this where pins are useful?
-                    let clone = self.clone();
+                    // TODO: clone less?
+                    let app = self.clone();
                     let method = method.to_string();
                     let params = params.clone();
                     let request_metadata = request_metadata.clone();
 
                     let f = async move {
-                        clone
+                        app
                             .jsonrpc_response_cache
                             .try_get_with::<_, Web3ProxyError>(cache_key.hash(), async {
-                                let response_data = timeout(Duration::from_secs(290), clone.balanced_rpcs
+                                let response_data = timeout(Duration::from_secs(290), app.balanced_rpcs
                                     .try_proxy_connection::<_, Arc<RawValue>>(
                                         &method,
                                         &params,
