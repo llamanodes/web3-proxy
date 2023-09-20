@@ -61,7 +61,7 @@ hdrhistogram = "7.5.2"
 hostname = "0.3.1"
 http = "0.2.9"
 hyper = { version = "0.14.27", features = ["full", "nightly"] }
-ipnet = { version = "2.8.0", features = ["json"] }
+ipnet = { version = "2.8.0" }
 itertools = "0.11.0"
 listenfd = "1.0.1"
 mimalloc = { version = "0.1.39", optional = true}
@@ -75,9 +75,9 @@ pagerduty-rs = { version = "0.1.6", default-features = false, features = ["async
 parking_lot = { version = "0.12.1", features = ["arc_lock", "nightly"] }
 rdkafka = { version = "0.34.0", features = ["tracing"] }
 regex = "1.9.5"
-reqwest = { version = "0.11.20", default-features = false, features = ["deflate", "gzip", "json", "tokio-rustls"] }
+reqwest = { version = "0.11.20", default-features = false, features = ["json", "tokio-rustls"] }
 rmp-serde = "1.1.2"
-rust_decimal = { version = "1.32.0", features = ["maths"] }
+rust_decimal = { version = "1.32.0" }
 sentry = { version = "0.31.7", default-features = false, features = ["anyhow", "backtrace", "contexts", "panic", "reqwest", "rustls", "serde_json", "tracing"] }
 sentry-tracing = "0.31.7"
 serde = { version = "1.0.188" }

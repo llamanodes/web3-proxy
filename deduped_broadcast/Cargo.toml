@@ -7,6 +7,6 @@ edition = "2021"
 
 [dependencies]
 tracing = "0.1"
-lru = { version = "0.11.0" }
+lru = { version = "0.11.1" }
 serde = "1"
 tokio = { version = "1.32.0", features = ["full"] }
