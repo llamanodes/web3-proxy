@@ -36,7 +36,6 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc, OwnedSemaphorePermit, RwLock as AsyncRwLock};
-use tokio::task::yield_now;
 use tracing::trace;
 
 /// How to select backend servers for a request
@@ -550,8 +549,6 @@ async fn read_web3_socket(
                     };
 
                     tokio::spawn(f);
-
-                    yield_now().await;
                 } else {
                     break;
                 }

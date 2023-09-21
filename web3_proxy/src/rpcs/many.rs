@@ -31,7 +31,6 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::select;
 use tokio::sync::{mpsc, watch};
-use tokio::task::yield_now;
 use tokio::time::{sleep_until, timeout, Duration, Instant};
 use tracing::{debug, error, info, instrument, trace, warn};
 
@@ -1183,8 +1182,6 @@ impl Web3Rpcs {
                             // consensus rpcs changed!
                             watch_consensus_rpcs.borrow_and_update();
 
-                            yield_now().await;
-
                             // continue to try again
                             continue;
                         }
@@ -1225,8 +1222,6 @@ impl Web3Rpcs {
                                 }
                             }
                         }
-
-                        yield_now().await;
 
                         continue;
                     } else {

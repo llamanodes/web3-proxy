@@ -26,7 +26,6 @@ use std::hash::{Hash, Hasher};
 use std::sync::atomic::{self, AtomicU32, AtomicU64, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
 use tokio::sync::{mpsc, watch, RwLock as AsyncRwLock};
-use tokio::task::yield_now;
 use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
 use tracing::{debug, error, info, trace, warn, Level};
 use url::Url;
@@ -691,8 +690,6 @@ impl Web3Rpc {
                     if *disconnect_watch_rx.borrow_and_update() {
                         break;
                     }
-
-                    yield_now().await;
 
                     disconnect_watch_rx.changed().await?;
                 }
