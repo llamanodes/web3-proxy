@@ -3,8 +3,8 @@
 use super::Web3ProxyApp;
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, RequestMetadata, RequestOrMethod};
-use crate::jsonrpc::JsonRpcForwardedResponse;
 use crate::jsonrpc::JsonRpcRequest;
+use crate::jsonrpc::{self, JsonRpcForwardedResponse};
 use crate::response_cache::JsonRpcResponseEnum;
 use axum::extract::ws::{CloseFrame, Message};
 use deferred_rate_limiter::DeferredRateLimitResult;
@@ -30,7 +30,7 @@ impl Web3ProxyApp {
         subscription_count: &'a AtomicU64,
         // TODO: taking a sender for Message instead of the exact json we are planning to send feels wrong, but its easier for now
         response_sender: mpsc::Sender<Message>,
-    ) -> Web3ProxyResult<(AbortHandle, JsonRpcForwardedResponse)> {
+    ) -> Web3ProxyResult<(AbortHandle, jsonrpc::ParsedResponse)> {
         let subscribe_to = jsonrpc_request
             .params
             .get(0)
@@ -214,10 +214,13 @@ impl Web3ProxyApp {
 
         let response_data = JsonRpcResponseEnum::from(json!(subscription_id));
 
-        let response = JsonRpcForwardedResponse::from_response_data(response_data, id);
+        let response = jsonrpc::ParsedResponse::from_response_data(response_data, id);
 
+        // TODO: better way of passing in ParsedResponse
+        let response = jsonrpc::SingleResponse::Parsed(response);
         // TODO: this serializes twice
         request_metadata.add_response(&response);
+        let response = response.parsed().await.expect("Response already parsed");
 
         // TODO: make a `SubscriptonHandle(AbortHandle, JoinHandle)` struct?
         Ok((subscription_abort_handle, response))

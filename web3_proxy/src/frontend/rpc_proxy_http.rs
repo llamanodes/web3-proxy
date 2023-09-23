@@ -85,7 +85,7 @@ async fn _proxy_web3_rpc(
         .await
         .map_err(|e| e.into_response_with_id(first_id))?;
 
-    let mut response = (status_code, Json(response)).into_response();
+    let mut response = (status_code, response).into_response();
 
     // TODO: DRY this up. it is the same code for public and private queries
     let response_headers = response.headers_mut();
@@ -280,7 +280,7 @@ async fn _proxy_web3_rpc_with_key(
         .await
         .map_err(|e| e.into_response_with_id(first_id))?;
 
-    let mut response = (status_code, Json(response)).into_response();
+    let mut response = (status_code, response).into_response();
 
     let headers = response.headers_mut();
 

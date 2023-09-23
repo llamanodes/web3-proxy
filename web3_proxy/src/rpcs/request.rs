@@ -2,7 +2,7 @@ use super::one::Web3Rpc;
 use crate::errors::{Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, AuthorizationType};
 use crate::globals::{global_db_conn, DB_CONN};
-use crate::jsonrpc::{JsonRpcParams, JsonRpcResultData};
+use crate::jsonrpc::{self, JsonRpcParams, JsonRpcResultData};
 use chrono::Utc;
 use derive_more::From;
 use entities::revert_log;
@@ -169,7 +169,7 @@ impl OpenRequestHandle {
         self,
         method: &str,
         params: &P,
-    ) -> Result<R, ProviderError> {
+    ) -> Result<jsonrpc::SingleResponse<R>, ProviderError> {
         // TODO: use tracing spans
         // TODO: including params in this log is way too verbose
         // trace!(rpc=%self.rpc, %method, "request");
@@ -194,10 +194,30 @@ impl OpenRequestHandle {
 
         // TODO: replace ethers-rs providers with our own that supports streaming the responses
         // TODO: replace ethers-rs providers with our own that handles "id" being null
-        let response: Result<R, _> = if let Some(ref p) = self.rpc.http_provider {
-            p.request(method, params).await
+        let response: Result<jsonrpc::SingleResponse<R>, _> = if let (
+            Some(ref url),
+            Some(ref client),
+        ) =
+            (&self.rpc.http_url, &self.rpc.http_client)
+        {
+            let params: serde_json::Value = serde_json::to_value(params)?;
+            let request = jsonrpc::JsonRpcRequest::new(
+                // TODO: proper id
+                jsonrpc::JsonRpcId::Number(1),
+                method.to_string(),
+                params,
+            )
+            .expect("request creation cannot fail");
+            match client.post(url.clone()).json(&request).send().await {
+                // TODO: threshold from configs
+                Ok(response) => jsonrpc::SingleResponse::read_if_short(response, 1024).await,
+                Err(err) => Err(err.into()),
+            }
         } else if let Some(p) = self.rpc.ws_provider.load().as_ref() {
-            p.request(method, params).await
+            p.request(method, params)
+                .await
+                // TODO: Id here
+                .map(|result| jsonrpc::ParsedResponse::from_result(result, None).into())
         } else {
             return Err(ProviderError::CustomError(
                 "no provider configured!".to_string(),

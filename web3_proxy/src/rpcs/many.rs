@@ -9,7 +9,7 @@ use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, RequestMetadata};
 use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::frontend::status::MokaCacheSerializer;
-use crate::jsonrpc::{JsonRpcErrorData, JsonRpcParams, JsonRpcResultData};
+use crate::jsonrpc::{self, JsonRpcErrorData, JsonRpcParams, JsonRpcResultData};
 use counter::Counter;
 use derive_more::From;
 use ethers::prelude::{TxHash, U64};
@@ -381,12 +381,15 @@ impl Web3Rpcs {
             .into_iter()
             .map(|active_request_handle| async move {
                 let result: Result<Result<Box<RawValue>, Web3ProxyError>, Web3ProxyError> =
-                    timeout(
-                        max_wait,
-                        active_request_handle
-                            .request(method, &json!(&params))
-                            .map_err(Web3ProxyError::EthersProvider),
-                    )
+                    timeout(max_wait, async {
+                        match active_request_handle.request(method, &json!(&params)).await {
+                            Ok(response) => match response.parsed().await {
+                                Ok(parsed) => parsed.into_result(),
+                                Err(err) => Err(Web3ProxyError::EthersProvider(err)),
+                            },
+                            Err(err) => Err(Web3ProxyError::EthersProvider(err)),
+                        }
+                    })
                     .await
                     .map_err(Web3ProxyError::from);
 
@@ -753,8 +756,15 @@ impl Web3Rpcs {
         max_wait: Option<Duration>,
     ) -> Web3ProxyResult<R> {
         // TODO: no request_metadata means we won't have stats on this internal request.
-        self.request_with_metadata(method, params, None, max_wait, None, None)
-            .await
+        let response = self
+            .request_with_metadata(method, params, None, max_wait, None, None)
+            .await?;
+        let parsed = response.parsed().await?;
+        match parsed.payload {
+            jsonrpc::Payload::Success { result } => Ok(result),
+            // TODO: confirm this error type is correct
+            jsonrpc::Payload::Error { error } => Err(error.into()),
+        }
     }
 
     /// Make a request with stat tracking.
@@ -766,7 +776,7 @@ impl Web3Rpcs {
         max_wait: Option<Duration>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
-    ) -> Web3ProxyResult<R> {
+    ) -> Web3ProxyResult<jsonrpc::SingleResponse<R>> {
         let mut skip_rpcs = vec![];
         let mut method_not_available_response = None;
 
@@ -1244,7 +1254,7 @@ impl Web3Rpcs {
         max_wait: Option<Duration>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
-    ) -> Web3ProxyResult<R> {
+    ) -> Web3ProxyResult<jsonrpc::SingleResponse<R>> {
         let proxy_mode = request_metadata.map(|x| x.proxy_mode()).unwrap_or_default();
 
         match proxy_mode {

@@ -6,7 +6,7 @@ use crate::balance::Balance;
 use crate::caches::RegisteredUserRateLimitKey;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::globals::global_db_replica_conn;
-use crate::jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest};
+use crate::jsonrpc::{self, JsonRpcForwardedResponse, JsonRpcRequest};
 use crate::rpcs::blockchain::Web3ProxyBlock;
 use crate::rpcs::one::Web3Rpc;
 use crate::stats::{AppStat, BackendRequests};
@@ -34,6 +34,7 @@ use rdkafka::util::Timeout as KafkaTimeout;
 use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::RedisRateLimitResult;
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 use std::borrow::Cow;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -443,7 +444,7 @@ impl<'a> From<&'a str> for RequestOrMethod<'a> {
 #[derive(From)]
 pub enum ResponseOrBytes<'a> {
     Json(&'a serde_json::Value),
-    Response(&'a JsonRpcForwardedResponse),
+    Response(&'a jsonrpc::SingleResponse),
     Error(&'a Web3ProxyError),
     Bytes(usize),
 }
@@ -460,9 +461,7 @@ impl ResponseOrBytes<'_> {
             Self::Json(x) => serde_json::to_string(x)
                 .expect("this should always serialize")
                 .len(),
-            Self::Response(x) => serde_json::to_string(x)
-                .expect("this should always serialize")
-                .len(),
+            Self::Response(x) => x.num_bytes(),
             Self::Bytes(num_bytes) => *num_bytes,
             Self::Error(x) => {
                 let (_, x) = x.as_response_parts();
@@ -584,7 +583,14 @@ impl RequestMetadata {
 
         if let Some(kafka_debug_logger) = self.kafka_debug_logger.as_ref() {
             if let ResponseOrBytes::Response(response) = response {
-                kafka_debug_logger.log_debug_response(response);
+                match response {
+                    jsonrpc::SingleResponse::Parsed(response) => {
+                        kafka_debug_logger.log_debug_response(response);
+                    }
+                    jsonrpc::SingleResponse::Stream(_) => {
+                        todo!("how to handle streaming response debug logging?");
+                    }
+                }
             }
         }
     }
