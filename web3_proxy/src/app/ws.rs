@@ -31,6 +31,22 @@ impl Web3ProxyApp {
         // TODO: taking a sender for Message instead of the exact json we are planning to send feels wrong, but its easier for now
         response_sender: mpsc::Sender<Message>,
     ) -> Web3ProxyResult<(AbortHandle, JsonRpcForwardedResponse)> {
+        let subscribe_to = jsonrpc_request
+            .params
+            .get(0)
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| {
+                Web3ProxyError::BadRequest("unable to subscribe using these params".into())
+            })?;
+
+        // anyone can subscribe to newHeads
+        // only premium users are allowed to subscribe to the other things
+        if !(subscribe_to == "newHeads" || authorization.active_premium().await) {
+            return Err(Web3ProxyError::AccessDenied(
+                "eth_subscribe for this event requires an active premium account".into(),
+            ));
+        }
+
         let request_metadata = RequestMetadata::new(
             self,
             authorization.clone(),
@@ -48,14 +64,6 @@ impl Web3ProxyApp {
 
         // save the id so we can use it in the response
         let id = jsonrpc_request.id.clone();
-
-        let subscribe_to = jsonrpc_request
-            .params
-            .get(0)
-            .and_then(|x| x.as_str())
-            .ok_or_else(|| {
-                Web3ProxyError::BadRequest("unable to subscribe using these params".into())
-            })?;
 
         // TODO: calling `json!` on every request is probably not fast. but it works for now
         // TODO: i think we need a stricter EthSubscribeRequest type that JsonRpcRequest can turn into

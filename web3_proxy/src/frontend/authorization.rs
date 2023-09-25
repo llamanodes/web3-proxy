@@ -676,6 +676,13 @@ impl From<RpcSecretKey> for Uuid {
 }
 
 impl Authorization {
+    /// this acquires a read lock on the latest balance. Be careful not to deadlock!
+    pub async fn active_premium(&self) -> bool {
+        let user_balance = self.checks.latest_balance.read().await;
+
+        user_balance.active_premium()
+    }
+
     pub fn internal() -> Web3ProxyResult<Self> {
         let authorization_checks = AuthorizationChecks {
             // any error logs on a local (internal) query are likely problems. log them all

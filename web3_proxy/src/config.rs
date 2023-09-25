@@ -122,6 +122,11 @@ pub struct AppConfig {
     /// Default ERC address for out deposit contract
     pub deposit_factory_contract: Option<Address>,
 
+    /// True if anonymous users should be able to eth_subscribe
+    /// newHeads is always allowed because that is cheap to send
+    #[serde_inline_default(false)]
+    pub free_subscriptions: bool,
+
     /// minimum amount to increase eth_estimateGas results
     pub gas_increase_min: Option<U256>,
 
