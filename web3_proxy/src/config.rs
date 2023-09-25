@@ -83,6 +83,13 @@ pub struct AppConfig {
     #[serde_inline_default(90_000u64)]
     pub archive_depth: u64,
 
+    /// pool of extra connections allowed for authenticated users
+    #[serde_inline_default(0usize)]
+    pub bonus_user_concurrency: usize,
+    /// pool of extra connections allowed for anonymous users
+    #[serde_inline_default(0usize)]
+    pub bonus_ip_concurrency: usize,
+
     /// EVM chain id. 1 for ETH
     /// TODO: better type for chain_id? max of `u64::MAX / 2 - 36` <https://github.com/ethereum/EIPs/issues/2294>
     #[serde_inline_default(1u64)]

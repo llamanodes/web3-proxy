@@ -99,6 +99,9 @@ pub struct Web3ProxyApp {
         Option<DeferredRateLimiter<RegisteredUserRateLimitKey>>,
     /// concurrent/parallel request limits for anonymous users
     pub ip_semaphores: Cache<IpAddr, Arc<Semaphore>>,
+    /// give some bonus capacity to public users
+    pub bonus_ip_concurrency: Arc<Semaphore>,
+    /// the /debug/ rpc endpoints send detailed logging to kafka
     pub kafka_producer: Option<rdkafka::producer::FutureProducer>,
     /// rate limit the login endpoint
     /// we do this because each pending login is a row in the database
@@ -114,6 +117,8 @@ pub struct Web3ProxyApp {
     pub user_balance_cache: UserBalanceCache,
     /// concurrent/parallel RPC request limits for authenticated users
     pub user_semaphores: Cache<(NonZeroU64, IpAddr), Arc<Semaphore>>,
+    /// give some bonus capacity to premium users
+    pub bonus_user_concurrency: Arc<Semaphore>,
     /// volatile cache used for rate limits
     /// TODO: i think i might just delete this entirely. instead use local-only concurrency limits.
     pub vredis_pool: Option<RedisPool>,
@@ -488,8 +493,15 @@ impl Web3ProxyApp {
             .ok()
             .and_then(|x| x.to_str().map(|x| x.to_string()));
 
+        // TODO: get the size out of the config
+        let bonus_ip_concurrency = Arc::new(Semaphore::new(top_config.app.bonus_ip_concurrency));
+        let bonus_user_concurrency =
+            Arc::new(Semaphore::new(top_config.app.bonus_user_concurrency));
+
         let app = Self {
             balanced_rpcs,
+            bonus_ip_concurrency,
+            bonus_user_concurrency,
             bundler_4337_rpcs,
             config: top_config.app.clone(),
             frontend_ip_rate_limiter,
