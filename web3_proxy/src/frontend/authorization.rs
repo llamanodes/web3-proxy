@@ -955,7 +955,16 @@ impl Web3ProxyApp {
                 })
                 .await;
 
-            let semaphore_permit = semaphore.acquire_owned().await?;
+            let semaphore_permit = tokio::select! {
+                biased;
+
+                p = semaphore.acquire_owned() => {
+                    p
+                }
+                p = self.bonus_ip_concurrency.clone().acquire_owned() => {
+                    p
+                }
+            }?;
 
             Ok(Some(semaphore_permit))
         } else {
@@ -984,7 +993,19 @@ impl Web3ProxyApp {
                 })
                 .await;
 
-            let semaphore_permit = semaphore.acquire_owned().await?;
+            let semaphore_permit = tokio::select! {
+                biased;
+
+                p = semaphore.acquire_owned() => {
+                    p
+                }
+                p = self.bonus_user_concurrency.clone().acquire_owned() => {
+                    p
+                }
+                p = self.bonus_ip_concurrency.clone().acquire_owned() => {
+                    p
+                }
+            }?;
 
             Ok(Some(semaphore_permit))
         } else {
