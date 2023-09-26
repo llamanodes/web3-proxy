@@ -1447,7 +1447,6 @@ where
             // TODO: set headers so they know when they can retry
             // TODO: debug or trace?
             // this is too verbose, but a stat might be good
-            // TODO: keys are secrets! use the id instead
             // TODO: emit a stat
             // trace!(?rpc_key, "rate limit exceeded until {:?}", retry_at);
             RateLimitResult::RateLimited(authorization, Some(retry_at))
@@ -1460,7 +1459,6 @@ where
         }
         Err(err) => {
             // internal error, not rate limit being hit
-            // TODO: i really want axum to do this for us in a single place.
             error!(?err, %key, "rate limiter is unhappy. allowing key");
 
             RateLimitResult::Allowed(authorization, None)

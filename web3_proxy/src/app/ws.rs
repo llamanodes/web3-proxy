@@ -265,7 +265,6 @@ impl Web3ProxyApp {
                         Ok(_) => {}
                         Err(err) => {
                             // this an internal error of some kind, not the rate limit being hit
-                            // TODO: i really want axum to do this for us in a single place.
                             error!(?err, "rate limiter is unhappy. allowing ip");
                         }
                     }
