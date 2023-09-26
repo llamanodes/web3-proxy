@@ -168,7 +168,7 @@ impl Web3Rpc {
         let (http_url, http_client) = if let Some(http_url) = config.http_url {
             let http_url = http_url.parse::<Url>()?;
             // TODO: double-check not missing anything from connect_http()
-            let http_client = http_client.unwrap_or_else(|| reqwest::Client::new());
+            let http_client = http_client.unwrap_or_default();
             (Some(http_url), Some(http_client))
         } else {
             (None, None)

@@ -49,11 +49,8 @@ impl ParsedResponse<Arc<RawValue>> {
                 let x: Box<RawValue> = Default::default();
                 Self::from_result(Arc::from(x), Some(id))
             }
-            JsonRpcResponseEnum::RpcError {
-                error_data,
-                num_bytes,
-            } => Self::from_error(error_data, id),
-            JsonRpcResponseEnum::Result { value, num_bytes } => Self::from_result(value, Some(id)),
+            JsonRpcResponseEnum::RpcError { error_data, .. } => Self::from_error(error_data, id),
+            JsonRpcResponseEnum::Result { value, .. } => Self::from_result(value, Some(id)),
         }
     }
 }

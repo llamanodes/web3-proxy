@@ -15,7 +15,7 @@ use derive_more::From;
 use ethers::prelude::{TxHash, U64};
 use futures::future::try_join_all;
 use futures::stream::FuturesUnordered;
-use futures::{StreamExt, TryFutureExt};
+use futures::StreamExt;
 use hashbrown::HashMap;
 use itertools::Itertools;
 use moka::future::CacheBuilder;
