@@ -1,6 +1,6 @@
 //! Rate-limited communication with a web3 provider.
 use super::blockchain::{ArcBlock, BlocksByHashCache, Web3ProxyBlock};
-use super::provider::{connect_http, connect_ws, EthersHttpProvider, EthersWsProvider};
+use super::provider::{connect_ws, EthersWsProvider};
 use super::request::{OpenRequestHandle, OpenRequestResult};
 use crate::app::{flatten_handle, Web3ProxyJoinHandle};
 use crate::config::{BlockAndRpc, Web3RpcConfig};

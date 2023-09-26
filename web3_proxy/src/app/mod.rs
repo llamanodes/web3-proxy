@@ -10,7 +10,7 @@ use crate::frontend::authorization::{
 use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::globals::{global_db_conn, DatabaseError, DB_CONN, DB_REPLICA};
 use crate::jsonrpc::{
-    self, JsonRpcErrorData, JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcId,
+    self, JsonRpcErrorData, JsonRpcId,
     JsonRpcParams, JsonRpcRequest, JsonRpcRequestEnum, JsonRpcResultData, SingleResponse,
 };
 use crate::relational_db::{connect_db, migrate_db};
@@ -1436,7 +1436,7 @@ impl Web3ProxyApp {
                 // try to get the transaction without specifying a min_block_height
                 // TODO: timeout
 
-                let mut parsed = match self
+                let parsed = match self
                     .balanced_rpcs
                     .try_proxy_connection::<_, Arc<RawValue>>(
                         method,
@@ -1812,7 +1812,7 @@ impl Web3ProxyApp {
                                     )
                                 ).await??
                             }
-                            Ok(p) => {
+                            Ok(_p) => {
                                 // we got the permit! we are either first, or we were waiting a short time to get it in which case this response should be cached
                                 // TODO: clone less?
                                 let f = {

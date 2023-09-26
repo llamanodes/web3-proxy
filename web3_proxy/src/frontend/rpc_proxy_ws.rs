@@ -8,7 +8,7 @@ use crate::jsonrpc::{self, JsonRpcId};
 use crate::{
     app::Web3ProxyApp,
     errors::Web3ProxyResult,
-    jsonrpc::{JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest},
+    jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest},
 };
 use axum::headers::{Origin, Referer, UserAgent};
 use axum::{

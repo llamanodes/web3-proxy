@@ -3,8 +3,7 @@
 use super::Web3ProxyApp;
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, RequestMetadata, RequestOrMethod};
-use crate::jsonrpc::JsonRpcRequest;
-use crate::jsonrpc::{self, JsonRpcForwardedResponse};
+use crate::jsonrpc::{self, JsonRpcRequest};
 use crate::response_cache::JsonRpcResponseEnum;
 use axum::extract::ws::{CloseFrame, Message};
 use deferred_rate_limiter::DeferredRateLimitResult;
