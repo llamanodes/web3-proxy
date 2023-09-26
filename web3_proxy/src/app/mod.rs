@@ -1110,7 +1110,7 @@ impl Web3ProxyApp {
         method: &str,
         params: &P,
         request_metadata: &Arc<RequestMetadata>,
-    ) -> Web3ProxyResult<Box<RawValue>> {
+    ) -> Web3ProxyResult<Arc<RawValue>> {
         if let Some(protected_rpcs) = self.private_rpcs.as_ref() {
             if !protected_rpcs.is_empty() {
                 let protected_response = protected_rpcs
@@ -1364,7 +1364,7 @@ impl Web3ProxyApp {
             | "web3_bundlerVersion") => match self.bundler_4337_rpcs.as_ref() {
                 Some(bundler_4337_rpcs) => {
                     bundler_4337_rpcs
-                        .try_proxy_connection::<_, Box<RawValue>>(
+                        .try_proxy_connection::<_, Arc<RawValue>>(
                             method,
                             params,
                             Some(request_metadata),
@@ -1438,7 +1438,7 @@ impl Web3ProxyApp {
 
                 let mut parsed = match self
                     .balanced_rpcs
-                    .try_proxy_connection::<_, Box<RawValue>>(
+                    .try_proxy_connection::<_, Arc<RawValue>>(
                         method,
                         params,
                         Some(request_metadata),
@@ -1466,7 +1466,7 @@ impl Web3ProxyApp {
 
                     self
                         .balanced_rpcs
-                        .try_proxy_connection::<_, Box<RawValue>>(
+                        .try_proxy_connection::<_, Arc<RawValue>>(
                             method,
                             params,
                             Some(request_metadata),
@@ -1777,7 +1777,7 @@ impl Web3ProxyApp {
                         timeout(
                             Duration::from_secs(295),
                             self.balanced_rpcs
-                            .try_proxy_connection::<_, Box<RawValue>>(
+                            .try_proxy_connection::<_, Arc<RawValue>>(
                                 method,
                                 params,
                                 Some(request_metadata),
@@ -1802,7 +1802,7 @@ impl Web3ProxyApp {
                                 timeout(
                                     Duration::from_secs(295),
                                     self.balanced_rpcs
-                                    .try_proxy_connection::<_, Box<RawValue>>(
+                                    .try_proxy_connection::<_, Arc<RawValue>>(
                                         method,
                                         params,
                                         Some(request_metadata),
@@ -1826,7 +1826,7 @@ impl Web3ProxyApp {
                                             .jsonrpc_response_cache
                                             .try_get_with::<_, Web3ProxyError>(cache_key.hash(), async {
                                                 let response_data = timeout(Duration::from_secs(290), app.balanced_rpcs
-                                                    .try_proxy_connection::<_, Box<RawValue>>(
+                                                    .try_proxy_connection::<_, Arc<RawValue>>(
                                                         &method,
                                                         &params,
                                                         Some(&request_metadata),
@@ -1890,7 +1890,7 @@ impl Web3ProxyApp {
                     timeout(
                         Duration::from_secs(295),
                         self.balanced_rpcs
-                        .try_proxy_connection::<_, Box<RawValue>>(
+                        .try_proxy_connection::<_, Arc<RawValue>>(
                             method,
                             params,
                             Some(request_metadata),

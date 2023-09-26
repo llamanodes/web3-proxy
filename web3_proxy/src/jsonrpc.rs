@@ -26,7 +26,7 @@ pub trait JsonRpcResultData = serde::Serialize + serde::de::DeserializeOwned + f
 
 // TODO: borrow values to avoid allocs if possible
 #[derive(Debug, Serialize)]
-pub struct ParsedResponse<T = Box<RawValue>> {
+pub struct ParsedResponse<T = Arc<RawValue>> {
     jsonrpc: String,
     id: Option<Box<RawValue>>,
     #[serde(flatten)]
@@ -35,16 +35,30 @@ pub struct ParsedResponse<T = Box<RawValue>> {
 
 impl ParsedResponse {
     pub fn from_value(value: serde_json::Value, id: Box<RawValue>) -> Self {
-        let result = serde_json::value::to_raw_value(&value).expect("this should not fail");
+        let result = serde_json::value::to_raw_value(&value)
+            .expect("this should not fail")
+            .into();
         Self::from_result(result, Some(id))
     }
 }
 
-impl<T> ParsedResponse<T> {
+impl ParsedResponse<Arc<RawValue>> {
     pub fn from_response_data(data: JsonRpcResponseEnum<Arc<RawValue>>, id: Box<RawValue>) -> Self {
-        todo!("box/arc mismatch")
+        match data {
+            JsonRpcResponseEnum::NullResult => {
+                let x: Box<RawValue> = Default::default();
+                Self::from_result(Arc::from(x), Some(id))
+            }
+            JsonRpcResponseEnum::RpcError {
+                error_data,
+                num_bytes,
+            } => Self::from_error(error_data, id),
+            JsonRpcResponseEnum::Result { value, num_bytes } => Self::from_result(value, Some(id)),
+        }
     }
+}
 
+impl<T> ParsedResponse<T> {
     pub fn from_result(result: T, id: Option<Box<RawValue>>) -> Self {
         Self {
             jsonrpc: "2.0".to_string(),
@@ -222,7 +236,7 @@ impl IntoResponse for StreamResponse {
 }
 
 #[derive(Debug)]
-pub enum SingleResponse<T = Box<RawValue>> {
+pub enum SingleResponse<T = Arc<RawValue>> {
     Parsed(ParsedResponse<T>),
     Stream(StreamResponse),
 }
@@ -309,7 +323,7 @@ where
 }
 
 #[derive(Debug)]
-pub enum Response<T = Box<RawValue>> {
+pub enum Response<T = Arc<RawValue>> {
     Single(SingleResponse<T>),
     Batch(Vec<ParsedResponse<T>>),
 }

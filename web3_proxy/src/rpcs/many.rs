@@ -371,7 +371,7 @@ impl Web3Rpcs {
         method: &str,
         params: &P,
         max_wait: Option<Duration>,
-    ) -> Result<Box<RawValue>, Web3ProxyError> {
+    ) -> Result<Arc<RawValue>, Web3ProxyError> {
         // TODO: if only 1 active_request_handles, do self.try_send_request?
 
         let max_wait = max_wait.unwrap_or_else(|| Duration::from_secs(300));
@@ -380,7 +380,7 @@ impl Web3Rpcs {
         let responses = active_request_handles
             .into_iter()
             .map(|active_request_handle| async move {
-                let result: Result<Result<Box<RawValue>, Web3ProxyError>, Web3ProxyError> =
+                let result: Result<Result<Arc<RawValue>, Web3ProxyError>, Web3ProxyError> =
                     timeout(max_wait, async {
                         match active_request_handle.request(method, &json!(&params)).await {
                             Ok(response) => match response.parsed().await {
@@ -396,7 +396,7 @@ impl Web3Rpcs {
                 result.flatten()
             })
             .collect::<FuturesUnordered<_>>()
-            .collect::<Vec<Result<Box<RawValue>, Web3ProxyError>>>()
+            .collect::<Vec<Result<Arc<RawValue>, Web3ProxyError>>>()
             .await;
 
         // TODO: Strings are not great keys, but we can't use RawValue or ProviderError as keys because they don't implement Hash or Eq
@@ -1108,7 +1108,7 @@ impl Web3Rpcs {
         max_wait: Option<Duration>,
         error_level: Option<RequestErrorHandler>,
         max_sends: Option<usize>,
-    ) -> Web3ProxyResult<Box<RawValue>> {
+    ) -> Web3ProxyResult<Arc<RawValue>> {
         let mut watch_consensus_rpcs = self.watch_ranked_rpcs.subscribe();
 
         let start = Instant::now();
