@@ -293,8 +293,9 @@ where
             Self::Stream(response) => {
                 match response.response.content_length() {
                     Some(len) => len as usize,
-                    // TODO: how to handle response too large
-                    None => usize::MAX,
+                    // TODO: how to handle response too large? we need this for billing to work!
+                    // TODO: lets start with the size that we peek
+                    None => 1024,
                 }
             }
         }

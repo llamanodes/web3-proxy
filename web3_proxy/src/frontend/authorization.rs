@@ -587,7 +587,7 @@ impl RequestMetadata {
                         kafka_debug_logger.log_debug_response(response);
                     }
                     jsonrpc::SingleResponse::Stream(_) => {
-                        todo!("how to handle streaming response debug logging?");
+                        warn!("need to handle streaming response debug logging");
                     }
                 }
             }
