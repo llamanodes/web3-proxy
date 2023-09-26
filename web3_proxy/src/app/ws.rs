@@ -231,7 +231,7 @@ impl Web3ProxyApp {
     ) -> Option<Message> {
         if let Some(authorization) = request_metadata.authorization.as_ref() {
             if authorization.checks.rpc_secret_key_id.is_none() {
-                if let Some(rate_limiter) = &self.frontend_ip_rate_limiter {
+                if let Some(rate_limiter) = &self.frontend_public_rate_limiter {
                     match rate_limiter
                         .throttle(
                             authorization.ip,
@@ -266,7 +266,7 @@ impl Web3ProxyApp {
                         Err(err) => {
                             // this an internal error of some kind, not the rate limit being hit
                             // TODO: i really want axum to do this for us in a single place.
-                            error!("rate limiter is unhappy. allowing ip. err={:?}", err);
+                            error!(?err, "rate limiter is unhappy. allowing ip");
                         }
                     }
                 }

@@ -16,7 +16,7 @@ use axum::headers::authorization::Bearer;
 use axum::headers::{Header, Origin, Referer, UserAgent};
 use chrono::Utc;
 use core::fmt;
-use deferred_rate_limiter::DeferredRateLimitResult;
+use deferred_rate_limiter::{DeferredRateLimitResult, DeferredRateLimiter};
 use derivative::Derivative;
 use derive_more::From;
 use entities::{login, rpc_key, user, user_tier};
@@ -32,7 +32,7 @@ use rdkafka::message::{Header as KafkaHeader, OwnedHeaders as KafkaOwnedHeaders,
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::util::Timeout as KafkaTimeout;
 use redis_rate_limiter::redis::AsyncCommands;
-use redis_rate_limiter::RedisRateLimitResult;
+use redis_rate_limiter::{RedisRateLimitResult, RedisRateLimiter};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::fmt::Debug;
@@ -833,7 +833,7 @@ pub async fn ip_is_authorized(
 ) -> Web3ProxyResult<(Authorization, Option<OwnedSemaphorePermit>)> {
     // TODO: i think we could write an `impl From` for this
     // TODO: move this to an AuthorizedUser extrator
-    let (authorization, semaphore) = match app.rate_limit_by_ip(ip, origin, proxy_mode).await? {
+    let (authorization, semaphore) = match app.rate_limit_public(ip, origin, proxy_mode).await? {
         RateLimitResult::Allowed(authorization, semaphore) => (authorization, semaphore),
         RateLimitResult::RateLimited(authorization, retry_at) => {
             // TODO: in the background, emit a stat (maybe simplest to use a channel?)
@@ -897,7 +897,7 @@ pub async fn key_is_authorized(
     // check the rate limits. error if over the limit
     // TODO: i think this should be in an "impl From" or "impl Into"
     let (authorization, semaphore) = match app
-        .rate_limit_by_rpc_key(ip, origin, proxy_mode, referer, rpc_key, user_agent)
+        .rate_limit_premium(ip, origin, proxy_mode, referer, rpc_key, user_agent)
         .await?
     {
         RateLimitResult::Allowed(authorization, semaphore) => (authorization, semaphore),
@@ -981,9 +981,11 @@ impl Web3ProxyApp {
     /// keep the semaphore alive until the user's request is entirely complete
     pub async fn user_semaphore(
         &self,
-        authorization_checks: &AuthorizationChecks,
+        authorization: &Authorization,
         ip: &IpAddr,
     ) -> Web3ProxyResult<Option<OwnedSemaphorePermit>> {
+        let authorization_checks = &authorization.checks;
+
         if let Some(max_concurrent_requests) = authorization_checks.max_concurrent_requests {
             let user_id = authorization_checks
                 .user_id
@@ -1047,7 +1049,7 @@ impl Web3ProxyApp {
         ip: IpAddr,
         proxy_mode: ProxyMode,
     ) -> Web3ProxyResult<RateLimitResult> {
-        // TODO: dry this up with rate_limit_by_rpc_key?
+        // TODO: if ip is on the local network, always allow?
 
         // we don't care about user agent or origin or referer
         let authorization = Authorization::external(
@@ -1059,46 +1061,20 @@ impl Web3ProxyApp {
             None,
         )?;
 
-        // no semaphore is needed here because login rate limits are low
-        // TODO: are we sure do not we want a semaphore here?
-        let semaphore = None;
+        let label = ip.to_string();
 
-        // TODO: if ip is on the local network, always allow?
-
-        if let Some(rate_limiter) = &self.login_rate_limiter {
-            match rate_limiter.throttle_label(&ip.to_string(), None, 1).await {
-                Ok(RedisRateLimitResult::Allowed(_)) => {
-                    Ok(RateLimitResult::Allowed(authorization, semaphore))
-                }
-                Ok(RedisRateLimitResult::RetryAt(retry_at, _)) => {
-                    // TODO: set headers so they know when they can retry
-                    // TODO: debug or trace?
-                    // this is too verbose, but a stat might be good
-                    // // trace!(?ip, "login rate limit exceeded until {:?}", retry_at);
-
-                    Ok(RateLimitResult::RateLimited(authorization, Some(retry_at)))
-                }
-                Ok(RedisRateLimitResult::RetryNever) => {
-                    // TODO: i don't think we'll get here. maybe if we ban an IP forever? seems unlikely
-                    // // trace!(?ip, "login rate limit is 0");
-                    Ok(RateLimitResult::RateLimited(authorization, None))
-                }
-                Err(err) => {
-                    // internal error, not rate limit being hit
-                    // TODO: i really want axum to do this for us in a single place.
-                    error!("login rate limiter is unhappy. allowing ip. err={:?}", err);
-
-                    Ok(RateLimitResult::Allowed(authorization, None))
-                }
-            }
-        } else {
-            // TODO: if no redis, rate limit with a local cache? "warn!" probably isn't right
-            Ok(RateLimitResult::Allowed(authorization, None))
-        }
+        redis_rate_limit(
+            &self.login_rate_limiter,
+            authorization,
+            None,
+            Some(&label),
+            None,
+        )
+        .await
     }
 
     /// origin is included because it can override the default rate limits
-    pub async fn rate_limit_by_ip(
+    pub async fn rate_limit_public(
         &self,
         ip: &IpAddr,
         origin: Option<&Origin>,
@@ -1124,44 +1100,38 @@ impl Web3ProxyApp {
             None,
         )?;
 
-        if let Some(rate_limiter) = &self.frontend_ip_rate_limiter {
-            match rate_limiter
-                .throttle(*ip, authorization.checks.max_requests_per_period, 1)
-                .await
-            {
-                Ok(DeferredRateLimitResult::Allowed) => {
-                    // rate limit allowed us. check concurrent request limits
-                    let semaphore = self.ip_semaphore(ip).await?;
+        if let Some(rate_limiter) = &self.frontend_public_rate_limiter {
+            let mut x = deferred_redis_rate_limit(authorization, *ip, None, rate_limiter).await?;
 
-                    Ok(RateLimitResult::Allowed(authorization, semaphore))
-                }
-                Ok(DeferredRateLimitResult::RetryAt(retry_at)) => {
-                    // TODO: set headers so they know when they can retry
-                    // // trace!(?ip, "rate limit exceeded until {:?}", retry_at);
-                    Ok(RateLimitResult::RateLimited(authorization, Some(retry_at)))
-                }
-                Ok(DeferredRateLimitResult::RetryNever) => {
-                    // TODO: i don't think we'll get here. maybe if we ban an IP forever? seems unlikely
-                    // // trace!(?ip, "rate limit is 0");
-                    Ok(RateLimitResult::RateLimited(authorization, None))
-                }
-                Err(err) => {
-                    // this an internal error of some kind, not the rate limit being hit
-                    // TODO: i really want axum to do this for us in a single place.
-                    error!("rate limiter is unhappy. allowing ip. err={:?}", err);
-
-                    // at least we can still check the semaphore
-                    let semaphore = self.ip_semaphore(ip).await?;
-
-                    Ok(RateLimitResult::Allowed(authorization, semaphore))
-                }
+            if let RateLimitResult::RateLimited(authorization, retry_at) = x {
+                // we got rate limited, try bonus_frontend_public_rate_limiter
+                x = redis_rate_limit(
+                    &self.bonus_frontend_public_rate_limiter,
+                    authorization,
+                    retry_at,
+                    None,
+                    None,
+                )
+                .await?;
             }
+
+            if let RateLimitResult::Allowed(a, b) = x {
+                debug_assert!(b.is_none());
+
+                let permit = self.ip_semaphore(ip).await?;
+
+                x = RateLimitResult::Allowed(a, permit)
+            }
+
+            debug_assert!(!matches!(x, RateLimitResult::UnknownKey));
+
+            Ok(x)
         } else {
             // no redis, but we can still check the ip semaphore
-            let semaphore = self.ip_semaphore(ip).await?;
+            let permit = self.ip_semaphore(ip).await?;
 
             // TODO: if no redis, rate limit with a local cache? "warn!" probably isn't right
-            Ok(RateLimitResult::Allowed(authorization, semaphore))
+            Ok(RateLimitResult::Allowed(authorization, permit))
         }
     }
 
@@ -1328,8 +1298,8 @@ impl Web3ProxyApp {
         Ok(x)
     }
 
-    /// Authorized the ip/origin/referer/useragent and rate limit and concurrency
-    pub async fn rate_limit_by_rpc_key(
+    /// Authorize the key/ip/origin/referer/useragent and handle rate and concurrency limits
+    pub async fn rate_limit_premium(
         &self,
         ip: &IpAddr,
         origin: Option<&Origin>,
@@ -1347,7 +1317,7 @@ impl Web3ProxyApp {
                     //     ?err,
                     //     "db is down. cannot check rpc key. fallback to ip rate limits"
                     // );
-                    return self.rate_limit_by_ip(ip, origin, proxy_mode).await;
+                    return self.rate_limit_public(ip, origin, proxy_mode).await;
                 }
 
                 return Err(err);
@@ -1357,12 +1327,8 @@ impl Web3ProxyApp {
         // if no rpc_key_id matching the given rpc was found, then we can't rate limit by key
         if authorization_checks.rpc_secret_key_id.is_none() {
             trace!("unknown key. falling back to free limits");
-            return self.rate_limit_by_ip(ip, origin, proxy_mode).await;
+            return self.rate_limit_public(ip, origin, proxy_mode).await;
         }
-
-        // only allow this rpc_key to run a limited amount of concurrent requests
-        // TODO: rate limit should be BEFORE the semaphore!
-        let semaphore = self.user_semaphore(&authorization_checks, ip).await?;
 
         let authorization = Authorization::try_new(
             authorization_checks,
@@ -1375,47 +1341,61 @@ impl Web3ProxyApp {
 
         // user key is valid. now check rate limits
         if let Some(user_max_requests_per_period) = authorization.checks.max_requests_per_period {
-            if let Some(rate_limiter) = &self.frontend_registered_user_rate_limiter {
-                match rate_limiter
-                    .throttle(
-                        RegisteredUserRateLimitKey(authorization.checks.user_id, *ip),
-                        Some(user_max_requests_per_period),
-                        1,
-                    )
-                    .await
-                {
-                    Ok(DeferredRateLimitResult::Allowed) => {
-                        return Ok(RateLimitResult::Allowed(authorization, semaphore))
-                    }
-                    Ok(DeferredRateLimitResult::RetryAt(retry_at)) => {
-                        // TODO: set headers so they know when they can retry
-                        // TODO: debug or trace?
-                        // this is too verbose, but a stat might be good
-                        // TODO: keys are secrets! use the id instead
-                        // TODO: emit a stat
-                        // trace!(?rpc_key, "rate limit exceeded until {:?}", retry_at);
-                        return Ok(RateLimitResult::RateLimited(authorization, Some(retry_at)));
-                    }
-                    Ok(DeferredRateLimitResult::RetryNever) => {
-                        // TODO: keys are secret. don't log them!
-                        // trace!(?rpc_key, "rate limit is 0");
-                        // TODO: emit a stat
-                        return Ok(RateLimitResult::RateLimited(authorization, None));
-                    }
-                    Err(err) => {
-                        // internal error, not rate limit being hit
-                        // TODO: i really want axum to do this for us in a single place.
-                        error!(?err, "rate limiter is unhappy. allowing rpc_key");
+            if let Some(rate_limiter) = &self.frontend_premium_rate_limiter {
+                let key = RegisteredUserRateLimitKey(authorization.checks.user_id, *ip);
 
-                        return Ok(RateLimitResult::Allowed(authorization, semaphore));
-                    }
+                let mut x = deferred_redis_rate_limit(
+                    authorization,
+                    key,
+                    Some(user_max_requests_per_period),
+                    rate_limiter,
+                )
+                .await?;
+
+                if let RateLimitResult::RateLimited(authorization, retry_at) = x {
+                    // rate limited by the user's key+ip. check to see if there are any limits available in the bonus premium pool
+                    x = redis_rate_limit(
+                        &self.bonus_frontend_premium_rate_limiter,
+                        authorization,
+                        retry_at,
+                        None,
+                        None,
+                    )
+                    .await?;
                 }
+
+                if let RateLimitResult::RateLimited(authorization, retry_at) = x {
+                    // premium got rate limited too. check the bonus public pool
+                    x = redis_rate_limit(
+                        &self.bonus_frontend_public_rate_limiter,
+                        authorization,
+                        retry_at,
+                        None,
+                        None,
+                    )
+                    .await?;
+                }
+
+                if let RateLimitResult::Allowed(a, b) = x {
+                    debug_assert!(b.is_none());
+
+                    // only allow this rpc_key to run a limited amount of concurrent requests
+                    let permit = self.user_semaphore(&a, ip).await?;
+
+                    x = RateLimitResult::Allowed(a, permit)
+                }
+
+                debug_assert!(!matches!(x, RateLimitResult::UnknownKey));
+
+                return Ok(x);
             } else {
                 // TODO: if no redis, rate limit with just a local cache?
             }
         }
 
-        Ok(RateLimitResult::Allowed(authorization, semaphore))
+        let permit = self.user_semaphore(&authorization, ip).await?;
+
+        Ok(RateLimitResult::Allowed(authorization, permit))
     }
 }
 
@@ -1444,4 +1424,88 @@ impl Authorization {
 
         Ok((a, s))
     }
+}
+
+/// this fails open!
+/// this never includes a semaphore! if you want one, add it after this call
+/// if `max_requests_per_period` is none, the limit in the authorization is used
+pub async fn deferred_redis_rate_limit<K>(
+    authorization: Authorization,
+    key: K,
+    max_requests_per_period: Option<u64>,
+    rate_limiter: &DeferredRateLimiter<K>,
+) -> Web3ProxyResult<RateLimitResult>
+where
+    K: Send + Sync + Copy + Clone + Display + Hash + Eq + PartialEq + 'static,
+{
+    let max_requests_per_period =
+        max_requests_per_period.or(authorization.checks.max_requests_per_period);
+
+    let x = match rate_limiter.throttle(key, max_requests_per_period, 1).await {
+        Ok(DeferredRateLimitResult::Allowed) => RateLimitResult::Allowed(authorization, None),
+        Ok(DeferredRateLimitResult::RetryAt(retry_at)) => {
+            // TODO: set headers so they know when they can retry
+            // TODO: debug or trace?
+            // this is too verbose, but a stat might be good
+            // TODO: keys are secrets! use the id instead
+            // TODO: emit a stat
+            // trace!(?rpc_key, "rate limit exceeded until {:?}", retry_at);
+            RateLimitResult::RateLimited(authorization, Some(retry_at))
+        }
+        Ok(DeferredRateLimitResult::RetryNever) => {
+            // TODO: keys are secret. don't log them!
+            // trace!(?rpc_key, "rate limit is 0");
+            // TODO: emit a stat
+            RateLimitResult::RateLimited(authorization, None)
+        }
+        Err(err) => {
+            // internal error, not rate limit being hit
+            // TODO: i really want axum to do this for us in a single place.
+            error!(?err, %key, "rate limiter is unhappy. allowing key");
+
+            RateLimitResult::Allowed(authorization, None)
+        }
+    };
+
+    Ok(x)
+}
+
+/// this never includes a semaphore! if you want one, add it after this call
+/// if `max_requests_per_period` is none, the limit in the authorization is used
+pub async fn redis_rate_limit(
+    rate_limiter: &Option<RedisRateLimiter>,
+    authorization: Authorization,
+    mut retry_at: Option<Instant>,
+    label: Option<&str>,
+    max_requests_per_period: Option<u64>,
+) -> Web3ProxyResult<RateLimitResult> {
+    let max_requests_per_period =
+        max_requests_per_period.or(authorization.checks.max_requests_per_period);
+
+    let x = if let Some(rate_limiter) = rate_limiter {
+        match rate_limiter
+            .throttle_label(label.unwrap_or_default(), max_requests_per_period, 1)
+            .await
+        {
+            Ok(RedisRateLimitResult::Allowed(..)) => RateLimitResult::Allowed(authorization, None),
+            Ok(RedisRateLimitResult::RetryAt(new_retry_at, ..)) => {
+                retry_at = retry_at.min(Some(new_retry_at));
+
+                RateLimitResult::RateLimited(authorization, retry_at)
+            }
+            Ok(RedisRateLimitResult::RetryNever) => {
+                RateLimitResult::RateLimited(authorization, retry_at)
+            }
+            Err(err) => {
+                // this an internal error of some kind, not the rate limit being hit
+                error!("rate limiter is unhappy. allowing ip. err={:?}", err);
+
+                RateLimitResult::Allowed(authorization, None)
+            }
+        }
+    } else {
+        RateLimitResult::Allowed(authorization, None)
+    };
+
+    Ok(x)
 }
