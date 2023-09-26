@@ -949,7 +949,10 @@ pub async fn key_is_authorized(
 
 impl Web3ProxyApp {
     /// Limit the number of concurrent requests from the given ip address.
-    pub async fn ip_semaphore(&self, ip: &IpAddr) -> Web3ProxyResult<Option<OwnedSemaphorePermit>> {
+    pub async fn permit_public_concurrency(
+        &self,
+        ip: &IpAddr,
+    ) -> Web3ProxyResult<Option<OwnedSemaphorePermit>> {
         if let Some(max_concurrent_requests) = self.config.public_max_concurrent_requests {
             let semaphore = self
                 .ip_semaphores
@@ -979,7 +982,7 @@ impl Web3ProxyApp {
 
     /// Limit the number of concurrent requests for a given user across all of their keys
     /// keep the semaphore alive until the user's request is entirely complete
-    pub async fn user_semaphore(
+    pub async fn permit_premium_concurrency(
         &self,
         authorization: &Authorization,
         ip: &IpAddr,
@@ -1118,7 +1121,7 @@ impl Web3ProxyApp {
             if let RateLimitResult::Allowed(a, b) = x {
                 debug_assert!(b.is_none());
 
-                let permit = self.ip_semaphore(ip).await?;
+                let permit = self.permit_public_concurrency(ip).await?;
 
                 x = RateLimitResult::Allowed(a, permit)
             }
@@ -1128,7 +1131,7 @@ impl Web3ProxyApp {
             Ok(x)
         } else {
             // no redis, but we can still check the ip semaphore
-            let permit = self.ip_semaphore(ip).await?;
+            let permit = self.permit_public_concurrency(ip).await?;
 
             // TODO: if no redis, rate limit with a local cache? "warn!" probably isn't right
             Ok(RateLimitResult::Allowed(authorization, permit))
@@ -1380,7 +1383,7 @@ impl Web3ProxyApp {
                     debug_assert!(b.is_none());
 
                     // only allow this rpc_key to run a limited amount of concurrent requests
-                    let permit = self.user_semaphore(&a, ip).await?;
+                    let permit = self.permit_premium_concurrency(&a, ip).await?;
 
                     x = RateLimitResult::Allowed(a, permit)
                 }
@@ -1393,7 +1396,7 @@ impl Web3ProxyApp {
             }
         }
 
-        let permit = self.user_semaphore(&authorization, ip).await?;
+        let permit = self.permit_premium_concurrency(&authorization, ip).await?;
 
         Ok(RateLimitResult::Allowed(authorization, permit))
     }
