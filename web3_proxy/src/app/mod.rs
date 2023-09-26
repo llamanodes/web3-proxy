@@ -1867,17 +1867,18 @@ impl Web3ProxyApp {
 
                                 // this is spawned so that if the client disconnects, the app keeps polling the future with a lock inside the moka cache
                                 // TODO: is this expect actually safe!? could there be a background process that still has the arc?
-                                match tokio::spawn(f).await?.map_err(Web3ProxyError::Arc) {
+                                match tokio::spawn(f).await? {
                                     Ok(response_data) => Ok(jsonrpc::ParsedResponse::from_response_data(response_data, id).into()),
-                                    Err(Web3ProxyError::StreamResponse(response)) => {
-                                        self.jsonrpc_response_failed_cache_keys.insert(cache_key_hash, ()).await;
-
-                                        Ok(jsonrpc::SingleResponse::Stream(response))
-                                    },
                                     Err(err) => {
                                         self.jsonrpc_response_failed_cache_keys.insert(cache_key_hash, ()).await;
 
-                                        Err(err)
+                                        if let Web3ProxyError::StreamResponse(x) = err.as_ref() {
+                                            let x = x.lock().take().expect("stream processing should only happen once");
+
+                                            Ok(jsonrpc::SingleResponse::Stream(x))
+                                        } else {
+                                            Err(err)
+                                        }
                                     },
                                 }?
                             }

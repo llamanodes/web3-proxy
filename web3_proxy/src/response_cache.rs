@@ -10,6 +10,7 @@ use ethers::{
 };
 use hashbrown::hash_map::DefaultHashBuilder;
 use moka::future::Cache;
+use parking_lot::Mutex;
 use serde_json::value::RawValue;
 use std::{
     hash::{BuildHasher, Hash, Hasher},
@@ -155,7 +156,7 @@ impl TryFrom<Web3ProxyResult<jsonrpc::SingleResponse>> for JsonRpcResponseEnum<A
                 }
             },
             Ok(jsonrpc::SingleResponse::Stream(stream)) => {
-                Err(Web3ProxyError::StreamResponse(stream))
+                Err(Web3ProxyError::StreamResponse(Mutex::new(Some(stream))))
             }
             Err(err) => err.try_into(),
         }

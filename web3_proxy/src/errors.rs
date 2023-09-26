@@ -19,6 +19,7 @@ use http::header::InvalidHeaderValue;
 use http::uri::InvalidUri;
 use ipnet::AddrParseError;
 use migration::sea_orm::DbErr;
+use parking_lot::Mutex;
 use redis_rate_limiter::redis::RedisError;
 use redis_rate_limiter::RedisPoolError;
 use reqwest::header::ToStrError;
@@ -130,7 +131,7 @@ pub enum Web3ProxyError {
     /// make it easy to skip caching streaming results
     #[error(ignore)]
     #[display(fmt = "{:?}", _0)]
-    StreamResponse(jsonrpc::StreamResponse),
+    StreamResponse(Mutex<Option<jsonrpc::StreamResponse>>),
     /// make it easy to skip caching null results
     NullJsonRpcResult,
     OriginRequired,
