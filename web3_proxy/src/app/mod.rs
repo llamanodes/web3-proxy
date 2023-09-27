@@ -521,7 +521,6 @@ impl Web3ProxyApp {
             .ok()
             .and_then(|x| x.to_str().map(|x| x.to_string()));
 
-        // TODO: get the size out of the config
         let bonus_ip_concurrency =
             Arc::new(Semaphore::new(top_config.app.bonus_public_concurrency));
         let bonus_user_concurrency =
