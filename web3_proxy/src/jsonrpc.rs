@@ -6,6 +6,7 @@ use axum::response::Response;
 use derive_more::From;
 use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
+use serde_inline_default::serde_inline_default;
 use serde_json::json;
 use serde_json::value::{to_raw_value, RawValue};
 use std::borrow::Cow;
@@ -19,13 +20,14 @@ pub trait JsonRpcResultData = serde::Serialize + serde::de::DeserializeOwned + f
 
 // TODO: &str here instead of String should save a lot of allocations
 // TODO: generic type for params?
+#[serde_inline_default]
 #[derive(Clone, Deserialize, Serialize)]
 pub struct JsonRpcRequest {
     pub jsonrpc: String,
     /// id could be a stricter type, but many rpcs do things against the spec
     pub id: Box<RawValue>,
     pub method: String,
-    /// TODO: skip serializing if serde_json::Value::Null
+    #[serde_inline_default(serde_json::Value::Null)]
     pub params: serde_json::Value,
 }
 

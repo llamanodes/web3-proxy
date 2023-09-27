@@ -91,6 +91,8 @@ Check that the websocket is working:
 ```
 $ websocat ws://127.0.0.1:8544
 
+{"jsonrpc":"2.0","method":"web3_clientVersion","id":1}
+
 {"jsonrpc": "2.0", "id": 1, "method": "eth_subscribe", "params": ["newHeads"]}
 
 {"jsonrpc": "2.0", "id": 1, "method": "eth_subscribe", "params": ["newPendingTransactions"]}
