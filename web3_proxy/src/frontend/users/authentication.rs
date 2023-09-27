@@ -125,7 +125,7 @@ pub async fn user_login_get(
         resources: vec![],
     };
 
-    let db_conn = global_db_conn().await?;
+    let db_conn = global_db_conn()?;
 
     // delete any expired logins
     if let Err(err) = login::Entity::delete_many()
@@ -262,7 +262,7 @@ pub async fn user_login_post(
     let login_nonce = UserBearerToken::from_str(&their_msg.nonce)?;
 
     // fetch the message we gave them from our database
-    let db_replica = global_db_replica_conn().await?;
+    let db_replica = global_db_replica_conn()?;
 
     let user_pending_login = pending_login::Entity::find()
         .filter(pending_login::Column::Nonce.eq(Uuid::from(login_nonce)))
@@ -294,7 +294,7 @@ pub async fn user_login_post(
         .one(db_replica.as_ref())
         .await?;
 
-    let db_conn = global_db_conn().await?;
+    let db_conn = global_db_conn()?;
 
     let (caller, user_rpc_keys, status_code) = match caller {
         None => {
@@ -447,7 +447,7 @@ pub async fn user_logout_post(
 ) -> Web3ProxyResponse {
     let user_bearer = UserBearerToken::try_from(bearer)?;
 
-    let db_conn = global_db_conn().await?;
+    let db_conn = global_db_conn()?;
 
     if let Err(err) = login::Entity::delete_many()
         .filter(login::Column::BearerToken.eq(user_bearer.uuid()))

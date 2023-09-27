@@ -69,9 +69,7 @@ pub async fn user_balance_stripe_post(
         return Ok("Received Webhook".into_response());
     }
 
-    let db_conn = global_db_conn()
-        .await
-        .web3_context("query_user_stats needs a db")?;
+    let db_conn = global_db_conn().web3_context("query_user_stats needs a db")?;
 
     if stripe_increase_balance_receipt::Entity::find()
         .filter(

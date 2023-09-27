@@ -1,4 +1,5 @@
 //! Helper functions for turning ether's BlockNumber into numbers and updating incoming queries to match.
+use crate::jsonrpc::JsonRpcRequest;
 use crate::rpcs::many::Web3Rpcs;
 use crate::{
     errors::{Web3ProxyError, Web3ProxyResult},
@@ -184,6 +185,7 @@ pub async fn clean_block_number(
 }
 
 /// TODO: change this to also return the hash needed?
+/// this replaces any "latest" identifiers in the JsonRpcRequest with the current block number which feels like the data is structured wrong
 #[derive(Debug, Eq, PartialEq)]
 pub enum CacheMode {
     CacheSuccessForever,
@@ -227,23 +229,32 @@ fn get_block_param_id(method: &str) -> Option<usize> {
 }
 
 impl CacheMode {
+    /// like `try_new`, but instead of erroring, it will default to caching with the head block
     pub async fn new(
-        method: &str,
-        params: &mut serde_json::Value,
+        request: &mut JsonRpcRequest,
         head_block: &Web3ProxyBlock,
         rpcs: &Web3Rpcs,
     ) -> Self {
-        match Self::try_new(method, params, head_block, rpcs).await {
+        match Self::try_new(request, head_block, rpcs).await {
             Ok(x) => x,
             Err(Web3ProxyError::NoBlocksKnown) => {
-                warn!(%method, ?params, "no servers available to get block from params. caching with head block");
+                warn!(
+                    method = %request.method,
+                    params = ?request.params,
+                    "no servers available to get block from params. caching with head block"
+                );
                 CacheMode::Cache {
                     block: head_block.into(),
                     cache_errors: true,
                 }
             }
             Err(err) => {
-                error!(%method, ?params, ?err, "could not get block from params. caching with head block");
+                error!(
+                    method = %request.method,
+                    params = ?request.params,
+                    ?err,
+                    "could not get block from params. caching with head block"
+                );
                 CacheMode::Cache {
                     block: head_block.into(),
                     cache_errors: true,
@@ -253,11 +264,12 @@ impl CacheMode {
     }
 
     pub async fn try_new(
-        method: &str,
-        params: &mut serde_json::Value,
+        request: &mut JsonRpcRequest,
         head_block: &Web3ProxyBlock,
         rpcs: &Web3Rpcs,
     ) -> Web3ProxyResult<Self> {
+        let params = &mut request.params;
+
         if matches!(params, serde_json::Value::Null) {
             // no params given. cache with the head block
             return Ok(Self::Cache {
@@ -276,7 +288,7 @@ impl CacheMode {
             }
         }
 
-        match method {
+        match request.method.as_str() {
             "debug_traceTransaction" => {
                 // TODO: make sure re-orgs work properly!
                 Ok(CacheMode::CacheSuccessForever)
@@ -433,7 +445,10 @@ impl CacheMode {
 #[cfg(test)]
 mod test {
     use super::CacheMode;
-    use crate::rpcs::{blockchain::Web3ProxyBlock, many::Web3Rpcs};
+    use crate::{
+        jsonrpc::{JsonRpcId, JsonRpcRequest},
+        rpcs::{blockchain::Web3ProxyBlock, many::Web3Rpcs},
+    };
     use ethers::types::{Block, H256};
     use serde_json::json;
     use std::sync::Arc;
@@ -441,7 +456,7 @@ mod test {
     #[test_log::test(tokio::test)]
     async fn test_fee_history() {
         let method = "eth_feeHistory";
-        let mut params = json!([4, "latest", [25, 75]]);
+        let params = json!([4, "latest", [25, 75]]);
 
         let head_block = Block {
             number: Some(1.into()),
@@ -456,7 +471,11 @@ mod test {
                 .await
                 .unwrap();
 
-        let x = CacheMode::try_new(method, &mut params, &head_block, &empty)
+        let id = JsonRpcId::Number(9);
+
+        let mut request = JsonRpcRequest::new(id, method.to_string(), params).unwrap();
+
+        let x = CacheMode::try_new(&mut request, &head_block, &empty)
             .await
             .unwrap();
 
@@ -469,14 +488,14 @@ mod test {
         );
 
         // "latest" should have been changed to the block number
-        assert_eq!(params.get(1), Some(&json!(head_block.number())));
+        assert_eq!(request.params.get(1), Some(&json!(head_block.number())));
     }
 
     #[test_log::test(tokio::test)]
     async fn test_eth_call_latest() {
         let method = "eth_call";
 
-        let mut params = json!([{"data": "0xdeadbeef", "to": "0x0000000000000000000000000000000000000000"}, "latest"]);
+        let params = json!([{"data": "0xdeadbeef", "to": "0x0000000000000000000000000000000000000000"}, "latest"]);
 
         let head_block = Block {
             number: Some(18173997.into()),
@@ -486,17 +505,21 @@ mod test {
 
         let head_block = Web3ProxyBlock::try_new(Arc::new(head_block)).unwrap();
 
+        let id = JsonRpcId::Number(99);
+
+        let mut request = JsonRpcRequest::new(id, method.to_string(), params).unwrap();
+
         let (empty, _handle, _ranked_rpc_reciver) =
             Web3Rpcs::spawn(1, None, 1, 1, "test".into(), None, None)
                 .await
                 .unwrap();
 
-        let x = CacheMode::try_new(method, &mut params, &head_block, &empty)
+        let x = CacheMode::try_new(&mut request, &head_block, &empty)
             .await
             .unwrap();
 
         // "latest" should have been changed to the block number
-        assert_eq!(params.get(1), Some(&json!(head_block.number())));
+        assert_eq!(request.params.get(1), Some(&json!(head_block.number())));
 
         assert_eq!(
             x,

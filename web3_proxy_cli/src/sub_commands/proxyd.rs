@@ -299,7 +299,7 @@ impl ProxydSubCommand {
         }
 
         // TODO: make sure this happens even if we exit with an error
-        if let Ok(db_conn) = global_db_conn().await {
+        if let Ok(db_conn) = global_db_conn() {
             /*
             From the sqlx docs:
 

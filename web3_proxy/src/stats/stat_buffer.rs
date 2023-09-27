@@ -2,7 +2,7 @@ use super::{AppStat, FlushedStats, RpcQueryKey};
 use crate::app::Web3ProxyJoinHandle;
 use crate::caches::{RpcSecretKeyCache, UserBalanceCache};
 use crate::errors::Web3ProxyResult;
-use crate::frontend::authorization::RequestMetadata;
+use crate::frontend::authorization::Web3Request;
 use crate::globals::global_db_conn;
 use crate::stats::RpcQueryStats;
 use derive_more::From;
@@ -228,24 +228,19 @@ impl StatBuffer {
 
     async fn _buffer_app_stat(&mut self, stat: AppStat) -> Web3ProxyResult<u64> {
         match stat {
-            AppStat::RpcQuery(request_metadata) => {
-                self._buffer_request_metadata(request_metadata).await
-            }
+            AppStat::RpcQuery(web3_request) => self._buffer_web3_request(web3_request).await,
         }
     }
 
-    async fn _buffer_request_metadata(
-        &mut self,
-        request_metadata: RequestMetadata,
-    ) -> Web3ProxyResult<u64> {
+    async fn _buffer_web3_request(&mut self, web3_request: Web3Request) -> Web3ProxyResult<u64> {
         // we convert on this side of the channel so that we don't slow down the request
-        let stat = RpcQueryStats::try_from_metadata(request_metadata)?;
+        let stat = RpcQueryStats::try_from_metadata(web3_request)?;
 
         // update the latest balance
         // do this BEFORE emitting any stats
         let mut approximate_balance_remaining = 0.into();
         let mut active_premium = false;
-        if let Ok(db_conn) = global_db_conn().await {
+        if let Ok(db_conn) = global_db_conn() {
             let user_id = stat.authorization.checks.user_id;
 
             // update the user's balance
@@ -379,7 +374,7 @@ impl StatBuffer {
         let mut count = 0;
         let mut frontend_requests = 0;
 
-        if let Ok(db_conn) = global_db_conn().await {
+        if let Ok(db_conn) = global_db_conn() {
             count = self.accounting_db_buffer.len();
             for (key, stat) in self.accounting_db_buffer.drain() {
                 let new_frontend_requests = stat.frontend_requests;

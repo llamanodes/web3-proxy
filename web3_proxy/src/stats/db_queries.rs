@@ -62,8 +62,8 @@ pub async fn query_user_stats<'a>(
     params: &'a HashMap<String, String>,
     stat_response_type: StatType,
 ) -> Web3ProxyResponse {
-    let db_conn = global_db_conn().await?;
-    let db_replica = global_db_replica_conn().await?;
+    let db_conn = global_db_conn()?;
+    let db_replica = global_db_replica_conn()?;
     let mut redis_conn = app.redis_conn().await?;
 
     // get the user id first. if it is 0, we should use a cache on the app

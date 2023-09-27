@@ -43,8 +43,8 @@ pub async fn query_admin_modify_usertier<'a>(
     let mut response_body = HashMap::new();
 
     // Establish connections
-    let db_conn = global_db_conn().await?;
-    let db_replica = global_db_replica_conn().await?;
+    let db_conn = global_db_conn()?;
+    let db_replica = global_db_replica_conn()?;
     let mut redis_conn = app.redis_conn().await?;
 
     // Will modify logic here

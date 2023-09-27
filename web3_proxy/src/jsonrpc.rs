@@ -20,17 +20,17 @@ use tokio::time::sleep;
 
 use crate::app::Web3ProxyApp;
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
-use crate::frontend::authorization::{Authorization, RequestMetadata, RequestOrMethod};
+use crate::frontend::authorization::{Authorization, RequestOrMethod, Web3Request};
 use crate::response_cache::JsonRpcResponseEnum;
 
 pub trait JsonRpcParams = fmt::Debug + serde::Serialize + Send + Sync + 'static;
 pub trait JsonRpcResultData = serde::Serialize + serde::de::DeserializeOwned + fmt::Debug + Send;
 
-// TODO: borrow values to avoid allocs if possible
+/// TODO: borrow values to avoid allocs if possible
 #[derive(Debug, Serialize)]
 pub struct ParsedResponse<T = Arc<RawValue>> {
-    jsonrpc: String,
-    id: Option<Box<RawValue>>,
+    pub jsonrpc: String,
+    pub id: Box<RawValue>,
     #[serde(flatten)]
     pub payload: Payload<T>,
 }
@@ -40,7 +40,7 @@ impl ParsedResponse {
         let result = serde_json::value::to_raw_value(&value)
             .expect("this should not fail")
             .into();
-        Self::from_result(result, Some(id))
+        Self::from_result(result, id)
     }
 }
 
@@ -49,16 +49,16 @@ impl ParsedResponse<Arc<RawValue>> {
         match data {
             JsonRpcResponseEnum::NullResult => {
                 let x: Box<RawValue> = Default::default();
-                Self::from_result(Arc::from(x), Some(id))
+                Self::from_result(Arc::from(x), id)
             }
             JsonRpcResponseEnum::RpcError { error_data, .. } => Self::from_error(error_data, id),
-            JsonRpcResponseEnum::Result { value, .. } => Self::from_result(value, Some(id)),
+            JsonRpcResponseEnum::Result { value, .. } => Self::from_result(value, id),
         }
     }
 }
 
 impl<T> ParsedResponse<T> {
-    pub fn from_result(result: T, id: Option<Box<RawValue>>) -> Self {
+    pub fn from_result(result: T, id: Box<RawValue>) -> Self {
         Self {
             jsonrpc: "2.0".to_string(),
             id,
@@ -69,7 +69,7 @@ impl<T> ParsedResponse<T> {
     pub fn from_error(error: JsonRpcErrorData, id: Box<RawValue>) -> Self {
         Self {
             jsonrpc: "2.0".to_string(),
-            id: Some(id),
+            id,
             payload: Payload::Error { error },
         }
     }
@@ -171,6 +171,8 @@ where
                     }
                 }
 
+                let id = id.unwrap_or_default();
+
                 // jsonrpc version must be present in all responses
                 let jsonrpc = jsonrpc
                     .ok_or_else(|| de::Error::missing_field("jsonrpc"))?
@@ -209,7 +211,7 @@ pub enum Payload<T> {
 pub struct StreamResponse {
     buffer: Bytes,
     response: reqwest::Response,
-    request_metadata: Arc<RequestMetadata>,
+    web3_request: Arc<Web3Request>,
 }
 
 impl StreamResponse {
@@ -233,7 +235,7 @@ impl IntoResponse for StreamResponse {
             .map_ok(move |x| {
                 let len = x.len();
 
-                self.request_metadata.add_response(len);
+                self.web3_request.add_response(len);
 
                 x
             });
@@ -257,7 +259,7 @@ where
     pub async fn read_if_short(
         mut response: reqwest::Response,
         nbytes: u64,
-        request_metadata: Arc<RequestMetadata>,
+        web3_request: Arc<Web3Request>,
     ) -> Result<SingleResponse<T>, ProviderError> {
         match response.content_length() {
             // short
@@ -266,7 +268,7 @@ where
             Some(_) => Ok(Self::Stream(StreamResponse {
                 buffer: Bytes::new(),
                 response,
-                request_metadata,
+                web3_request,
             })),
             None => {
                 let mut buffer = BytesMut::new();
@@ -282,7 +284,7 @@ where
                 Ok(Self::Stream(StreamResponse {
                     buffer,
                     response,
-                    request_metadata,
+                    web3_request,
                 }))
             }
         }
@@ -310,6 +312,17 @@ where
                 Some(len) => len as usize,
                 None => 0,
             },
+        }
+    }
+
+    pub fn set_id(&mut self, id: Box<RawValue>) {
+        match self {
+            SingleResponse::Parsed(x) => {
+                x.id = id;
+            }
+            SingleResponse::Stream(..) => {
+                // stream responses will hopefully always have the right id already because we pass the orignal id all the way from the front to the back
+            }
         }
     }
 }
@@ -381,6 +394,7 @@ where
 pub struct JsonRpcRequest {
     pub jsonrpc: String,
     /// id could be a stricter type, but many rpcs do things against the spec
+    /// TODO: this gets cloned into the response object often. would an Arc be better? That has its own overhead and these are short strings
     pub id: Box<RawValue>,
     pub method: String,
     #[serde_inline_default(serde_json::Value::Null)]
@@ -486,11 +500,11 @@ impl JsonRpcRequestEnum {
             .expect("JsonRpcRequestEnum should always serialize")
             .len();
 
-        let request = RequestOrMethod::Method("invalid_method", size);
+        let request = RequestOrMethod::Method("invalid_method".into(), size);
 
         // TODO: create a stat so we can penalize
         // TODO: what request size
-        let metadata = RequestMetadata::new(app, authorization.clone(), request, None).await;
+        let metadata = Web3Request::new(app, authorization.clone(), request, None).await;
 
         metadata
             .user_error_response
@@ -676,26 +690,22 @@ impl JsonRpcRequest {
 }
 
 impl JsonRpcForwardedResponse {
-    pub fn from_anyhow_error(
-        err: anyhow::Error,
-        code: Option<i64>,
-        id: Option<Box<RawValue>>,
-    ) -> Self {
+    pub fn from_anyhow_error(err: anyhow::Error, code: Option<i64>, id: Box<RawValue>) -> Self {
         let message = format!("{:?}", err);
 
         Self::from_string(message, code, id)
     }
 
-    pub fn from_str(message: &str, code: Option<i64>, id: Option<Box<RawValue>>) -> Self {
+    pub fn from_str(message: &str, code: Option<i64>, id: Box<RawValue>) -> Self {
         Self::from_string(message.to_string(), code, id)
     }
 
-    pub fn from_string(message: String, code: Option<i64>, id: Option<Box<RawValue>>) -> Self {
+    pub fn from_string(message: String, code: Option<i64>, id: Box<RawValue>) -> Self {
         // TODO: this is too verbose. plenty of errors are valid, like users giving an invalid address. no need to log that
         // TODO: can we somehow get the initial request here? if we put that into a tracing span, will things slow down a ton?
         JsonRpcForwardedResponse {
             jsonrpc: "2.0",
-            id: id.unwrap_or_default(),
+            id,
             result: None,
             error: Some(JsonRpcErrorData {
                 code: code.unwrap_or(-32099),
@@ -772,7 +782,7 @@ mod tests {
     fn serialize_response() {
         let obj = ParsedResponse {
             jsonrpc: "2.0".to_string(),
-            id: None,
+            id: Default::default(),
             payload: Payload::Success {
                 result: serde_json::value::RawValue::from_string("100".to_string()).unwrap(),
             },

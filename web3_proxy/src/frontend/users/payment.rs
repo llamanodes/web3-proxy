@@ -46,7 +46,7 @@ pub async fn user_balance_get(
 ) -> Web3ProxyResponse {
     let user = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = global_db_replica_conn().await?;
+    let db_replica = global_db_replica_conn()?;
 
     let user_balance = match Balance::try_from_db(db_replica.as_ref(), user.id).await? {
         None => Balance::default(),
@@ -66,7 +66,7 @@ pub async fn user_chain_deposits_get(
 ) -> Web3ProxyResponse {
     let user = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = global_db_replica_conn().await?;
+    let db_replica = global_db_replica_conn()?;
 
     // Filter by user ...
     let receipts = increase_on_chain_balance_receipt::Entity::find()
@@ -105,7 +105,7 @@ pub async fn user_stripe_deposits_get(
 ) -> Web3ProxyResponse {
     let user = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = global_db_replica_conn().await?;
+    let db_replica = global_db_replica_conn()?;
 
     // Filter by user ...
     let receipts = stripe_increase_balance_receipt::Entity::find()
@@ -148,7 +148,7 @@ pub async fn user_admin_deposits_get(
 ) -> Web3ProxyResponse {
     let user = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = global_db_replica_conn().await?;
+    let db_replica = global_db_replica_conn()?;
 
     // Filter by user ...
     let receipts = admin_increase_balance_receipt::Entity::find()
@@ -207,7 +207,7 @@ pub async fn user_balance_post(
             Web3ProxyError::BadRequest(format!("unable to parse tx_hash: {}", err).into())
         })?;
 
-    let db_conn = global_db_conn().await?;
+    let db_conn = global_db_conn()?;
 
     // get the transaction receipt
     let transaction_receipt = app
@@ -496,7 +496,7 @@ pub async fn handle_uncle_block(
     // user_id -> balance that we need to subtract
     let mut reversed_balances: HashMap<u64, Decimal> = HashMap::new();
 
-    let db_conn = global_db_conn().await?;
+    let db_conn = global_db_conn()?;
 
     // delete any deposit txids with uncle_hash
     for reversed_deposit in increase_on_chain_balance_receipt::Entity::find()

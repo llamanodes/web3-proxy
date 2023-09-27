@@ -1,6 +1,7 @@
 use crate::{
     block_number::BlockNumAndHash,
     errors::{Web3ProxyError, Web3ProxyResult},
+    frontend::authorization::Web3Request,
     jsonrpc::{self, JsonRpcErrorData},
 };
 use derive_more::From;
@@ -19,7 +20,7 @@ use std::{
 
 #[derive(Clone, Debug, Eq, From)]
 pub struct JsonRpcQueryCacheKey {
-    /// hashed params
+    /// hashed params so that
     hash: u64,
     from_block: Option<BlockNumAndHash>,
     to_block: Option<BlockNumAndHash>,
@@ -58,8 +59,7 @@ impl JsonRpcQueryCacheKey {
     pub fn new(
         from_block: Option<BlockNumAndHash>,
         to_block: Option<BlockNumAndHash>,
-        method: &str,
-        params: &serde_json::Value,
+        web3_request: &Web3Request,
         cache_errors: bool,
     ) -> Self {
         let from_block_hash = from_block.as_ref().map(|x| x.hash());
@@ -70,11 +70,11 @@ impl JsonRpcQueryCacheKey {
         from_block_hash.hash(&mut hasher);
         to_block_hash.hash(&mut hasher);
 
-        method.hash(&mut hasher);
+        web3_request.request.method().hash(&mut hasher);
 
         // TODO: make sure preserve_order feature is OFF
         // TODO: is there a faster way to do this?
-        params.to_string().hash(&mut hasher);
+        web3_request.request.params().to_string().hash(&mut hasher);
 
         cache_errors.hash(&mut hasher);
 

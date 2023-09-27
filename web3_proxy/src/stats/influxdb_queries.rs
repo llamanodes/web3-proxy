@@ -48,7 +48,7 @@ pub async fn query_user_influx_stats<'a>(
         ));
     }
 
-    let db_replica = global_db_replica_conn().await?;
+    let db_replica = global_db_replica_conn()?;
 
     // Read the (optional) user-id from the request, this is the logic for subusers
     // If there is no bearer token, this is not allowed

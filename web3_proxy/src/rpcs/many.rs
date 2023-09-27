@@ -6,7 +6,7 @@ use super::request::{OpenRequestHandle, OpenRequestResult, RequestErrorHandler};
 use crate::app::{flatten_handle, Web3ProxyApp, Web3ProxyJoinHandle};
 use crate::config::{average_block_interval, BlockAndRpc, Web3RpcConfig};
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
-use crate::frontend::authorization::RequestMetadata;
+use crate::frontend::authorization::Web3Request;
 use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::frontend::status::MokaCacheSerializer;
 use crate::jsonrpc::{self, JsonRpcErrorData, JsonRpcParams, JsonRpcResultData};
@@ -22,7 +22,6 @@ use moka::future::CacheBuilder;
 use parking_lot::RwLock;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
-use serde_json::json;
 use serde_json::value::RawValue;
 use std::borrow::Cow;
 use std::cmp::min_by_key;
@@ -231,9 +230,15 @@ impl Web3Rpcs {
                         trace!("old_rpc: {}", old_rpc);
 
                         // if the old rpc was synced, wait for the new one to sync
-                        if old_rpc.head_block.as_ref().unwrap().borrow().is_some() {
+                        if old_rpc
+                            .head_block_sender
+                            .as_ref()
+                            .unwrap()
+                            .borrow()
+                            .is_some()
+                        {
                             let mut new_head_receiver =
-                                new_rpc.head_block.as_ref().unwrap().subscribe();
+                                new_rpc.head_block_sender.as_ref().unwrap().subscribe();
                             trace!("waiting for new {} connection to sync", new_rpc);
 
                             // TODO: maximum wait time
@@ -365,11 +370,9 @@ impl Web3Rpcs {
 
     /// Send the same request to all the handles. Returning the most common success or most common error.
     /// TODO: option to return the fastest response and handles for all the others instead?
-    pub async fn try_send_parallel_requests<P: JsonRpcParams>(
+    pub async fn try_send_parallel_requests(
         &self,
         active_request_handles: Vec<OpenRequestHandle>,
-        method: &str,
-        params: &P,
         max_wait: Option<Duration>,
     ) -> Result<Arc<RawValue>, Web3ProxyError> {
         // TODO: if only 1 active_request_handles, do self.try_send_request?
@@ -382,7 +385,7 @@ impl Web3Rpcs {
             .map(|active_request_handle| async move {
                 let result: Result<Result<Arc<RawValue>, Web3ProxyError>, Web3ProxyError> =
                     timeout(max_wait, async {
-                        match active_request_handle.request(method, &json!(&params)).await {
+                        match active_request_handle.request().await {
                             Ok(response) => match response.parsed().await {
                                 Ok(parsed) => parsed.into_result(),
                                 Err(err) => Err(Web3ProxyError::EthersProvider(err)),
@@ -446,7 +449,7 @@ impl Web3Rpcs {
 
     async fn _best_available_rpc(
         &self,
-        request_metadata: &Arc<RequestMetadata>,
+        web3_request: &Arc<Web3Request>,
         error_handler: Option<RequestErrorHandler>,
         potential_rpcs: &[Arc<Web3Rpc>],
         skip: &mut Vec<Arc<Web3Rpc>>,
@@ -466,7 +469,7 @@ impl Web3Rpcs {
             // just because it has lower latency doesn't mean we are sure to get a connection. there might be rate limits
             // TODO: what error_handler?
             match faster_rpc
-                .try_request_handle(request_metadata, error_handler)
+                .try_request_handle(web3_request, error_handler)
                 .await
             {
                 Ok(OpenRequestResult::Handle(handle)) => {
@@ -506,7 +509,7 @@ impl Web3Rpcs {
     #[instrument(level = "trace")]
     pub async fn wait_for_best_rpc(
         &self,
-        request_metadata: &Arc<RequestMetadata>,
+        web3_request: &Arc<Web3Request>,
         skip_rpcs: &mut Vec<Arc<Web3Rpc>>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
@@ -523,7 +526,7 @@ impl Web3Rpcs {
             let potential_rpcs = self.by_name.read().values().cloned().collect::<Vec<_>>();
 
             let x = self
-                ._best_available_rpc(request_metadata, error_handler, &potential_rpcs, skip_rpcs)
+                ._best_available_rpc(web3_request, error_handler, &potential_rpcs, skip_rpcs)
                 .await;
 
             return Ok(x);
@@ -567,7 +570,7 @@ impl Web3Rpcs {
 
                     match self
                         ._best_available_rpc(
-                            request_metadata,
+                            web3_request,
                             error_handler,
                             &potential_rpcs,
                             skip_rpcs,
@@ -630,7 +633,7 @@ impl Web3Rpcs {
             potential_rpcs.clear();
         }
 
-        request_metadata.no_servers.fetch_add(1, Ordering::Relaxed);
+        web3_request.no_servers.fetch_add(1, Ordering::Relaxed);
 
         if let Some(retry_at) = earliest_retry_at {
             // TODO: log the server that retry_at came from
@@ -656,7 +659,7 @@ impl Web3Rpcs {
     // TODO: this is broken
     pub async fn all_connections(
         &self,
-        request_metadata: &Arc<RequestMetadata>,
+        web3_request: &Arc<Web3Request>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
         max_count: Option<usize>,
@@ -706,7 +709,7 @@ impl Web3Rpcs {
             }
 
             // check rate limits and increment our connection counter
-            match rpc.try_request_handle(request_metadata, error_level).await {
+            match rpc.try_request_handle(web3_request, error_level).await {
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // this rpc is not available. skip it
                     trace!("{} is rate limited. skipping", rpc);
@@ -744,10 +747,12 @@ impl Web3Rpcs {
         params: &P,
         max_wait: Option<Duration>,
     ) -> Web3ProxyResult<R> {
-        let request_metadata = RequestMetadata::new_internal(self.chain_id, method, params);
+        let head_block = self.head_block();
+
+        let web3_request = Web3Request::new_internal(method.into(), params, head_block).await;
 
         let response = self
-            .request_with_metadata(method, params, &request_metadata, max_wait, None, None)
+            .request_with_metadata(&web3_request, max_wait, None, None)
             .await?;
         let parsed = response.parsed().await?;
         match parsed.payload {
@@ -758,11 +763,9 @@ impl Web3Rpcs {
     }
 
     /// Make a request with stat tracking.
-    pub async fn request_with_metadata<P: JsonRpcParams, R: JsonRpcResultData>(
+    pub async fn request_with_metadata<R: JsonRpcResultData>(
         &self,
-        method: &str,
-        params: &P,
-        request_metadata: &Arc<RequestMetadata>,
+        web3_request: &Arc<Web3Request>,
         max_wait: Option<Duration>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
@@ -774,7 +777,7 @@ impl Web3Rpcs {
 
         let start = Instant::now();
 
-        // set error_handler to Save. this might be overridden depending on the request_metadata.authorization
+        // set error_handler to Save. this might be overridden depending on the web3_request.authorization
         let error_handler = Some(RequestErrorHandler::Save);
 
         let mut last_provider_error = None;
@@ -790,7 +793,7 @@ impl Web3Rpcs {
 
             match self
                 .wait_for_best_rpc(
-                    request_metadata,
+                    web3_request,
                     &mut skip_rpcs,
                     min_block_needed,
                     max_block_needed,
@@ -804,24 +807,22 @@ impl Web3Rpcs {
                     // TODO: look at backend_requests instead
                     let rpc = active_request_handle.clone_connection();
 
-                    request_metadata.backend_requests.lock().push(rpc.clone());
+                    web3_request.backend_requests.lock().push(rpc.clone());
 
                     let is_backup_response = rpc.backup;
 
-                    match active_request_handle.request::<P, R>(method, params).await {
+                    match active_request_handle.request::<R>().await {
                         Ok(response) => {
                             // TODO: if there are multiple responses being aggregated, this will only use the last server's backup type
-                            request_metadata
+                            web3_request
                                 .response_from_backup_rpc
                                 .store(is_backup_response, Ordering::Relaxed);
 
-                            request_metadata
+                            web3_request
                                 .user_error_response
                                 .store(false, Ordering::Relaxed);
 
-                            request_metadata
-                                .error_response
-                                .store(false, Ordering::Relaxed);
+                            web3_request.error_response.store(false, Ordering::Relaxed);
 
                             return Ok(response);
                         }
@@ -829,7 +830,7 @@ impl Web3Rpcs {
                             // TODO: if this is an error, do NOT return. continue to try on another server
                             let error = match JsonRpcErrorData::try_from(&error) {
                                 Ok(x) => {
-                                    request_metadata
+                                    web3_request
                                         .user_error_response
                                         .store(true, Ordering::Relaxed);
                                     x
@@ -837,11 +838,9 @@ impl Web3Rpcs {
                                 Err(err) => {
                                     warn!(?err, "error from {}", rpc);
 
-                                    request_metadata
-                                        .error_response
-                                        .store(true, Ordering::Relaxed);
+                                    web3_request.error_response.store(true, Ordering::Relaxed);
 
-                                    request_metadata
+                                    web3_request
                                         .user_error_response
                                         .store(false, Ordering::Relaxed);
 
@@ -972,7 +971,7 @@ impl Web3Rpcs {
                     );
 
                     // TODO: have a separate column for rate limited?
-                    request_metadata.no_servers.fetch_add(1, Ordering::Relaxed);
+                    web3_request.no_servers.fetch_add(1, Ordering::Relaxed);
 
                     select! {
                         _ = sleep_until(retry_at) => {
@@ -987,20 +986,16 @@ impl Web3Rpcs {
                     }
                 }
                 OpenRequestResult::NotReady => {
-                    request_metadata
-                        .error_response
-                        .store(true, Ordering::Relaxed);
+                    web3_request.error_response.store(true, Ordering::Relaxed);
                     break;
                 }
             }
         }
 
         if let Some(err) = method_not_available_response {
-            request_metadata
-                .error_response
-                .store(false, Ordering::Relaxed);
+            web3_request.error_response.store(false, Ordering::Relaxed);
 
-            request_metadata
+            web3_request
                 .user_error_response
                 .store(true, Ordering::Relaxed);
 
@@ -1030,8 +1025,8 @@ impl Web3Rpcs {
                 max=?max_block_needed,
                 head=?head_block_num,
                 known=num_conns,
-                %method,
-                ?params,
+                method=%web3_request.request.method(),
+                params=?web3_request.request.params(),
                 "No servers synced",
             );
         } else if head_block_num.as_ref() > needed {
@@ -1043,8 +1038,8 @@ impl Web3Rpcs {
                 max=?max_block_needed,
                 head=?head_block_num,
                 known=%num_conns,
-                %method,
-                ?params,
+                method=%web3_request.request.method(),
+                params=?web3_request.request.params(),
                 "No archive servers synced",
             );
         } else {
@@ -1056,8 +1051,8 @@ impl Web3Rpcs {
                 head=?head_block_num,
                 skipped=%num_skipped,
                 known=%num_conns,
-                %method,
-                ?params,
+                method=%web3_request.request.method(),
+                params=?web3_request.request.params(),
                 "Requested data is not available",
             );
         }
@@ -1074,11 +1069,9 @@ impl Web3Rpcs {
 
     /// be sure there is a timeout on this or it might loop forever
     #[allow(clippy::too_many_arguments)]
-    pub async fn try_send_all_synced_connections<P: JsonRpcParams>(
+    pub async fn try_send_all_synced_connections(
         self: &Arc<Self>,
-        method: &str,
-        params: &P,
-        request_metadata: &Arc<RequestMetadata>,
+        web3_request: &Arc<Web3Request>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
         max_wait: Option<Duration>,
@@ -1098,7 +1091,7 @@ impl Web3Rpcs {
 
             match self
                 .all_connections(
-                    request_metadata,
+                    web3_request,
                     min_block_needed,
                     max_block_needed,
                     max_sends,
@@ -1109,8 +1102,10 @@ impl Web3Rpcs {
                 Ok(active_request_handles) => {
                     let mut only_backups_used = true;
 
-                    request_metadata.backend_requests.lock().extend(
-                        active_request_handles.iter().map(|x| {
+                    web3_request
+                        .backend_requests
+                        .lock()
+                        .extend(active_request_handles.iter().map(|x| {
                             let rpc = x.clone_connection();
 
                             if !rpc.backup {
@@ -1119,21 +1114,18 @@ impl Web3Rpcs {
                             }
 
                             rpc
-                        }),
-                    );
+                        }));
 
-                    request_metadata
+                    warn!("move this to where we turn RequestMetadata into a Stat");
+                    web3_request
                         .response_from_backup_rpc
                         .store(only_backups_used, Ordering::Relaxed);
 
                     let x = self
-                        .try_send_parallel_requests(
-                            active_request_handles,
-                            method,
-                            params,
-                            max_wait,
-                        )
+                        .try_send_parallel_requests(active_request_handles, max_wait)
                         .await?;
+
+                    // TODO: count the number of successes and possibly retry if there weren't enough
 
                     return Ok(x);
                 }
@@ -1146,7 +1138,7 @@ impl Web3Rpcs {
                     );
 
                     // TODO: if this times out, i think we drop this
-                    request_metadata.no_servers.fetch_add(1, Ordering::Relaxed);
+                    web3_request.no_servers.fetch_add(1, Ordering::Relaxed);
 
                     let max_sleep = if let Some(max_wait) = max_wait {
                         start + max_wait
@@ -1170,7 +1162,7 @@ impl Web3Rpcs {
                     }
                 }
                 Err(Some(retry_at)) => {
-                    request_metadata.no_servers.fetch_add(1, Ordering::Relaxed);
+                    web3_request.no_servers.fetch_add(1, Ordering::Relaxed);
 
                     if let Some(max_wait) = max_wait {
                         if start.elapsed() > max_wait {
@@ -1216,23 +1208,19 @@ impl Web3Rpcs {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn try_proxy_connection<P: JsonRpcParams, R: JsonRpcResultData>(
+    pub async fn try_proxy_connection<R: JsonRpcResultData>(
         &self,
-        method: &str,
-        params: &P,
-        request_metadata: &Arc<RequestMetadata>,
+        web3_request: &Arc<Web3Request>,
         max_wait: Option<Duration>,
         min_block_needed: Option<&U64>,
         max_block_needed: Option<&U64>,
     ) -> Web3ProxyResult<jsonrpc::SingleResponse<R>> {
-        let proxy_mode = request_metadata.proxy_mode();
+        let proxy_mode = web3_request.proxy_mode();
 
         match proxy_mode {
             ProxyMode::Debug | ProxyMode::Best => {
                 self.request_with_metadata(
-                    method,
-                    params,
-                    request_metadata,
+                    web3_request,
                     max_wait,
                     min_block_needed,
                     max_block_needed,
@@ -1366,42 +1354,42 @@ mod tests {
             Web3Rpc {
                 name: "a".to_string(),
                 tier: 0.into(),
-                head_block: Some(tx_a),
+                head_block_sender: Some(tx_a),
                 peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "b".to_string(),
                 tier: 0.into(),
-                head_block: Some(tx_b),
+                head_block_sender: Some(tx_b),
                 peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "c".to_string(),
                 tier: 0.into(),
-                head_block: Some(tx_c),
+                head_block_sender: Some(tx_c),
                 peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "d".to_string(),
                 tier: 1.into(),
-                head_block: Some(tx_d),
+                head_block_sender: Some(tx_d),
                 peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "e".to_string(),
                 tier: 1.into(),
-                head_block: Some(tx_e),
+                head_block_sender: Some(tx_e),
                 peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
             Web3Rpc {
                 name: "f".to_string(),
                 tier: 1.into(),
-                head_block: Some(tx_f),
+                head_block_sender: Some(tx_f),
                 peak_latency: Some(new_peak_latency()),
                 ..Default::default()
             },
@@ -1450,7 +1438,7 @@ mod tests {
             automatic_block_limit: false,
             backup: false,
             block_data_limit: block_data_limit.into(),
-            head_block: Some(tx_synced),
+            head_block_sender: Some(tx_synced),
             peak_latency: Some(new_peak_latency()),
             ..Default::default()
         };
@@ -1463,7 +1451,7 @@ mod tests {
             automatic_block_limit: false,
             backup: false,
             block_data_limit: block_data_limit.into(),
-            head_block: Some(tx_lagged),
+            head_block_sender: Some(tx_lagged),
             peak_latency: Some(new_peak_latency()),
             ..Default::default()
         };
@@ -1527,7 +1515,7 @@ mod tests {
         assert!(rpcs.head_block_hash().is_none());
 
         // all_backend_connections gives all non-backup servers regardless of sync status
-        let m = Arc::new(RequestMetadata::default());
+        let m = Arc::new(Web3Request::default());
         assert_eq!(
             rpcs.all_connections(&m, None, None, None, None)
                 .await
@@ -1537,7 +1525,7 @@ mod tests {
         );
 
         // best_synced_backend_connection which servers to be synced with the head block should not find any nodes
-        let m = Arc::new(RequestMetadata::default());
+        let m = Arc::new(Web3Request::default());
         let x = rpcs
             .wait_for_best_rpc(
                 &m,
@@ -1633,7 +1621,7 @@ mod tests {
         assert!(!lagged_rpc.has_block_data(head_block.number.as_ref().unwrap()));
 
         // TODO: make sure the handle is for the expected rpc
-        let m = Arc::new(RequestMetadata::default());
+        let m = Arc::new(Web3Request::default());
         assert!(matches!(
             rpcs.wait_for_best_rpc(
                 &m,
@@ -1648,7 +1636,7 @@ mod tests {
         ));
 
         // TODO: make sure the handle is for the expected rpc
-        let m = Arc::new(RequestMetadata::default());
+        let m = Arc::new(Web3Request::default());
         assert!(matches!(
             rpcs.wait_for_best_rpc(
                 &m,
@@ -1663,7 +1651,7 @@ mod tests {
         ));
 
         // TODO: make sure the handle is for the expected rpc
-        let m = Arc::new(RequestMetadata::default());
+        let m = Arc::new(Web3Request::default());
         assert!(matches!(
             rpcs.wait_for_best_rpc(
                 &m,
@@ -1678,7 +1666,7 @@ mod tests {
         ));
 
         // future block should not get a handle
-        let m = Arc::new(RequestMetadata::default());
+        let m = Arc::new(Web3Request::default());
         let future_rpc = rpcs
             .wait_for_best_rpc(
                 &m,
@@ -1715,7 +1703,7 @@ mod tests {
             backup: false,
             block_data_limit: 64.into(),
             tier: 1.into(),
-            head_block: Some(tx_pruned),
+            head_block_sender: Some(tx_pruned),
             ..Default::default()
         };
 
@@ -1728,7 +1716,7 @@ mod tests {
             backup: false,
             block_data_limit: u64::MAX.into(),
             tier: 2.into(),
-            head_block: Some(tx_archive),
+            head_block_sender: Some(tx_archive),
             ..Default::default()
         };
 
@@ -1787,7 +1775,7 @@ mod tests {
 
         // best_synced_backend_connection requires servers to be synced with the head block
         // TODO: test with and without passing the head_block.number?
-        let m = Arc::new(RequestMetadata::default());
+        let m = Arc::new(Web3Request::default());
         let best_available_server = rpcs
             .wait_for_best_rpc(
                 &m,
@@ -1806,7 +1794,7 @@ mod tests {
             OpenRequestResult::Handle(_)
         ));
 
-        let m = Arc::new(RequestMetadata::default());
+        let m = Arc::new(Web3Request::default());
         let _best_available_server_from_none = rpcs
             .wait_for_best_rpc(
                 &m,
@@ -1820,7 +1808,7 @@ mod tests {
 
         // assert_eq!(best_available_server, best_available_server_from_none);
 
-        let m = Arc::new(RequestMetadata::default());
+        let m = Arc::new(Web3Request::default());
         let best_archive_server = rpcs
             .wait_for_best_rpc(
                 &m,
@@ -1879,7 +1867,7 @@ mod tests {
             backup: false,
             block_data_limit: 64.into(),
             // tier: 0,
-            head_block: Some(tx_mock_geth),
+            head_block_sender: Some(tx_mock_geth),
             peak_latency: Some(new_peak_latency()),
             ..Default::default()
         };
@@ -1891,7 +1879,7 @@ mod tests {
             backup: false,
             block_data_limit: u64::MAX.into(),
             // tier: 1,
-            head_block: Some(tx_mock_erigon_archive),
+            head_block_sender: Some(tx_mock_erigon_archive),
             peak_latency: Some(new_peak_latency()),
             ..Default::default()
         };
@@ -1950,7 +1938,7 @@ mod tests {
 
         // best_synced_backend_connection requires servers to be synced with the head block
         // TODO: test with and without passing the head_block.number?
-        let m = Arc::new(RequestMetadata::default());
+        let m = Arc::new(Web3Request::default());
         let head_connections = rpcs
             .all_connections(&m, Some(block_2.number()), None, None, None)
             .await;
@@ -1963,7 +1951,7 @@ mod tests {
             "wrong number of connections"
         );
 
-        let m = Arc::new(RequestMetadata::default());
+        let m = Arc::new(Web3Request::default());
         let all_connections = rpcs
             .all_connections(&m, Some(block_1.number()), None, None, None)
             .await;
@@ -1976,7 +1964,7 @@ mod tests {
             "wrong number of connections"
         );
 
-        let m = Arc::new(RequestMetadata::default());
+        let m = Arc::new(Web3Request::default());
         let all_connections = rpcs.all_connections(&m, None, None, None, None).await;
 
         debug!("all_connections: {:#?}", all_connections);

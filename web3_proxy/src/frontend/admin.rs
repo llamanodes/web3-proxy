@@ -59,7 +59,7 @@ pub async fn admin_increase_balance(
     let caller = app.bearer_is_authorized(bearer).await?;
 
     // Establish connections
-    let db_conn = global_db_conn().await?;
+    let db_conn = global_db_conn()?;
     let txn = db_conn.begin().await?;
 
     // Check if the caller is an admin (if not, return early)
@@ -197,8 +197,8 @@ pub async fn admin_imitate_login_get(
         resources: vec![],
     };
 
-    let db_conn = global_db_conn().await?;
-    let db_replica = global_db_replica_conn().await?;
+    let db_conn = global_db_conn()?;
+    let db_replica = global_db_replica_conn()?;
 
     let admin = user::Entity::find()
         .filter(user::Column::Address.eq(admin_address.as_bytes()))
@@ -336,7 +336,7 @@ pub async fn admin_imitate_login_post(
     })?;
 
     // fetch the message we gave them from our database
-    let db_replica = global_db_replica_conn().await?;
+    let db_replica = global_db_replica_conn()?;
 
     let user_pending_login = pending_login::Entity::find()
         .filter(pending_login::Column::Nonce.eq(Uuid::from(login_nonce)))
@@ -379,7 +379,7 @@ pub async fn admin_imitate_login_post(
         .await?
         .web3_context("admin address was not found!")?;
 
-    let db_conn = global_db_conn().await?;
+    let db_conn = global_db_conn()?;
 
     // Add a message that the admin has logged in
     // Note that the admin is trying to log in as this user
