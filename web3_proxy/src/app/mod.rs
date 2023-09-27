@@ -1822,6 +1822,7 @@ impl Web3ProxyApp {
                             Arc::new(Semaphore::new(1))
                         }).await;
 
+                        // TODO: don't always do 1 second. use the median request latency instead
                         match timeout(Duration::from_secs(1), s.acquire_owned()).await {
                             Err(_) => {
                                 // TODO: should we try to cache this? whatever has the semaphore //should// handle that for us

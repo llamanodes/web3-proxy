@@ -40,7 +40,10 @@ impl Web3ProxyApp {
 
         // anyone can subscribe to newHeads
         // only premium users are allowed to subscribe to the other things
-        if !(subscribe_to == "newHeads" || authorization.active_premium().await) {
+        if !(self.config.free_subscriptions
+            || subscribe_to == "newHeads"
+            || authorization.active_premium().await)
+        {
             return Err(Web3ProxyError::AccessDenied(
                 "eth_subscribe for this event requires an active premium account".into(),
             ));
