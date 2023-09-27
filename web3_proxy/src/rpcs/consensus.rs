@@ -108,20 +108,6 @@ pub struct RankedRpcs {
 }
 
 impl RankedRpcs {
-    // /// useful when Web3Rpcs does not track the head block
-    // pub fn from_all(rpcs: &Web3Rpcs) -> Self {
-    //     let inner = vec![(
-    //         RpcRanking::default(),
-    //         rpcs.by_name
-    //             .read()
-    //             .values()
-    //             .cloned()
-    //             .collect::<Vec<Arc<_>>>(),
-    //     )];
-
-    //     todo!()
-    // }
-
     pub fn from_votes(
         min_synced_rpcs: usize,
         min_sum_soft_limit: u32,
@@ -914,12 +900,4 @@ impl ConsensusFinder {
             .map(|(x, _)| x.tier.load(atomic::Ordering::Relaxed))
             .max()
     }
-}
-
-#[cfg(test)]
-mod test {
-    // #[test]
-    // fn test_simplest_case_consensus_head_connections() {
-    //     todo!();
-    // }
 }
