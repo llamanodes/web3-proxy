@@ -187,7 +187,7 @@ impl MigrateStatsToV2SubCommand {
                     // Create RequestMetadata
                     let request_metadata = RequestMetadata {
                         archive_request: x.archive_request.into(),
-                        authorization: Some(authorization.clone()),
+                        authorization: authorization.clone(),
                         backend_requests: Mutex::new(backend_rpcs),
                         chain_id,
                         error_response: x.error_response.into(),

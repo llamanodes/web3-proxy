@@ -44,8 +44,6 @@ async fn main() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "wait_for_sync=debug");
     }
 
-    // todo!("set up tracing");
-
     // this probably won't matter for us in docker, but better safe than sorry
     fdlimit::raise_fd_limit();
 

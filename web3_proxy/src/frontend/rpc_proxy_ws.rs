@@ -4,11 +4,11 @@
 
 use super::authorization::{ip_is_authorized, key_is_authorized, Authorization, RequestMetadata};
 use crate::errors::{Web3ProxyError, Web3ProxyResponse};
-use crate::jsonrpc::JsonRpcId;
+use crate::jsonrpc::{self, JsonRpcId};
 use crate::{
     app::Web3ProxyApp,
     errors::Web3ProxyResult,
-    jsonrpc::{JsonRpcForwardedResponse, JsonRpcForwardedResponseEnum, JsonRpcRequest},
+    jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest},
 };
 use axum::headers::{Origin, Referer, UserAgent};
 use axum::{
@@ -323,11 +323,11 @@ async fn websocket_proxy_web3_rpc(
     response_sender: &mpsc::Sender<Message>,
     subscription_count: &AtomicU64,
     subscriptions: &AsyncRwLock<HashMap<U64, AbortHandle>>,
-) -> (Box<RawValue>, Web3ProxyResult<JsonRpcForwardedResponseEnum>) {
+) -> (Box<RawValue>, Web3ProxyResult<jsonrpc::Response>) {
     let response_id = json_request.id.clone();
 
     // TODO: move this to a seperate function so we can use the try operator
-    let response: Web3ProxyResult<JsonRpcForwardedResponseEnum> = match &json_request.method[..] {
+    let response: Web3ProxyResult<jsonrpc::Response> = match &json_request.method[..] {
         "eth_subscribe" => {
             // TODO: how can we subscribe with proxy_mode?
             match app
@@ -340,7 +340,10 @@ async fn websocket_proxy_web3_rpc(
                 .await
             {
                 Ok((handle, response)) => {
-                    if let Some(subscription_id) = response.result.clone() {
+                    if let jsonrpc::Payload::Success {
+                        result: ref subscription_id,
+                    } = response.payload
+                    {
                         let mut x = subscriptions.write().await;
 
                         let key: U64 = serde_json::from_str(subscription_id.get()).unwrap();
@@ -389,9 +392,12 @@ async fn websocket_proxy_web3_rpc(
             };
 
             let response =
-                JsonRpcForwardedResponse::from_value(json!(partial_response), response_id.clone());
+                jsonrpc::ParsedResponse::from_value(json!(partial_response), response_id.clone());
 
+            // TODO: better way of passing in ParsedResponse
+            let response = jsonrpc::SingleResponse::Parsed(response);
             request_metadata.add_response(&response);
+            let response = response.parsed().await.expect("Response already parsed");
 
             Ok(response.into())
         }
@@ -441,7 +447,7 @@ async fn handle_socket_payload(
     };
 
     let response_str = match response {
-        Ok(x) => serde_json::to_string(&x).expect("to_string should always work here"),
+        Ok(x) => x.to_json_string().await?,
         Err(err) => {
             let (_, response_data) = err.as_response_parts();
 

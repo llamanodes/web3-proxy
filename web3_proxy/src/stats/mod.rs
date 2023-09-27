@@ -539,13 +539,8 @@ impl BufferedRpcQueryStats {
 /// There are often multiple copies if a request is being sent to multiple servers in parallel
 impl RpcQueryStats {
     fn try_from_metadata(mut metadata: RequestMetadata) -> Web3ProxyResult<Self> {
-        let mut authorization = metadata.authorization.take();
-
-        if authorization.is_none() {
-            authorization = Some(Arc::new(Authorization::internal()?));
-        }
-
-        let authorization = authorization.expect("Authorization will always be set");
+        // TODO: do this without a clone
+        let authorization = metadata.authorization.clone();
 
         let archive_request = metadata.archive_request.load(Ordering::Relaxed);
 

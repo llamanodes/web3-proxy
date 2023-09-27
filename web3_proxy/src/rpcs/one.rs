@@ -1,12 +1,12 @@
 //! Rate-limited communication with a web3 provider.
 use super::blockchain::{ArcBlock, BlocksByHashCache, Web3ProxyBlock};
-use super::provider::{connect_http, connect_ws, EthersHttpProvider, EthersWsProvider};
+use super::provider::{connect_ws, EthersWsProvider};
 use super::request::{OpenRequestHandle, OpenRequestResult};
 use crate::app::{flatten_handle, Web3ProxyJoinHandle};
 use crate::config::{BlockAndRpc, Web3RpcConfig};
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
-use crate::frontend::authorization::Authorization;
-use crate::jsonrpc::{JsonRpcParams, JsonRpcResultData};
+use crate::frontend::authorization::RequestMetadata;
+use crate::jsonrpc::{self, JsonRpcParams, JsonRpcResultData};
 use crate::rpcs::request::RequestErrorHandler;
 use anyhow::{anyhow, Context};
 use arc_swap::ArcSwapOption;
@@ -39,7 +39,8 @@ pub struct Web3Rpc {
     pub db_conn: Option<DatabaseConnection>,
     pub subscribe_txs: bool,
     /// most all requests prefer use the http_provider
-    pub(super) http_provider: Option<EthersHttpProvider>,
+    pub(super) http_client: Option<reqwest::Client>,
+    pub(super) http_url: Option<Url>,
     /// the websocket url is only used for subscriptions
     pub(super) ws_url: Option<Url>,
     /// the websocket provider is only used for subscriptions
@@ -164,14 +165,13 @@ impl Web3Rpc {
 
         let median_request_latency = RollingQuantileLatency::spawn_median(1_000).await;
 
-        let http_provider = if let Some(http_url) = config.http_url {
+        let (http_url, http_client) = if let Some(http_url) = config.http_url {
             let http_url = http_url.parse::<Url>()?;
-
-            Some(connect_http(http_url, http_client, block_interval)?)
-
-            // TODO: check the provider is on the right chain
+            // TODO: double-check not missing anything from connect_http()
+            let http_client = http_client.unwrap_or_default();
+            (Some(http_url), Some(http_client))
         } else {
-            None
+            (None, None)
         };
 
         let ws_url = if let Some(ws_url) = config.ws_url {
@@ -194,7 +194,8 @@ impl Web3Rpc {
             hard_limit,
             hard_limit_until: Some(hard_limit_until),
             head_block: Some(head_block),
-            http_provider,
+            http_url,
+            http_client,
             max_head_block_age,
             name,
             peak_latency: Some(peak_latency),
@@ -916,7 +917,7 @@ impl Web3Rpc {
                 self.send_head_block_result(Ok(Some(block)), &block_sender, &block_map)
                     .await?;
             }
-        } else if self.http_provider.is_some() {
+        } else if self.http_client.is_some() {
             // there is a "watch_blocks" function, but a lot of public nodes (including llamanodes) do not support the necessary rpc endpoints
             // TODO: is 1/2 the block time okay?
             let mut i = interval(self.block_interval / 2);
@@ -960,7 +961,7 @@ impl Web3Rpc {
 
     pub async fn wait_for_request_handle(
         self: &Arc<Self>,
-        authorization: &Arc<Authorization>,
+        request_metadata: &Arc<RequestMetadata>,
         max_wait: Option<Duration>,
         error_handler: Option<RequestErrorHandler>,
     ) -> Web3ProxyResult<OpenRequestHandle> {
@@ -969,7 +970,10 @@ impl Web3Rpc {
         let max_wait_until = max_wait.map(|x| Instant::now() + x);
 
         loop {
-            match self.try_request_handle(authorization, error_handler).await {
+            match self
+                .try_request_handle(request_metadata, error_handler)
+                .await
+            {
                 Ok(OpenRequestResult::Handle(handle)) => return Ok(handle),
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // TODO: emit a stat?
@@ -1011,7 +1015,7 @@ impl Web3Rpc {
 
     pub async fn try_request_handle(
         self: &Arc<Self>,
-        authorization: &Arc<Authorization>,
+        request_metadata: &Arc<RequestMetadata>,
         error_handler: Option<RequestErrorHandler>,
     ) -> Web3ProxyResult<OpenRequestResult> {
         // TODO: if websocket is reconnecting, return an error?
@@ -1062,7 +1066,7 @@ impl Web3Rpc {
         };
 
         let handle =
-            OpenRequestHandle::new(authorization.clone(), self.clone(), error_handler).await;
+            OpenRequestHandle::new(request_metadata.clone(), self.clone(), error_handler).await;
 
         Ok(handle.into())
     }
@@ -1084,17 +1088,20 @@ impl Web3Rpc {
         self: &Arc<Self>,
         method: &str,
         params: &P,
-        authorization: &Arc<Authorization>,
+        request_metadata: &Arc<RequestMetadata>,
         error_handler: Option<RequestErrorHandler>,
         max_wait: Option<Duration>,
     ) -> Web3ProxyResult<R> {
         let handle = self
-            .wait_for_request_handle(authorization, max_wait, error_handler)
+            .wait_for_request_handle(request_metadata, max_wait, error_handler)
             .await?;
 
-        let x = handle.request::<P, R>(method, params).await?;
-
-        Ok(x)
+        let response = handle.request::<P, R>(method, params).await?;
+        let parsed = response.parsed().await?;
+        match parsed.payload {
+            jsonrpc::Payload::Success { result } => Ok(result),
+            jsonrpc::Payload::Error { error } => Err(error.into()),
+        }
     }
 }
 
@@ -1108,7 +1115,7 @@ impl Hash for Web3Rpc {
         self.name.hash(state);
 
         // TODO: url does NOT include the authorization data. i think created_at should protect us if auth changes without anything else
-        self.http_provider.as_ref().map(|x| x.url()).hash(state);
+        self.http_url.hash(state);
         // TODO: figure out how to get the url for the ws provider
         // self.ws_provider.map(|x| x.url()).hash(state);
 

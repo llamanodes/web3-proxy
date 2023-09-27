@@ -1,7 +1,7 @@
 //! Utlities for logging errors for admins and displaying errors to users.
 
 use crate::frontend::authorization::Authorization;
-use crate::jsonrpc::{JsonRpcErrorData, JsonRpcForwardedResponse};
+use crate::jsonrpc::{self, JsonRpcErrorData, JsonRpcForwardedResponse};
 use crate::response_cache::JsonRpcResponseEnum;
 use crate::rpcs::provider::EthersHttpProvider;
 use axum::extract::rejection::JsonRejection;
@@ -19,6 +19,7 @@ use http::header::InvalidHeaderValue;
 use http::uri::InvalidUri;
 use ipnet::AddrParseError;
 use migration::sea_orm::DbErr;
+use parking_lot::Mutex;
 use redis_rate_limiter::redis::RedisError;
 use redis_rate_limiter::RedisPoolError;
 use reqwest::header::ToStrError;
@@ -127,6 +128,10 @@ pub enum Web3ProxyError {
     #[error(ignore)]
     #[display(fmt = "{:?}", _0)]
     JsonRpcResponse(JsonRpcResponseEnum<Arc<RawValue>>),
+    /// make it easy to skip caching streaming results
+    #[error(ignore)]
+    #[display(fmt = "{:?}", _0)]
+    StreamResponse(Mutex<Option<jsonrpc::StreamResponse>>),
     /// make it easy to skip caching null results
     NullJsonRpcResult,
     OriginRequired,
@@ -184,6 +189,15 @@ pub enum Web3ProxyError {
 }
 
 impl Web3ProxyError {
+    pub fn as_json_response_parts(
+        &self,
+        id: Box<RawValue>,
+    ) -> (StatusCode, jsonrpc::SingleResponse) {
+        let (code, response_data) = self.as_response_parts();
+        let response = jsonrpc::ParsedResponse::from_response_data(response_data, id);
+        (code, response.into())
+    }
+
     /// turn the error into an axum response.
     /// <https://www.jsonrpc.org/specification#error_object>
     pub fn as_response_parts(&self) -> (StatusCode, JsonRpcResponseEnum<Arc<RawValue>>) {
@@ -768,6 +782,10 @@ impl Web3ProxyError {
             Self::JsonRpcResponse(response_enum) => {
                 // TODO: shame we have to clone, but its an Arc so its not terrible
                 return (StatusCode::OK, response_enum.clone());
+            }
+            Self::StreamResponse(_resp) => {
+                // TODO: better way of doing this?
+                unreachable!("stream is pulled out, not used here");
             }
             Self::NullJsonRpcResult => {
                 return (StatusCode::OK, JsonRpcResponseEnum::NullResult);

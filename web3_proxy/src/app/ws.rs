@@ -3,8 +3,7 @@
 use super::Web3ProxyApp;
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, RequestMetadata, RequestOrMethod};
-use crate::jsonrpc::JsonRpcForwardedResponse;
-use crate::jsonrpc::JsonRpcRequest;
+use crate::jsonrpc::{self, JsonRpcRequest};
 use crate::response_cache::JsonRpcResponseEnum;
 use axum::extract::ws::{CloseFrame, Message};
 use deferred_rate_limiter::DeferredRateLimitResult;
@@ -30,7 +29,7 @@ impl Web3ProxyApp {
         subscription_count: &'a AtomicU64,
         // TODO: taking a sender for Message instead of the exact json we are planning to send feels wrong, but its easier for now
         response_sender: mpsc::Sender<Message>,
-    ) -> Web3ProxyResult<(AbortHandle, JsonRpcForwardedResponse)> {
+    ) -> Web3ProxyResult<(AbortHandle, jsonrpc::ParsedResponse)> {
         let subscribe_to = jsonrpc_request
             .params
             .get(0)
@@ -41,7 +40,10 @@ impl Web3ProxyApp {
 
         // anyone can subscribe to newHeads
         // only premium users are allowed to subscribe to the other things
-        if !(subscribe_to == "newHeads" || authorization.active_premium().await) {
+        if !(self.config.free_subscriptions
+            || subscribe_to == "newHeads"
+            || authorization.active_premium().await)
+        {
             return Err(Web3ProxyError::AccessDenied(
                 "eth_subscribe for this event requires an active premium account".into(),
             ));
@@ -214,10 +216,13 @@ impl Web3ProxyApp {
 
         let response_data = JsonRpcResponseEnum::from(json!(subscription_id));
 
-        let response = JsonRpcForwardedResponse::from_response_data(response_data, id);
+        let response = jsonrpc::ParsedResponse::from_response_data(response_data, id);
 
+        // TODO: better way of passing in ParsedResponse
+        let response = jsonrpc::SingleResponse::Parsed(response);
         // TODO: this serializes twice
         request_metadata.add_response(&response);
+        let response = response.parsed().await.expect("Response already parsed");
 
         // TODO: make a `SubscriptonHandle(AbortHandle, JoinHandle)` struct?
         Ok((subscription_abort_handle, response))
@@ -227,45 +232,44 @@ impl Web3ProxyApp {
         &self,
         request_metadata: &RequestMetadata,
     ) -> Option<Message> {
-        if let Some(authorization) = request_metadata.authorization.as_ref() {
-            if authorization.checks.rpc_secret_key_id.is_none() {
-                if let Some(rate_limiter) = &self.frontend_ip_rate_limiter {
-                    match rate_limiter
-                        .throttle(
-                            authorization.ip,
-                            authorization.checks.max_requests_per_period,
-                            1,
-                        )
-                        .await
-                    {
-                        Ok(DeferredRateLimitResult::RetryNever) => {
-                            let close_frame = CloseFrame {
+        let authorization = &request_metadata.authorization;
+
+        if !authorization.active_premium().await {
+            if let Some(rate_limiter) = &self.frontend_public_rate_limiter {
+                match rate_limiter
+                    .throttle(
+                        authorization.ip,
+                        authorization.checks.max_requests_per_period,
+                        1,
+                    )
+                    .await
+                {
+                    Ok(DeferredRateLimitResult::RetryNever) => {
+                        let close_frame = CloseFrame {
                             code: StatusCode::TOO_MANY_REQUESTS.as_u16(),
                             reason:
                                 "rate limited. upgrade to premium for unlimited websocket messages"
                                     .into(),
                         };
 
-                            return Some(Message::Close(Some(close_frame)));
-                        }
-                        Ok(DeferredRateLimitResult::RetryAt(retry_at)) => {
-                            let retry_at = retry_at.duration_since(Instant::now());
+                        return Some(Message::Close(Some(close_frame)));
+                    }
+                    Ok(DeferredRateLimitResult::RetryAt(retry_at)) => {
+                        let retry_at = retry_at.duration_since(Instant::now());
 
-                            let reason = format!("rate limited. upgrade to premium for unlimited websocket messages. retry in {}s", retry_at.as_secs_f32());
+                        let reason = format!("rate limited. upgrade to premium for unlimited websocket messages. retry in {}s", retry_at.as_secs_f32());
 
-                            let close_frame = CloseFrame {
-                                code: StatusCode::TOO_MANY_REQUESTS.as_u16(),
-                                reason: reason.into(),
-                            };
+                        let close_frame = CloseFrame {
+                            code: StatusCode::TOO_MANY_REQUESTS.as_u16(),
+                            reason: reason.into(),
+                        };
 
-                            return Some(Message::Close(Some(close_frame)));
-                        }
-                        Ok(_) => {}
-                        Err(err) => {
-                            // this an internal error of some kind, not the rate limit being hit
-                            // TODO: i really want axum to do this for us in a single place.
-                            error!("rate limiter is unhappy. allowing ip. err={:?}", err);
-                        }
+                        return Some(Message::Close(Some(close_frame)));
+                    }
+                    Ok(_) => {}
+                    Err(err) => {
+                        // this an internal error of some kind, not the rate limit being hit
+                        error!(?err, "rate limiter is unhappy. allowing ip");
                     }
                 }
             }

@@ -1,9 +1,11 @@
-use crate::app::Web3ProxyApp;
-use crate::errors::Web3ProxyError;
-use crate::frontend::authorization::{Authorization, RequestMetadata, RequestOrMethod};
-use crate::response_cache::JsonRpcResponseEnum;
-use axum::response::Response;
+use axum::body::StreamBody;
+use axum::response::{IntoResponse, Response as AxumResponse};
+use axum::Json;
+use bytes::{Bytes, BytesMut};
 use derive_more::From;
+use ethers::providers::ProviderError;
+use futures_util::stream::{self, StreamExt};
+use futures_util::TryStreamExt;
 use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_inline_default::serde_inline_default;
@@ -11,12 +13,366 @@ use serde_json::json;
 use serde_json::value::{to_raw_value, RawValue};
 use std::borrow::Cow;
 use std::fmt;
+use std::marker::PhantomData;
 use std::sync::{atomic, Arc};
 use std::time::Duration;
 use tokio::time::sleep;
 
+use crate::app::Web3ProxyApp;
+use crate::errors::{Web3ProxyError, Web3ProxyResult};
+use crate::frontend::authorization::{Authorization, RequestMetadata, RequestOrMethod};
+use crate::response_cache::JsonRpcResponseEnum;
+
 pub trait JsonRpcParams = fmt::Debug + serde::Serialize + Send + Sync + 'static;
 pub trait JsonRpcResultData = serde::Serialize + serde::de::DeserializeOwned + fmt::Debug + Send;
+
+// TODO: borrow values to avoid allocs if possible
+#[derive(Debug, Serialize)]
+pub struct ParsedResponse<T = Arc<RawValue>> {
+    jsonrpc: String,
+    id: Option<Box<RawValue>>,
+    #[serde(flatten)]
+    pub payload: Payload<T>,
+}
+
+impl ParsedResponse {
+    pub fn from_value(value: serde_json::Value, id: Box<RawValue>) -> Self {
+        let result = serde_json::value::to_raw_value(&value)
+            .expect("this should not fail")
+            .into();
+        Self::from_result(result, Some(id))
+    }
+}
+
+impl ParsedResponse<Arc<RawValue>> {
+    pub fn from_response_data(data: JsonRpcResponseEnum<Arc<RawValue>>, id: Box<RawValue>) -> Self {
+        match data {
+            JsonRpcResponseEnum::NullResult => {
+                let x: Box<RawValue> = Default::default();
+                Self::from_result(Arc::from(x), Some(id))
+            }
+            JsonRpcResponseEnum::RpcError { error_data, .. } => Self::from_error(error_data, id),
+            JsonRpcResponseEnum::Result { value, .. } => Self::from_result(value, Some(id)),
+        }
+    }
+}
+
+impl<T> ParsedResponse<T> {
+    pub fn from_result(result: T, id: Option<Box<RawValue>>) -> Self {
+        Self {
+            jsonrpc: "2.0".to_string(),
+            id,
+            payload: Payload::Success { result },
+        }
+    }
+
+    pub fn from_error(error: JsonRpcErrorData, id: Box<RawValue>) -> Self {
+        Self {
+            jsonrpc: "2.0".to_string(),
+            id: Some(id),
+            payload: Payload::Error { error },
+        }
+    }
+
+    pub fn result(&self) -> Option<&T> {
+        match &self.payload {
+            Payload::Success { result } => Some(result),
+            Payload::Error { .. } => None,
+        }
+    }
+
+    pub fn into_result(self) -> Web3ProxyResult<T> {
+        match self.payload {
+            Payload::Success { result } => Ok(result),
+            Payload::Error { error } => Err(Web3ProxyError::JsonRpcErrorData(error)),
+        }
+    }
+}
+
+impl<'de, T> Deserialize<'de> for ParsedResponse<T>
+where
+    T: de::DeserializeOwned,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct ResponseVisitor<T>(PhantomData<T>);
+        impl<'de, T> de::Visitor<'de> for ResponseVisitor<T>
+        where
+            T: de::DeserializeOwned,
+        {
+            type Value = ParsedResponse<T>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a valid jsonrpc 2.0 response object")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::MapAccess<'de>,
+            {
+                let mut jsonrpc = None;
+
+                // response & error
+                let mut id = None;
+                // only response
+                let mut result = None;
+                // only error
+                let mut error = None;
+
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        "jsonrpc" => {
+                            if jsonrpc.is_some() {
+                                return Err(de::Error::duplicate_field("jsonrpc"));
+                            }
+
+                            let value = map.next_value()?;
+                            if value != "2.0" {
+                                return Err(de::Error::invalid_value(
+                                    de::Unexpected::Str(value),
+                                    &"2.0",
+                                ));
+                            }
+
+                            jsonrpc = Some(value);
+                        }
+                        "id" => {
+                            if id.is_some() {
+                                return Err(de::Error::duplicate_field("id"));
+                            }
+
+                            let value: Box<RawValue> = map.next_value()?;
+                            id = Some(value);
+                        }
+                        "result" => {
+                            if result.is_some() {
+                                return Err(de::Error::duplicate_field("result"));
+                            }
+
+                            let value: T = map.next_value()?;
+                            result = Some(value);
+                        }
+                        "error" => {
+                            if error.is_some() {
+                                return Err(de::Error::duplicate_field("Error"));
+                            }
+
+                            let value: JsonRpcErrorData = map.next_value()?;
+                            error = Some(value);
+                        }
+                        key => {
+                            return Err(de::Error::unknown_field(
+                                key,
+                                &["jsonrpc", "id", "result", "error"],
+                            ));
+                        }
+                    }
+                }
+
+                // jsonrpc version must be present in all responses
+                let jsonrpc = jsonrpc
+                    .ok_or_else(|| de::Error::missing_field("jsonrpc"))?
+                    .to_string();
+
+                let payload = match (result, error) {
+                    (Some(result), None) => Payload::Success { result },
+                    (None, Some(error)) => Payload::Error { error },
+                    _ => {
+                        return Err(de::Error::custom(
+                            "response must be either a success or error object",
+                        ))
+                    }
+                };
+
+                Ok(ParsedResponse {
+                    jsonrpc,
+                    id,
+                    payload,
+                })
+            }
+        }
+
+        deserializer.deserialize_map(ResponseVisitor(PhantomData))
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum Payload<T> {
+    Success { result: T },
+    Error { error: JsonRpcErrorData },
+}
+
+#[derive(Debug)]
+pub struct StreamResponse {
+    buffer: Bytes,
+    response: reqwest::Response,
+    request_metadata: Arc<RequestMetadata>,
+}
+
+impl StreamResponse {
+    // TODO: error handing
+    pub async fn read<T>(self) -> Result<ParsedResponse<T>, ProviderError>
+    where
+        T: de::DeserializeOwned,
+    {
+        let mut buffer = BytesMut::with_capacity(self.buffer.len());
+        buffer.extend_from_slice(&self.buffer);
+        buffer.extend_from_slice(&self.response.bytes().await?);
+        let parsed = serde_json::from_slice(&buffer)?;
+        Ok(parsed)
+    }
+}
+
+impl IntoResponse for StreamResponse {
+    fn into_response(self) -> axum::response::Response {
+        let stream = stream::once(async { Ok::<_, reqwest::Error>(self.buffer) })
+            .chain(self.response.bytes_stream())
+            .map_ok(move |x| {
+                let len = x.len();
+
+                self.request_metadata.add_response(len);
+
+                x
+            });
+        let body = StreamBody::new(stream);
+        body.into_response()
+    }
+}
+
+#[derive(Debug)]
+pub enum SingleResponse<T = Arc<RawValue>> {
+    Parsed(ParsedResponse<T>),
+    Stream(StreamResponse),
+}
+
+impl<T> SingleResponse<T>
+where
+    T: de::DeserializeOwned + Serialize,
+{
+    // TODO: threshold from configs
+    // TODO: error handling
+    pub async fn read_if_short(
+        mut response: reqwest::Response,
+        nbytes: u64,
+        request_metadata: Arc<RequestMetadata>,
+    ) -> Result<SingleResponse<T>, ProviderError> {
+        match response.content_length() {
+            // short
+            Some(len) if len <= nbytes => Ok(Self::from_bytes(response.bytes().await?)?),
+            // long
+            Some(_) => Ok(Self::Stream(StreamResponse {
+                buffer: Bytes::new(),
+                response,
+                request_metadata,
+            })),
+            None => {
+                let mut buffer = BytesMut::new();
+                while (buffer.len() as u64) < nbytes {
+                    match response.chunk().await? {
+                        Some(chunk) => {
+                            buffer.extend_from_slice(&chunk);
+                        }
+                        None => return Ok(Self::from_bytes(buffer.freeze())?),
+                    }
+                }
+                let buffer = buffer.freeze();
+                Ok(Self::Stream(StreamResponse {
+                    buffer,
+                    response,
+                    request_metadata,
+                }))
+            }
+        }
+    }
+
+    fn from_bytes(buf: Bytes) -> Result<Self, serde_json::Error> {
+        let val = serde_json::from_slice(&buf)?;
+        Ok(Self::Parsed(val))
+    }
+
+    // TODO: error handling
+    pub async fn parsed(self) -> Result<ParsedResponse<T>, ProviderError> {
+        match self {
+            Self::Parsed(resp) => Ok(resp),
+            Self::Stream(resp) => resp.read().await,
+        }
+    }
+
+    pub fn num_bytes(&self) -> usize {
+        match self {
+            Self::Parsed(response) => serde_json::to_string(response)
+                .expect("this should always serialize")
+                .len(),
+            Self::Stream(response) => match response.response.content_length() {
+                Some(len) => len as usize,
+                None => 0,
+            },
+        }
+    }
+}
+
+impl<T> From<ParsedResponse<T>> for SingleResponse<T> {
+    fn from(response: ParsedResponse<T>) -> Self {
+        Self::Parsed(response)
+    }
+}
+
+impl<T> IntoResponse for SingleResponse<T>
+where
+    T: Serialize,
+{
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            Self::Parsed(resp) => Json(resp).into_response(),
+            Self::Stream(resp) => resp.into_response(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum Response<T = Arc<RawValue>> {
+    Single(SingleResponse<T>),
+    Batch(Vec<ParsedResponse<T>>),
+}
+
+impl Response<Arc<RawValue>> {
+    pub async fn to_json_string(self) -> Result<String, ProviderError> {
+        let x = match self {
+            Self::Single(resp) => {
+                // TODO: handle streaming differently?
+                let parsed = resp.parsed().await?;
+
+                serde_json::to_string(&parsed)
+            }
+            Self::Batch(resps) => serde_json::to_string(&resps),
+        };
+
+        let x = x.expect("to_string should always work");
+
+        Ok(x)
+    }
+}
+
+impl<T> From<ParsedResponse<T>> for Response<T> {
+    fn from(response: ParsedResponse<T>) -> Self {
+        Self::Single(SingleResponse::Parsed(response))
+    }
+}
+
+impl<T> IntoResponse for Response<T>
+where
+    T: Serialize,
+{
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            Self::Single(resp) => resp.into_response(),
+            Self::Batch(resps) => Json(resps).into_response(),
+        }
+    }
+}
 
 // TODO: &str here instead of String should save a lot of allocations
 // TODO: generic type for params?
@@ -120,7 +476,7 @@ impl JsonRpcRequestEnum {
         app: &Web3ProxyApp,
         authorization: &Arc<Authorization>,
         duration: Duration,
-    ) -> Result<(), Response> {
+    ) -> Result<(), AxumResponse> {
         let err_id = match self.validate() {
             None => return Ok(()),
             Some(x) => x,
@@ -269,6 +625,14 @@ pub struct JsonRpcErrorData {
     pub data: Option<serde_json::Value>,
 }
 
+impl JsonRpcErrorData {
+    pub fn num_bytes(&self) -> usize {
+        serde_json::to_string(self)
+            .expect("should always serialize")
+            .len()
+    }
+}
+
 impl From<&'static str> for JsonRpcErrorData {
     fn from(value: &'static str) -> Self {
         Self {
@@ -396,6 +760,26 @@ pub enum JsonRpcForwardedResponseEnum {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deserialize_response() {
+        let json = r#"{"jsonrpc":"2.0","id":null,"result":100}"#;
+        let obj: ParsedResponse = serde_json::from_str(json).unwrap();
+        assert!(matches!(obj.payload, Payload::Success { .. }));
+    }
+
+    #[test]
+    fn serialize_response() {
+        let obj = ParsedResponse {
+            jsonrpc: "2.0".to_string(),
+            id: None,
+            payload: Payload::Success {
+                result: serde_json::value::RawValue::from_string("100".to_string()).unwrap(),
+            },
+        };
+        let json = serde_json::to_string(&obj).unwrap();
+        assert_eq!(json, r#"{"jsonrpc":"2.0","id":null,"result":100}"#);
+    }
 
     #[test]
     fn this_deserialize_single() {

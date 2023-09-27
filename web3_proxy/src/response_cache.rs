@@ -1,4 +1,8 @@
-use crate::{block_number::BlockNumAndHash, errors::Web3ProxyError, jsonrpc::JsonRpcErrorData};
+use crate::{
+    block_number::BlockNumAndHash,
+    errors::{Web3ProxyError, Web3ProxyResult},
+    jsonrpc::{self, JsonRpcErrorData},
+};
 use derive_more::From;
 use ethers::{
     providers::{HttpClientError, JsonRpcError, ProviderError, WsClientError},
@@ -6,6 +10,7 @@ use ethers::{
 };
 use hashbrown::hash_map::DefaultHashBuilder;
 use moka::future::Cache;
+use parking_lot::Mutex;
 use serde_json::value::RawValue;
 use std::{
     hash::{BuildHasher, Hash, Hasher},
@@ -131,6 +136,35 @@ impl JsonRpcResponseEnum<Arc<RawValue>> {
             Self::NullResult => true,
             Self::Result { value, .. } => value.get() == "null",
             _ => false,
+        }
+    }
+}
+
+impl TryFrom<Web3ProxyResult<jsonrpc::SingleResponse>> for JsonRpcResponseEnum<Arc<RawValue>> {
+    type Error = Web3ProxyError;
+    fn try_from(response: Web3ProxyResult<jsonrpc::SingleResponse>) -> Result<Self, Self::Error> {
+        match response {
+            Ok(jsonrpc::SingleResponse::Parsed(parsed)) => match parsed.payload {
+                jsonrpc::Payload::Success { result } => {
+                    let num_bytes = result.get().len() as u32;
+                    Ok(JsonRpcResponseEnum::Result {
+                        value: result,
+                        num_bytes,
+                    })
+                }
+                jsonrpc::Payload::Error { error } => {
+                    let num_bytes = error.num_bytes() as u32;
+                    Ok(JsonRpcResponseEnum::RpcError {
+                        error_data: error,
+                        // TODO: this double serializes
+                        num_bytes,
+                    })
+                }
+            },
+            Ok(jsonrpc::SingleResponse::Stream(stream)) => {
+                Err(Web3ProxyError::StreamResponse(Mutex::new(Some(stream))))
+            }
+            Err(err) => err.try_into(),
         }
     }
 }
