@@ -1,6 +1,6 @@
 use super::one::Web3Rpc;
 use crate::errors::{Web3ProxyErrorContext, Web3ProxyResult};
-use crate::frontend::authorization::{Authorization, AuthorizationType};
+use crate::frontend::authorization::{Authorization, AuthorizationType, RequestMetadata};
 use crate::globals::{global_db_conn, DB_CONN};
 use crate::jsonrpc::{self, JsonRpcParams, JsonRpcResultData};
 use chrono::Utc;
@@ -30,7 +30,7 @@ pub enum OpenRequestResult {
 /// Opening this handle checks rate limits. Developers, try to keep opening a handle and using it as close together as possible
 #[derive(Debug)]
 pub struct OpenRequestHandle {
-    authorization: Arc<Authorization>,
+    request_metadata: Arc<RequestMetadata>,
     error_handler: RequestErrorHandler,
     rpc: Arc<Web3Rpc>,
 }
@@ -133,7 +133,7 @@ impl Drop for OpenRequestHandle {
 
 impl OpenRequestHandle {
     pub async fn new(
-        authorization: Arc<Authorization>,
+        request_metadata: Arc<RequestMetadata>,
         rpc: Arc<Web3Rpc>,
         error_handler: Option<RequestErrorHandler>,
     ) -> Self {
@@ -146,7 +146,7 @@ impl OpenRequestHandle {
         let error_handler = error_handler.unwrap_or_default();
 
         Self {
-            authorization,
+            request_metadata,
             error_handler,
             rpc,
         }
@@ -175,7 +175,9 @@ impl OpenRequestHandle {
         // trace!(rpc=%self.rpc, %method, "request");
         trace!("requesting from {}", self.rpc);
 
-        match self.authorization.authorization_type {
+        let authorization = &self.request_metadata.authorization;
+
+        match &authorization.authorization_type {
             AuthorizationType::Frontend => {
                 self.rpc
                     .external_requests
@@ -210,7 +212,14 @@ impl OpenRequestHandle {
             .expect("request creation cannot fail");
             match client.post(url.clone()).json(&request).send().await {
                 // TODO: threshold from configs
-                Ok(response) => jsonrpc::SingleResponse::read_if_short(response, 1024).await,
+                Ok(response) => {
+                    jsonrpc::SingleResponse::read_if_short(
+                        response,
+                        1024,
+                        self.request_metadata.clone(),
+                    )
+                    .await
+                }
                 Err(err) => Err(err.into()),
             }
         } else if let Some(p) = self.rpc.ws_provider.load().as_ref() {
@@ -247,7 +256,8 @@ impl OpenRequestHandle {
                     // trace!(%method, "skipping save on revert");
                     RequestErrorHandler::TraceLevel
                 } else if DB_CONN.read().await.is_ok() {
-                    let log_revert_chance = self.authorization.checks.log_revert_chance;
+                    let log_revert_chance =
+                        self.request_metadata.authorization.checks.log_revert_chance;
 
                     if log_revert_chance == 0 {
                         // trace!(%method, "no chance. skipping save on revert");
@@ -405,7 +415,7 @@ impl OpenRequestHandle {
                         Ok(params) => {
                             // spawn saving to the database so we don't slow down the request
                             // TODO: log if this errors
-                            let f = self.authorization.clone().save_revert(method, params.0 .0);
+                            let f = authorization.clone().save_revert(method, params.0 .0);
 
                             tokio::spawn(f);
                         }

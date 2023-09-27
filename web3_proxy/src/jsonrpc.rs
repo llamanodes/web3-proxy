@@ -5,6 +5,7 @@ use bytes::{Bytes, BytesMut};
 use derive_more::From;
 use ethers::providers::ProviderError;
 use futures_util::stream::{self, StreamExt};
+use futures_util::TryStreamExt;
 use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -207,6 +208,7 @@ pub enum Payload<T> {
 pub struct StreamResponse {
     buffer: Bytes,
     response: reqwest::Response,
+    request_metadata: Arc<RequestMetadata>,
 }
 
 impl StreamResponse {
@@ -226,7 +228,14 @@ impl StreamResponse {
 impl IntoResponse for StreamResponse {
     fn into_response(self) -> axum::response::Response {
         let stream = stream::once(async { Ok::<_, reqwest::Error>(self.buffer) })
-            .chain(self.response.bytes_stream());
+            .chain(self.response.bytes_stream())
+            .map_ok(move |x| {
+                let len = x.len();
+
+                self.request_metadata.add_response(len);
+
+                x
+            });
         let body = StreamBody::new(stream);
         body.into_response()
     }
@@ -247,6 +256,7 @@ where
     pub async fn read_if_short(
         mut response: reqwest::Response,
         nbytes: u64,
+        request_metadata: Arc<RequestMetadata>,
     ) -> Result<SingleResponse<T>, ProviderError> {
         match response.content_length() {
             // short
@@ -255,6 +265,7 @@ where
             Some(_) => Ok(Self::Stream(StreamResponse {
                 buffer: Bytes::new(),
                 response,
+                request_metadata,
             })),
             None => {
                 let mut buffer = BytesMut::new();
@@ -267,7 +278,11 @@ where
                     }
                 }
                 let buffer = buffer.freeze();
-                Ok(Self::Stream(StreamResponse { buffer, response }))
+                Ok(Self::Stream(StreamResponse {
+                    buffer,
+                    response,
+                    request_metadata,
+                }))
             }
         }
     }
@@ -290,13 +305,10 @@ where
             Self::Parsed(response) => serde_json::to_string(response)
                 .expect("this should always serialize")
                 .len(),
-            Self::Stream(response) => {
-                match response.response.content_length() {
-                    Some(len) => len as usize,
-                    // TODO: how to handle response too large
-                    None => usize::MAX,
-                }
-            }
+            Self::Stream(response) => match response.response.content_length() {
+                Some(len) => len as usize,
+                None => 0,
+            },
         }
     }
 }
@@ -325,9 +337,21 @@ pub enum Response<T = Arc<RawValue>> {
     Batch(Vec<ParsedResponse<T>>),
 }
 
-impl<T> Response<T> {
-    pub fn to_json_string(&self) -> Result<String, ProviderError> {
-        todo!()
+impl Response<Arc<RawValue>> {
+    pub async fn to_json_string(self) -> Result<String, ProviderError> {
+        let x = match self {
+            Self::Single(resp) => {
+                // TODO: handle streaming differently?
+                let parsed = resp.parsed().await?;
+
+                serde_json::to_string(&parsed)
+            }
+            Self::Batch(resps) => serde_json::to_string(&resps),
+        };
+
+        let x = x.expect("to_string should always work");
+
+        Ok(x)
     }
 }
 

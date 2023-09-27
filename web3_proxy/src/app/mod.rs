@@ -10,8 +10,8 @@ use crate::frontend::authorization::{
 use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::globals::{global_db_conn, DatabaseError, DB_CONN, DB_REPLICA};
 use crate::jsonrpc::{
-    self, JsonRpcErrorData, JsonRpcId,
-    JsonRpcParams, JsonRpcRequest, JsonRpcRequestEnum, JsonRpcResultData, SingleResponse,
+    self, JsonRpcErrorData, JsonRpcId, JsonRpcParams, JsonRpcRequest, JsonRpcRequestEnum,
+    JsonRpcResultData, SingleResponse,
 };
 use crate::relational_db::{connect_db, migrate_db};
 use crate::response_cache::{
@@ -97,10 +97,13 @@ pub struct Web3ProxyApp {
     pub hostname: Option<String>,
     pub frontend_port: Arc<AtomicU16>,
     /// rate limit anonymous users
-    pub frontend_ip_rate_limiter: Option<DeferredRateLimiter<IpAddr>>,
+    pub frontend_public_rate_limiter: Option<DeferredRateLimiter<IpAddr>>,
+    /// bonus rate limit for anonymous users
+    pub bonus_frontend_public_rate_limiter: Option<RedisRateLimiter>,
     /// rate limit authenticated users
-    pub frontend_registered_user_rate_limiter:
-        Option<DeferredRateLimiter<RegisteredUserRateLimitKey>>,
+    pub frontend_premium_rate_limiter: Option<DeferredRateLimiter<RegisteredUserRateLimitKey>>,
+    /// bonus rate limit for authenticated users
+    pub bonus_frontend_premium_rate_limiter: Option<RedisRateLimiter>,
     /// concurrent/parallel request limits for anonymous users
     pub ip_semaphores: Cache<IpAddr, Arc<Semaphore>>,
     /// give some bonus capacity to public users
@@ -363,9 +366,11 @@ impl Web3ProxyApp {
 
         // create rate limiters
         // these are optional. they require redis
-        let mut frontend_ip_rate_limiter = None;
-        let mut frontend_registered_user_rate_limiter = None;
+        let mut frontend_public_rate_limiter = None;
+        let mut frontend_premium_rate_limiter = None;
         let mut login_rate_limiter = None;
+        let mut bonus_frontend_public_rate_limiter: Option<RedisRateLimiter> = None;
+        let mut bonus_frontend_premium_rate_limiter: Option<RedisRateLimiter> = None;
 
         if let Some(ref redis_pool) = vredis_pool {
             if let Some(public_requests_per_period) = top_config.app.public_requests_per_period {
@@ -381,10 +386,29 @@ impl Web3ProxyApp {
                 // these two rate limiters can share the base limiter
                 // these are deferred rate limiters because we don't want redis network requests on the hot path
                 // TODO: take cache_size from config
-                frontend_ip_rate_limiter =
+                frontend_public_rate_limiter =
                     Some(DeferredRateLimiter::new(20_000, "ip", rpc_rrl.clone(), None).await);
-                frontend_registered_user_rate_limiter =
+                frontend_premium_rate_limiter =
                     Some(DeferredRateLimiter::new(20_000, "key", rpc_rrl, None).await);
+
+                if top_config.app.bonus_frontend_public_rate_limit > 0 {
+                    bonus_frontend_public_rate_limiter = Some(RedisRateLimiter::new(
+                        "web3_proxy",
+                        "bonus_frontend_public",
+                        top_config.app.bonus_frontend_public_rate_limit,
+                        60.0,
+                        redis_pool.clone(),
+                    ));
+                }
+                if top_config.app.bonus_frontend_premium_rate_limit > 0 {
+                    bonus_frontend_premium_rate_limiter = Some(RedisRateLimiter::new(
+                        "web3_proxy",
+                        "bonus_frontend_premium",
+                        top_config.app.bonus_frontend_premium_rate_limit,
+                        60.0,
+                        redis_pool.clone(),
+                    ));
+                }
             }
 
             // login rate limiter
@@ -497,10 +521,10 @@ impl Web3ProxyApp {
             .ok()
             .and_then(|x| x.to_str().map(|x| x.to_string()));
 
-        // TODO: get the size out of the config
-        let bonus_ip_concurrency = Arc::new(Semaphore::new(top_config.app.bonus_ip_concurrency));
+        let bonus_ip_concurrency =
+            Arc::new(Semaphore::new(top_config.app.bonus_public_concurrency));
         let bonus_user_concurrency =
-            Arc::new(Semaphore::new(top_config.app.bonus_user_concurrency));
+            Arc::new(Semaphore::new(top_config.app.bonus_premium_concurrency));
 
         // TODO: what size?
         let jsonrpc_response_semaphores = CacheBuilder::new(10_000)
@@ -513,13 +537,15 @@ impl Web3ProxyApp {
 
         let app = Self {
             balanced_rpcs,
+            bonus_frontend_public_rate_limiter,
+            bonus_frontend_premium_rate_limiter,
             bonus_ip_concurrency,
             bonus_user_concurrency,
             bundler_4337_rpcs,
             config: top_config.app.clone(),
-            frontend_ip_rate_limiter,
+            frontend_public_rate_limiter,
             frontend_port: frontend_port.clone(),
-            frontend_registered_user_rate_limiter,
+            frontend_premium_rate_limiter,
             hostname,
             http_client,
             influxdb_client,
@@ -1117,7 +1143,7 @@ impl Web3ProxyApp {
                     .try_send_all_synced_connections(
                         method,
                         params,
-                        Some(request_metadata),
+                        request_metadata,
                         None,
                         None,
                         Some(Duration::from_secs(10)),
@@ -1147,7 +1173,7 @@ impl Web3ProxyApp {
             .try_send_all_synced_connections(
                 method,
                 params,
-                Some(request_metadata),
+                request_metadata,
                 None,
                 None,
                 Some(Duration::from_secs(10)),
@@ -1367,7 +1393,7 @@ impl Web3ProxyApp {
                         .try_proxy_connection::<_, Arc<RawValue>>(
                             method,
                             params,
-                            Some(request_metadata),
+                            request_metadata,
                             Some(Duration::from_secs(30)),
                             None,
                             None,
@@ -1405,7 +1431,7 @@ impl Web3ProxyApp {
                     .try_proxy_connection::<_, U256>(
                         method,
                         params,
-                        Some(request_metadata),
+                        request_metadata,
                         Some(Duration::from_secs(30)),
                         None,
                         None,
@@ -1441,7 +1467,7 @@ impl Web3ProxyApp {
                     .try_proxy_connection::<_, Arc<RawValue>>(
                         method,
                         params,
-                        Some(request_metadata),
+                        request_metadata,
                         Some(Duration::from_secs(30)),
                         None,
                         None,
@@ -1469,7 +1495,7 @@ impl Web3ProxyApp {
                         .try_proxy_connection::<_, Arc<RawValue>>(
                             method,
                             params,
-                            Some(request_metadata),
+                            request_metadata,
                             Some(Duration::from_secs(30)),
                             // TODO: should this be block 0 instead?
                             Some(&U64::one()),
@@ -1780,7 +1806,7 @@ impl Web3ProxyApp {
                             .try_proxy_connection::<_, Arc<RawValue>>(
                                 method,
                                 params,
-                                Some(request_metadata),
+                                request_metadata,
                                 max_wait,
                                 None,
                                 None,
@@ -1796,6 +1822,7 @@ impl Web3ProxyApp {
                             Arc::new(Semaphore::new(1))
                         }).await;
 
+                        // TODO: don't always do 1 second. use the median request latency instead
                         match timeout(Duration::from_secs(1), s.acquire_owned()).await {
                             Err(_) => {
                                 // TODO: should we try to cache this? whatever has the semaphore //should// handle that for us
@@ -1805,7 +1832,7 @@ impl Web3ProxyApp {
                                     .try_proxy_connection::<_, Arc<RawValue>>(
                                         method,
                                         params,
-                                        Some(request_metadata),
+                                        request_metadata,
                                         max_wait,
                                         None,
                                         None,
@@ -1829,7 +1856,7 @@ impl Web3ProxyApp {
                                                     .try_proxy_connection::<_, Arc<RawValue>>(
                                                         &method,
                                                         &params,
-                                                        Some(&request_metadata),
+                                                        &request_metadata,
                                                         max_wait,
                                                         from_block_num.as_ref(),
                                                         to_block_num.as_ref(),
@@ -1893,7 +1920,7 @@ impl Web3ProxyApp {
                         .try_proxy_connection::<_, Arc<RawValue>>(
                             method,
                             params,
-                            Some(request_metadata),
+                            request_metadata,
                             max_wait,
                             None,
                             None,
