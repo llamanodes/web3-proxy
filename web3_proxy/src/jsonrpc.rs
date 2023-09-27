@@ -337,9 +337,21 @@ pub enum Response<T = Arc<RawValue>> {
     Batch(Vec<ParsedResponse<T>>),
 }
 
-impl<T> Response<T> {
-    pub fn to_json_string(&self) -> Result<String, ProviderError> {
-        todo!()
+impl Response<Arc<RawValue>> {
+    pub async fn to_json_string(self) -> Result<String, ProviderError> {
+        let x = match self {
+            Self::Single(resp) => {
+                // TODO: handle streaming differently?
+                let parsed = resp.parsed().await?;
+
+                serde_json::to_string(&parsed)
+            }
+            Self::Batch(resps) => serde_json::to_string(&resps),
+        };
+
+        let x = x.expect("to_string should always work");
+
+        Ok(x)
     }
 }
 

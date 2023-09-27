@@ -447,11 +447,7 @@ async fn handle_socket_payload(
     };
 
     let response_str = match response {
-        // TOOD: is expect still ok here?
-        // TODO: could we stream this somehow?
-        Ok(x) => x
-            .to_json_string()
-            .expect("to_string should always work here"),
+        Ok(x) => x.to_json_string().await?,
         Err(err) => {
             let (_, response_data) = err.as_response_parts();
 
