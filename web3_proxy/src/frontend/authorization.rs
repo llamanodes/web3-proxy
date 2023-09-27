@@ -4,9 +4,10 @@ use super::rpc_proxy_ws::ProxyMode;
 use crate::app::{Web3ProxyApp, APP_USER_AGENT};
 use crate::balance::Balance;
 use crate::caches::RegisteredUserRateLimitKey;
+use crate::compute_units::default_usd_per_cu;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::globals::global_db_replica_conn;
-use crate::jsonrpc::{self, JsonRpcRequest};
+use crate::jsonrpc::{self, JsonRpcParams, JsonRpcRequest};
 use crate::rpcs::blockchain::Web3ProxyBlock;
 use crate::rpcs::one::Web3Rpc;
 use crate::stats::{AppStat, BackendRequests};
@@ -34,6 +35,7 @@ use rdkafka::util::Timeout as KafkaTimeout;
 use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::{RedisRateLimitResult, RedisRateLimiter};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::borrow::Cow;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -339,7 +341,7 @@ pub struct RequestMetadata {
     /// TODO: this is more complex than "requires a block older than X height". different types of data can be pruned differently
     pub archive_request: AtomicBool,
 
-    pub authorization: Option<Arc<Authorization>>,
+    pub authorization: Arc<Authorization>,
 
     pub chain_id: u64,
 
@@ -394,10 +396,7 @@ impl Default for Authorization {
 
 impl RequestMetadata {
     pub fn proxy_mode(&self) -> ProxyMode {
-        self.authorization
-            .as_ref()
-            .map(|x| x.checks.proxy_mode)
-            .unwrap_or_default()
+        self.authorization.checks.proxy_mode
     }
 }
 
@@ -516,7 +515,7 @@ impl RequestMetadata {
 
         let x = Self {
             archive_request: false.into(),
-            authorization: Some(authorization),
+            authorization,
             backend_requests: Default::default(),
             chain_id,
             error_response: false.into(),
@@ -532,6 +531,51 @@ impl RequestMetadata {
             start_instant: Instant::now(),
             stat_sender: app.stat_sender.clone(),
             usd_per_cu: app.config.usd_per_cu.unwrap_or_default(),
+            user_error_response: false.into(),
+        };
+
+        Arc::new(x)
+    }
+
+    pub fn new_internal<P: JsonRpcParams>(chain_id: u64, method: &str, params: &P) -> Arc<Self> {
+        let authorization = Arc::new(Authorization::internal().unwrap());
+        let request_ulid = Ulid::new();
+        let method = method.to_string().into();
+
+        // TODO: how can we get this?
+        let stat_sender = None;
+
+        // TODO: how can we do this efficiently? having to serialize sucks
+        let request_bytes = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": method,
+            "params": params,
+        })
+        .to_string()
+        .len();
+
+        // TODO: we should be getting this from config instead!
+        let usd_per_cu = default_usd_per_cu(chain_id);
+
+        let x = Self {
+            archive_request: false.into(),
+            authorization,
+            backend_requests: Default::default(),
+            chain_id,
+            error_response: false.into(),
+            kafka_debug_logger: None,
+            method,
+            no_servers: 0.into(),
+            request_bytes,
+            request_ulid,
+            response_bytes: 0.into(),
+            response_from_backup_rpc: false.into(),
+            response_millis: 0.into(),
+            response_timestamp: 0.into(),
+            start_instant: Instant::now(),
+            stat_sender,
+            usd_per_cu,
             user_error_response: false.into(),
         };
 

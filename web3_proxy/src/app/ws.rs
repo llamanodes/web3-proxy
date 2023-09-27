@@ -229,44 +229,44 @@ impl Web3ProxyApp {
         &self,
         request_metadata: &RequestMetadata,
     ) -> Option<Message> {
-        if let Some(authorization) = request_metadata.authorization.as_ref() {
-            if authorization.checks.rpc_secret_key_id.is_none() {
-                if let Some(rate_limiter) = &self.frontend_public_rate_limiter {
-                    match rate_limiter
-                        .throttle(
-                            authorization.ip,
-                            authorization.checks.max_requests_per_period,
-                            1,
-                        )
-                        .await
-                    {
-                        Ok(DeferredRateLimitResult::RetryNever) => {
-                            let close_frame = CloseFrame {
+        let authorization = &request_metadata.authorization;
+
+        if !authorization.active_premium().await {
+            if let Some(rate_limiter) = &self.frontend_public_rate_limiter {
+                match rate_limiter
+                    .throttle(
+                        authorization.ip,
+                        authorization.checks.max_requests_per_period,
+                        1,
+                    )
+                    .await
+                {
+                    Ok(DeferredRateLimitResult::RetryNever) => {
+                        let close_frame = CloseFrame {
                             code: StatusCode::TOO_MANY_REQUESTS.as_u16(),
                             reason:
                                 "rate limited. upgrade to premium for unlimited websocket messages"
                                     .into(),
                         };
 
-                            return Some(Message::Close(Some(close_frame)));
-                        }
-                        Ok(DeferredRateLimitResult::RetryAt(retry_at)) => {
-                            let retry_at = retry_at.duration_since(Instant::now());
+                        return Some(Message::Close(Some(close_frame)));
+                    }
+                    Ok(DeferredRateLimitResult::RetryAt(retry_at)) => {
+                        let retry_at = retry_at.duration_since(Instant::now());
 
-                            let reason = format!("rate limited. upgrade to premium for unlimited websocket messages. retry in {}s", retry_at.as_secs_f32());
+                        let reason = format!("rate limited. upgrade to premium for unlimited websocket messages. retry in {}s", retry_at.as_secs_f32());
 
-                            let close_frame = CloseFrame {
-                                code: StatusCode::TOO_MANY_REQUESTS.as_u16(),
-                                reason: reason.into(),
-                            };
+                        let close_frame = CloseFrame {
+                            code: StatusCode::TOO_MANY_REQUESTS.as_u16(),
+                            reason: reason.into(),
+                        };
 
-                            return Some(Message::Close(Some(close_frame)));
-                        }
-                        Ok(_) => {}
-                        Err(err) => {
-                            // this an internal error of some kind, not the rate limit being hit
-                            error!(?err, "rate limiter is unhappy. allowing ip");
-                        }
+                        return Some(Message::Close(Some(close_frame)));
+                    }
+                    Ok(_) => {}
+                    Err(err) => {
+                        // this an internal error of some kind, not the rate limit being hit
+                        error!(?err, "rate limiter is unhappy. allowing ip");
                     }
                 }
             }

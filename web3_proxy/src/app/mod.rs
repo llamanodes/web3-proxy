@@ -1144,7 +1144,7 @@ impl Web3ProxyApp {
                     .try_send_all_synced_connections(
                         method,
                         params,
-                        Some(request_metadata),
+                        request_metadata,
                         None,
                         None,
                         Some(Duration::from_secs(10)),
@@ -1174,7 +1174,7 @@ impl Web3ProxyApp {
             .try_send_all_synced_connections(
                 method,
                 params,
-                Some(request_metadata),
+                request_metadata,
                 None,
                 None,
                 Some(Duration::from_secs(10)),
@@ -1394,7 +1394,7 @@ impl Web3ProxyApp {
                         .try_proxy_connection::<_, Arc<RawValue>>(
                             method,
                             params,
-                            Some(request_metadata),
+                            request_metadata,
                             Some(Duration::from_secs(30)),
                             None,
                             None,
@@ -1432,7 +1432,7 @@ impl Web3ProxyApp {
                     .try_proxy_connection::<_, U256>(
                         method,
                         params,
-                        Some(request_metadata),
+                        request_metadata,
                         Some(Duration::from_secs(30)),
                         None,
                         None,
@@ -1468,7 +1468,7 @@ impl Web3ProxyApp {
                     .try_proxy_connection::<_, Arc<RawValue>>(
                         method,
                         params,
-                        Some(request_metadata),
+                        request_metadata,
                         Some(Duration::from_secs(30)),
                         None,
                         None,
@@ -1496,7 +1496,7 @@ impl Web3ProxyApp {
                         .try_proxy_connection::<_, Arc<RawValue>>(
                             method,
                             params,
-                            Some(request_metadata),
+                            request_metadata,
                             Some(Duration::from_secs(30)),
                             // TODO: should this be block 0 instead?
                             Some(&U64::one()),
@@ -1807,7 +1807,7 @@ impl Web3ProxyApp {
                             .try_proxy_connection::<_, Arc<RawValue>>(
                                 method,
                                 params,
-                                Some(request_metadata),
+                                request_metadata,
                                 max_wait,
                                 None,
                                 None,
@@ -1832,7 +1832,7 @@ impl Web3ProxyApp {
                                     .try_proxy_connection::<_, Arc<RawValue>>(
                                         method,
                                         params,
-                                        Some(request_metadata),
+                                        request_metadata,
                                         max_wait,
                                         None,
                                         None,
@@ -1856,7 +1856,7 @@ impl Web3ProxyApp {
                                                     .try_proxy_connection::<_, Arc<RawValue>>(
                                                         &method,
                                                         &params,
-                                                        Some(&request_metadata),
+                                                        &request_metadata,
                                                         max_wait,
                                                         from_block_num.as_ref(),
                                                         to_block_num.as_ref(),
@@ -1920,7 +1920,7 @@ impl Web3ProxyApp {
                         .try_proxy_connection::<_, Arc<RawValue>>(
                             method,
                             params,
-                            Some(request_metadata),
+                            request_metadata,
                             max_wait,
                             None,
                             None,

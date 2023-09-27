@@ -5,7 +5,7 @@ use super::request::{OpenRequestHandle, OpenRequestResult};
 use crate::app::{flatten_handle, Web3ProxyJoinHandle};
 use crate::config::{BlockAndRpc, Web3RpcConfig};
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
-use crate::frontend::authorization::Authorization;
+use crate::frontend::authorization::RequestMetadata;
 use crate::jsonrpc::{self, JsonRpcParams, JsonRpcResultData};
 use crate::rpcs::request::RequestErrorHandler;
 use anyhow::{anyhow, Context};
@@ -961,7 +961,7 @@ impl Web3Rpc {
 
     pub async fn wait_for_request_handle(
         self: &Arc<Self>,
-        authorization: &Arc<Authorization>,
+        request_metadata: &Arc<RequestMetadata>,
         max_wait: Option<Duration>,
         error_handler: Option<RequestErrorHandler>,
     ) -> Web3ProxyResult<OpenRequestHandle> {
@@ -970,7 +970,10 @@ impl Web3Rpc {
         let max_wait_until = max_wait.map(|x| Instant::now() + x);
 
         loop {
-            match self.try_request_handle(authorization, error_handler).await {
+            match self
+                .try_request_handle(request_metadata, error_handler)
+                .await
+            {
                 Ok(OpenRequestResult::Handle(handle)) => return Ok(handle),
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // TODO: emit a stat?
@@ -1012,7 +1015,7 @@ impl Web3Rpc {
 
     pub async fn try_request_handle(
         self: &Arc<Self>,
-        authorization: &Arc<Authorization>,
+        request_metadata: &Arc<RequestMetadata>,
         error_handler: Option<RequestErrorHandler>,
     ) -> Web3ProxyResult<OpenRequestResult> {
         // TODO: if websocket is reconnecting, return an error?
@@ -1063,7 +1066,7 @@ impl Web3Rpc {
         };
 
         let handle =
-            OpenRequestHandle::new(authorization.clone(), self.clone(), error_handler).await;
+            OpenRequestHandle::new(request_metadata.clone(), self.clone(), error_handler).await;
 
         Ok(handle.into())
     }
@@ -1085,12 +1088,12 @@ impl Web3Rpc {
         self: &Arc<Self>,
         method: &str,
         params: &P,
-        authorization: &Arc<Authorization>,
+        request_metadata: &Arc<RequestMetadata>,
         error_handler: Option<RequestErrorHandler>,
         max_wait: Option<Duration>,
     ) -> Web3ProxyResult<R> {
         let handle = self
-            .wait_for_request_handle(authorization, max_wait, error_handler)
+            .wait_for_request_handle(request_metadata, max_wait, error_handler)
             .await?;
 
         let response = handle.request::<P, R>(method, params).await?;
