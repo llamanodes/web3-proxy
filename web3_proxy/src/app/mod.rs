@@ -1179,7 +1179,7 @@ impl Web3ProxyApp {
         head_block: Option<Web3ProxyBlock>,
     ) -> (StatusCode, jsonrpc::SingleResponse, Vec<Arc<Web3Rpc>>) {
         let web3_request = Web3Request::new(
-            self.clone(),
+            self,
             authorization,
             None,
             RequestOrMethod::Request(request),

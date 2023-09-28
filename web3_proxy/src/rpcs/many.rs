@@ -564,9 +564,8 @@ impl Web3Rpcs {
 
                 if potential_rpcs.len() >= self.min_synced_rpcs {
                     // we have enough potential rpcs. try to load balance
-                    potential_rpcs.sort_by_cached_key(|x| {
-                        x.shuffle_for_load_balancing_on(max_block_needed.copied())
-                    });
+                    potential_rpcs
+                        .sort_by_cached_key(|x| x.shuffle_for_load_balancing_on(max_block_needed));
 
                     match self
                         ._best_available_rpc(
@@ -1008,7 +1007,7 @@ impl Web3Rpcs {
                 params=?web3_request.request.params(),
                 "No servers synced",
             );
-        } else if head_block_num.as_ref() > max_block_needed {
+        } else if head_block_num > max_block_needed {
             // we have synced past the needed block
             // TODO: log ranked rpcs
             // TODO: only log params in development

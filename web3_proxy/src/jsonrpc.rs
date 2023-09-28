@@ -506,8 +506,7 @@ impl JsonRpcRequestEnum {
 
         // TODO: create a stat so we can penalize
         // TODO: what request size
-        let metadata =
-            Web3Request::new(app.clone(), authorization.clone(), None, request, None).await;
+        let metadata = Web3Request::new(app, authorization.clone(), None, request, None).await;
 
         metadata
             .user_error_response

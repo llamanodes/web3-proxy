@@ -316,7 +316,7 @@ async fn proxy_web3_socket(
 }
 
 async fn websocket_proxy_web3_rpc(
-    app: Arc<Web3ProxyApp>,
+    app: &Arc<Web3ProxyApp>,
     authorization: Arc<Authorization>,
     json_request: JsonRpcRequest,
     response_sender: &mpsc::Sender<Message>,
@@ -325,8 +325,7 @@ async fn websocket_proxy_web3_rpc(
 ) -> Web3ProxyResult<jsonrpc::Response> {
     match &json_request.method[..] {
         "eth_subscribe" => {
-            let web3_request =
-                Web3Request::new(app.clone(), authorization, None, json_request, None).await;
+            let web3_request = Web3Request::new(app, authorization, None, json_request, None).await;
 
             // TODO: how can we subscribe with proxy_mode?
             match app
@@ -351,8 +350,7 @@ async fn websocket_proxy_web3_rpc(
             }
         }
         "eth_unsubscribe" => {
-            let web3_request =
-                Web3Request::new(app.clone(), authorization, None, json_request, None).await;
+            let web3_request = Web3Request::new(app, authorization, None, json_request, None).await;
 
             // sometimes we get a list, sometimes we get the id directly
             // check for the list first, then just use the whole thing
@@ -403,14 +401,14 @@ async fn websocket_proxy_web3_rpc(
 
 /// websockets support a few more methods than http clients
 async fn handle_socket_payload(
-    app: Arc<Web3ProxyApp>,
+    app: &Arc<Web3ProxyApp>,
     authorization: &Arc<Authorization>,
     payload: &str,
     response_sender: &mpsc::Sender<Message>,
     subscription_count: &AtomicU64,
     subscriptions: Arc<AsyncRwLock<HashMap<U64, AbortHandle>>>,
 ) -> Web3ProxyResult<(Message, Option<OwnedSemaphorePermit>)> {
-    let (authorization, semaphore) = authorization.check_again(&app).await?;
+    let (authorization, semaphore) = authorization.check_again(app).await?;
 
     // TODO: handle batched requests
     let (response_id, response) = match serde_json::from_str::<JsonRpcRequest>(payload) {
@@ -475,7 +473,7 @@ async fn read_web3_socket(
                         let (response_msg, _semaphore) = match msg {
                             Message::Text(payload) => {
                                 match handle_socket_payload(
-                                    app,
+                                    &app,
                                     &authorization,
                                     &payload,
                                     &response_sender,
@@ -509,7 +507,7 @@ async fn read_web3_socket(
                                 let payload = from_utf8_mut(&mut payload).unwrap();
 
                                 let (m, s) = match handle_socket_payload(
-                                    app,
+                                    &app,
                                     &authorization,
                                     payload,
                                     &response_sender,

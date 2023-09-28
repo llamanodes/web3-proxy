@@ -483,7 +483,7 @@ impl ResponseOrBytes<'_> {
 
 impl Web3Request {
     pub async fn new<R: Into<RequestOrMethod>>(
-        app: Arc<Web3ProxyApp>,
+        app: &Arc<Web3ProxyApp>,
         authorization: Arc<Authorization>,
         max_wait: Option<Duration>,
         request: R,
@@ -498,7 +498,7 @@ impl Web3Request {
 
         let kafka_debug_logger = if matches!(authorization.checks.proxy_mode, ProxyMode::Debug) {
             KafkaDebugLogger::try_new(
-                &app,
+                app,
                 authorization.clone(),
                 head_block.as_ref().map(|x| x.number()),
                 "web3_proxy:rpc",
@@ -567,8 +567,9 @@ impl Web3Request {
 
         let request = JsonRpcRequest::new(id, method, json!(params)).unwrap();
 
-        APP.with(|app| Self::new(app.clone(), authorization, max_wait, request, head_block))
-            .await
+        let app = APP.with(|app| app.clone());
+
+        Self::new(&app, authorization, max_wait, request, head_block).await
     }
 
     #[inline]
@@ -581,17 +582,19 @@ impl Web3Request {
         self.request.id()
     }
 
-    pub fn max_block_needed(&self) -> Option<&U64> {
+    pub fn max_block_needed(&self) -> Option<U64> {
         if let Some(cache_key) = &self.cache_key {
-            cache_key.to_block_num()
+            cache_key.to_block_num().copied()
         } else {
             None
         }
     }
 
-    pub fn min_block_needed(&self) -> Option<&U64> {
-        if let Some(cache_key) = &self.cache_key {
-            cache_key.from_block_num()
+    pub fn min_block_needed(&self) -> Option<U64> {
+        if self.archive_request.load(atomic::Ordering::Relaxed) {
+            Some(U64::zero())
+        } else if let Some(cache_key) = &self.cache_key {
+            cache_key.from_block_num().copied()
         } else {
             None
         }

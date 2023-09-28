@@ -39,8 +39,8 @@ impl ConsensusRpcData {
     }
 
     // TODO: take an enum for the type of data (hrtc)
-    fn data_available(&self, block_num: &U64) -> bool {
-        *block_num >= self.oldest_block_num && *block_num <= self.head_block_num
+    fn data_available(&self, block_num: U64) -> bool {
+        block_num >= self.oldest_block_num && block_num <= self.head_block_num
     }
 }
 
@@ -206,8 +206,8 @@ impl RankedRpcs {
     /// TODO: also include method (or maybe an enum representing the different prune types)
     pub fn should_wait_for_block(
         &self,
-        min_block_num: Option<&U64>,
-        max_block_num: Option<&U64>,
+        min_block_num: Option<U64>,
+        max_block_num: Option<U64>,
         skip_rpcs: &[Arc<Web3Rpc>],
     ) -> ShouldWaitForBlock {
         for rpc in self.inner.iter() {
@@ -221,7 +221,7 @@ impl RankedRpcs {
     }
 
     /// TODO: change this to take a min and a max
-    pub fn has_block_data(&self, rpc: &Web3Rpc, block_num: &U64) -> bool {
+    pub fn has_block_data(&self, rpc: &Web3Rpc, block_num: U64) -> bool {
         self.rpc_data
             .get(rpc)
             .map(|x| x.data_available(block_num))
@@ -234,8 +234,8 @@ impl RankedRpcs {
     pub fn rpc_will_work_eventually(
         &self,
         rpc: &Arc<Web3Rpc>,
-        min_block_num: Option<&U64>,
-        max_block_num: Option<&U64>,
+        min_block_num: Option<U64>,
+        max_block_num: Option<U64>,
         skip_rpcs: &[Arc<Web3Rpc>],
     ) -> ShouldWaitForBlock {
         if skip_rpcs.contains(rpc) {
@@ -256,7 +256,7 @@ impl RankedRpcs {
 
         if let Some(needed_block_num) = max_block_num {
             if let Some(rpc_data) = self.rpc_data.get(rpc) {
-                match rpc_data.head_block_num.cmp(needed_block_num) {
+                match rpc_data.head_block_num.cmp(&needed_block_num) {
                     Ordering::Less => {
                         trace!("{} is behind. let it catch up", rpc);
                         // TODO: what if this is a pruned rpc that is behind by a lot, and the block is old, too?
@@ -290,8 +290,8 @@ impl RankedRpcs {
     pub fn rpc_will_work_now(
         &self,
         skip: &[Arc<Web3Rpc>],
-        min_block_needed: Option<&U64>,
-        max_block_needed: Option<&U64>,
+        min_block_needed: Option<U64>,
+        max_block_needed: Option<U64>,
         rpc: &Arc<Web3Rpc>,
     ) -> bool {
         if skip.contains(rpc) {
