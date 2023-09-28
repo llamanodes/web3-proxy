@@ -201,16 +201,17 @@ impl RankedRpcs {
     }
 
     /// will tell you if waiting will eventually  should wait for a block
-    /// TODO: return if backup will be needed to serve the request
-    /// TODO: serve now if a backup server has the data
+    /// TODO: error if backup will be needed to serve the request?
+    /// TODO: serve now if a backup server has the data?
     /// TODO: also include method (or maybe an enum representing the different prune types)
     pub fn should_wait_for_block(
         &self,
-        needed_block_num: Option<&U64>,
+        min_block_num: Option<&U64>,
+        max_block_num: Option<&U64>,
         skip_rpcs: &[Arc<Web3Rpc>],
     ) -> ShouldWaitForBlock {
         for rpc in self.inner.iter() {
-            match self.rpc_will_work_eventually(rpc, needed_block_num, skip_rpcs) {
+            match self.rpc_will_work_eventually(rpc, min_block_num, max_block_num, skip_rpcs) {
                 ShouldWaitForBlock::NeverReady => continue,
                 x => return x,
             }
@@ -233,7 +234,8 @@ impl RankedRpcs {
     pub fn rpc_will_work_eventually(
         &self,
         rpc: &Arc<Web3Rpc>,
-        needed_block_num: Option<&U64>,
+        min_block_num: Option<&U64>,
+        max_block_num: Option<&U64>,
         skip_rpcs: &[Arc<Web3Rpc>],
     ) -> ShouldWaitForBlock {
         if skip_rpcs.contains(rpc) {
@@ -241,7 +243,18 @@ impl RankedRpcs {
             return ShouldWaitForBlock::NeverReady;
         }
 
-        if let Some(needed_block_num) = needed_block_num {
+        if let Some(min_block_num) = min_block_num {
+            if !self.has_block_data(rpc, min_block_num) {
+                trace!(
+                    "{} is missing min_block_num ({}). will not work eventually",
+                    rpc,
+                    min_block_num,
+                );
+                return ShouldWaitForBlock::NeverReady;
+            }
+        }
+
+        if let Some(needed_block_num) = max_block_num {
             if let Some(rpc_data) = self.rpc_data.get(rpc) {
                 match rpc_data.head_block_num.cmp(needed_block_num) {
                     Ordering::Less => {

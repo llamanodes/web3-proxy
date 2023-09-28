@@ -30,7 +30,8 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::select;
 use tokio::sync::{mpsc, watch};
-use tokio::time::{sleep_until, timeout, Duration, Instant};
+use tokio::task::yield_now;
+use tokio::time::{sleep, sleep_until, timeout, Duration, Instant};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 /// A collection of web3 connections. Sends requests either the current best server or all servers.
@@ -506,18 +507,14 @@ impl Web3Rpcs {
         }
     }
 
+    /// TODO: skip_rpcs should probably be on the web3_request, too
     #[instrument(level = "trace")]
     pub async fn wait_for_best_rpc(
         &self,
         web3_request: &Arc<Web3Request>,
         skip_rpcs: &mut Vec<Arc<Web3Rpc>>,
-        min_block_needed: Option<&U64>,
-        max_block_needed: Option<&U64>,
-        max_wait: Option<Duration>,
         error_handler: Option<RequestErrorHandler>,
     ) -> Web3ProxyResult<OpenRequestResult> {
-        let start = Instant::now();
-
         let mut earliest_retry_at: Option<Instant> = None;
 
         if self.watch_head_block.is_none() {
@@ -535,6 +532,9 @@ impl Web3Rpcs {
         let mut watch_ranked_rpcs = self.watch_ranked_rpcs.subscribe();
 
         let mut potential_rpcs = Vec::new();
+
+        let min_block_needed = web3_request.min_block_needed();
+        let max_block_needed = web3_request.max_block_needed();
 
         // TODO: max loop count if no max_wait?
         loop {
@@ -589,44 +589,38 @@ impl Web3Rpcs {
                     }
                 }
 
-                if let Some(max_wait) = max_wait {
-                    let waiting_for = min_block_needed.max(max_block_needed);
-
-                    match ranked_rpcs.should_wait_for_block(waiting_for, skip_rpcs) {
-                        ShouldWaitForBlock::NeverReady => break,
-                        // TODO: think about this more. but for now lets always wait for ranked to change
-                        // ShouldWaitForBlock::Ready => {
-                        //     if start.elapsed() > max_wait {
-                        //         break;
-                        //     }
-                        //     // TODO: i don't see how we can get here. something feels wrong if this is common.
-                        //     // maybe from a race? maybe _best_available_rpc returned NotReady just as a node synced
-                        //     yield_now().await;
-                        // }
-                        ShouldWaitForBlock::Ready | ShouldWaitForBlock::Wait { .. } => select! {
-                            _ = watch_ranked_rpcs.changed() => {
-                                // no need to borrow_and_update because we do that at the top of the loop
-                                // TODO: wait until watched_ranked_rpcs is on the right block?
-                                trace!("watch ranked rpcs changed");
-                            },
-                            _ = sleep_until(start + max_wait) => break,
-                        },
+                match ranked_rpcs.should_wait_for_block(
+                    min_block_needed,
+                    max_block_needed,
+                    skip_rpcs,
+                ) {
+                    ShouldWaitForBlock::NeverReady => break,
+                    ShouldWaitForBlock::Ready => {
+                        if web3_request.ttl_expired() {
+                            break;
+                        }
+                        // TODO: i don't see how we can get here. something feels wrong if this is common.
+                        // maybe from a race? maybe _best_available_rpc returned NotReady just as a node synced
+                        yield_now().await;
                     }
-                } else {
-                    break;
+                    ShouldWaitForBlock::Wait { .. } => select! {
+                        _ = watch_ranked_rpcs.changed() => {
+                            // no need to borrow_and_update because we do that at the top of the loop
+                            // TODO: wait until watched_ranked_rpcs is on the right block?
+                            trace!("watch ranked rpcs changed");
+                        },
+                        _ = sleep(web3_request.ttl()) => break,
+                    },
                 }
-            } else if let Some(max_wait) = max_wait {
-                trace!(max_wait = max_wait.as_secs_f32(), "no potential rpcs");
+            } else {
+                trace!("no potential rpcs");
                 select! {
                     _ = watch_ranked_rpcs.changed() => {
                         // no need to borrow_and_update because we do that at the top of the loop
                         trace!("watch ranked rpcs changed");
                     },
-                    _ = sleep_until(start + max_wait) => break,
+                    _ = sleep(web3_request.ttl()) => break,
                 }
-            } else {
-                trace!("no potential rpcs and set to not wait");
-                break;
             }
 
             // clear for the next loop
@@ -749,11 +743,10 @@ impl Web3Rpcs {
     ) -> Web3ProxyResult<R> {
         let head_block = self.head_block();
 
-        let web3_request = Web3Request::new_internal(method.into(), params, head_block).await;
+        let web3_request =
+            Web3Request::new_internal(method.into(), params, head_block, max_wait).await;
 
-        let response = self
-            .request_with_metadata(&web3_request, max_wait, None, None)
-            .await?;
+        let response = self.request_with_metadata(&web3_request).await?;
         let parsed = response.parsed().await?;
         match parsed.payload {
             jsonrpc::Payload::Success { result } => Ok(result),
@@ -766,16 +759,11 @@ impl Web3Rpcs {
     pub async fn request_with_metadata<R: JsonRpcResultData>(
         &self,
         web3_request: &Arc<Web3Request>,
-        max_wait: Option<Duration>,
-        min_block_needed: Option<&U64>,
-        max_block_needed: Option<&U64>,
     ) -> Web3ProxyResult<jsonrpc::SingleResponse<R>> {
         let mut skip_rpcs = vec![];
         let mut method_not_available_response = None;
 
         let mut watch_consensus_rpcs = self.watch_ranked_rpcs.subscribe();
-
-        let start = Instant::now();
 
         // set error_handler to Save. this might be overridden depending on the web3_request.authorization
         let error_handler = Some(RequestErrorHandler::Save);
@@ -784,22 +772,12 @@ impl Web3Rpcs {
 
         // TODO: the loop here feels somewhat redundant with the loop in best_available_rpc
         loop {
-            if let Some(max_wait) = max_wait {
-                if start.elapsed() > max_wait {
-                    trace!("max_wait exceeded");
-                    break;
-                }
+            if web3_request.ttl_expired() {
+                break;
             }
 
             match self
-                .wait_for_best_rpc(
-                    web3_request,
-                    &mut skip_rpcs,
-                    min_block_needed,
-                    max_block_needed,
-                    max_wait,
-                    error_handler,
-                )
+                .wait_for_best_rpc(web3_request, &mut skip_rpcs, error_handler)
                 .await?
             {
                 OpenRequestResult::Handle(active_request_handle) => {
@@ -1008,10 +986,11 @@ impl Web3Rpcs {
             return Err(err.into());
         }
 
+        let min_block_needed = web3_request.min_block_needed();
+        let max_block_needed = web3_request.max_block_needed();
+
         let num_conns = self.len();
         let num_skipped = skip_rpcs.len();
-
-        let needed = min_block_needed.max(max_block_needed);
 
         let head_block_num = watch_consensus_rpcs
             .borrow_and_update()
@@ -1029,7 +1008,7 @@ impl Web3Rpcs {
                 params=?web3_request.request.params(),
                 "No servers synced",
             );
-        } else if head_block_num.as_ref() > needed {
+        } else if head_block_num.as_ref() > max_block_needed {
             // we have synced past the needed block
             // TODO: log ranked rpcs
             // TODO: only log params in development
@@ -1211,22 +1190,11 @@ impl Web3Rpcs {
     pub async fn try_proxy_connection<R: JsonRpcResultData>(
         &self,
         web3_request: &Arc<Web3Request>,
-        max_wait: Option<Duration>,
-        min_block_needed: Option<&U64>,
-        max_block_needed: Option<&U64>,
     ) -> Web3ProxyResult<jsonrpc::SingleResponse<R>> {
         let proxy_mode = web3_request.proxy_mode();
 
         match proxy_mode {
-            ProxyMode::Debug | ProxyMode::Best => {
-                self.request_with_metadata(
-                    web3_request,
-                    max_wait,
-                    min_block_needed,
-                    max_block_needed,
-                )
-                .await
-            }
+            ProxyMode::Debug | ProxyMode::Best => self.request_with_metadata(web3_request).await,
             ProxyMode::Fastest(_x) => todo!("Fastest"),
             ProxyMode::Versus => todo!("Versus"),
         }
@@ -1527,14 +1495,7 @@ mod tests {
         // best_synced_backend_connection which servers to be synced with the head block should not find any nodes
         let m = Arc::new(Web3Request::default());
         let x = rpcs
-            .wait_for_best_rpc(
-                &m,
-                &mut vec![],
-                Some(head_block.number.as_ref().unwrap()),
-                None,
-                Some(Duration::from_secs(0)),
-                Some(RequestErrorHandler::DebugLevel),
-            )
+            .wait_for_best_rpc(&m, &mut vec![], Some(RequestErrorHandler::DebugLevel))
             .await
             .unwrap();
 
@@ -1623,60 +1584,30 @@ mod tests {
         // TODO: make sure the handle is for the expected rpc
         let m = Arc::new(Web3Request::default());
         assert!(matches!(
-            rpcs.wait_for_best_rpc(
-                &m,
-                &mut vec![],
-                None,
-                None,
-                Some(Duration::from_secs(0)),
-                None,
-            )
-            .await,
+            rpcs.wait_for_best_rpc(&m, &mut vec![], None).await,
             Ok(OpenRequestResult::Handle(_))
         ));
 
         // TODO: make sure the handle is for the expected rpc
+        // TODO: actually test a future block. this Web3Request doesn't require block #0
         let m = Arc::new(Web3Request::default());
         assert!(matches!(
-            rpcs.wait_for_best_rpc(
-                &m,
-                &mut vec![],
-                Some(&0.into()),
-                None,
-                Some(Duration::from_secs(0)),
-                None,
-            )
-            .await,
+            rpcs.wait_for_best_rpc(&m, &mut vec![], None,).await,
             Ok(OpenRequestResult::Handle(_))
         ));
 
         // TODO: make sure the handle is for the expected rpc
+        // TODO: actually test a future block. this Web3Request doesn't require block #1
         let m = Arc::new(Web3Request::default());
         assert!(matches!(
-            rpcs.wait_for_best_rpc(
-                &m,
-                &mut vec![],
-                Some(&1.into()),
-                None,
-                Some(Duration::from_secs(0)),
-                None,
-            )
-            .await,
+            rpcs.wait_for_best_rpc(&m, &mut vec![], None,).await,
             Ok(OpenRequestResult::Handle(_))
         ));
 
         // future block should not get a handle
+        // TODO: actually test a future block. this Web3Request doesn't require block #2
         let m = Arc::new(Web3Request::default());
-        let future_rpc = rpcs
-            .wait_for_best_rpc(
-                &m,
-                &mut vec![],
-                Some(&2.into()),
-                None,
-                Some(Duration::from_secs(0)),
-                None,
-            )
-            .await;
+        let future_rpc = rpcs.wait_for_best_rpc(&m, &mut vec![], None).await;
         assert!(matches!(future_rpc, Ok(OpenRequestResult::NotReady)));
     }
 
@@ -1776,16 +1707,7 @@ mod tests {
         // best_synced_backend_connection requires servers to be synced with the head block
         // TODO: test with and without passing the head_block.number?
         let m = Arc::new(Web3Request::default());
-        let best_available_server = rpcs
-            .wait_for_best_rpc(
-                &m,
-                &mut vec![],
-                Some(head_block.number()),
-                None,
-                Some(Duration::from_secs(0)),
-                None,
-            )
-            .await;
+        let best_available_server = rpcs.wait_for_best_rpc(&m, &mut vec![], None).await;
 
         debug!("best_available_server: {:#?}", best_available_server);
 
@@ -1795,30 +1717,13 @@ mod tests {
         ));
 
         let m = Arc::new(Web3Request::default());
-        let _best_available_server_from_none = rpcs
-            .wait_for_best_rpc(
-                &m,
-                &mut vec![],
-                None,
-                None,
-                Some(Duration::from_secs(0)),
-                None,
-            )
-            .await;
+        let _best_available_server_from_none = rpcs.wait_for_best_rpc(&m, &mut vec![], None).await;
 
         // assert_eq!(best_available_server, best_available_server_from_none);
 
+        // TODO: actually test a future block. this Web3Request doesn't require block #1
         let m = Arc::new(Web3Request::default());
-        let best_archive_server = rpcs
-            .wait_for_best_rpc(
-                &m,
-                &mut vec![],
-                Some(&1.into()),
-                None,
-                Some(Duration::from_secs(0)),
-                None,
-            )
-            .await;
+        let best_archive_server = rpcs.wait_for_best_rpc(&m, &mut vec![], None).await;
 
         match best_archive_server {
             Ok(OpenRequestResult::Handle(x)) => {

@@ -5,7 +5,7 @@ use crate::config::{AppConfig, TopConfig};
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, RequestOrMethod, Web3Request};
 use crate::frontend::rpc_proxy_ws::ProxyMode;
-use crate::globals::{global_db_conn, DatabaseError, APP, DB_CONN, DB_REPLICA};
+use crate::globals::{global_db_conn, DatabaseError, DB_CONN, DB_REPLICA};
 use crate::jsonrpc::{
     self, JsonRpcErrorData, JsonRpcId, JsonRpcParams, JsonRpcRequest, JsonRpcRequestEnum,
     JsonRpcResultData, SingleResponse,
@@ -619,12 +619,6 @@ impl Web3ProxyApp {
             important_background_handles.push(f);
         }
 
-        {
-            let mut locked_app = APP.write();
-
-            *locked_app = Some(app.clone());
-        }
-
         Ok(Web3ProxyAppSpawn {
             app,
             app_handles,
@@ -1185,8 +1179,9 @@ impl Web3ProxyApp {
         head_block: Option<Web3ProxyBlock>,
     ) -> (StatusCode, jsonrpc::SingleResponse, Vec<Arc<Web3Rpc>>) {
         let web3_request = Web3Request::new(
-            self,
+            self.clone(),
             authorization,
+            None,
             RequestOrMethod::Request(request),
             head_block,
         )
@@ -1363,9 +1358,6 @@ impl Web3ProxyApp {
                     bundler_4337_rpcs
                         .try_proxy_connection::<Arc<RawValue>>(
                             web3_request,
-                            Some(Duration::from_secs(30)),
-                            None,
-                            None,
                         )
                         .await?
                 }
@@ -1399,9 +1391,6 @@ impl Web3ProxyApp {
                     .balanced_rpcs
                     .try_proxy_connection::<U256>(
                         web3_request,
-                        Some(Duration::from_secs(30)),
-                        None,
-                        None,
                     )
                     .await?
                     .parsed()
@@ -1431,27 +1420,27 @@ impl Web3ProxyApp {
                 // try to get the transaction without specifying a min_block_height
                 // TODO: timeout
 
-                let parsed = match self
+                let result = self
                     .balanced_rpcs
-                    .try_proxy_connection::<Arc<RawValue>>(
+                    .try_proxy_connection::<serde_json::Value>(
                         web3_request,
-                        Some(Duration::from_secs(30)),
-                        None,
-                        None,
                     )
-                    .await {
-                        Ok(response) => response.parsed().await.map_err(Into::into),
-                        Err(err) => Err(err),
-                    };
+                    .await?
+                    .parsed()
+                    .await?
+                    .into_result();
 
-                // if we got "null", it is probably because the tx is old. retry on nodes with old block data
-                let try_archive = if let Ok(Some(value)) = parsed.as_ref().map(|r| r.result()) {
-                    value.get() == "null" || value.get() == "" || value.get() == "\"\""
-                } else {
-                    true
+                // if we got "null" or "", it is probably because the tx is old. retry on nodes with old block data
+                // TODO: this feels fragile. how should we do this better/
+                let try_archive = match &result {
+                    Ok(serde_json::Value::Null) => true,
+                    Ok(serde_json::Value::Array(x)) => x.is_empty(),
+                    Ok(serde_json::Value::String(x)) => x.is_empty(),
+                    Err(..) => true,
+                    _ => false,
                 };
 
-                if try_archive && let Some(head_block_num) = web3_request.head_block.as_ref().map(|x| x.number()) {
+                if try_archive {
                     // TODO: only charge for archive if it gave a result
                     web3_request
                         .archive_request
@@ -1461,15 +1450,15 @@ impl Web3ProxyApp {
                         .balanced_rpcs
                         .try_proxy_connection::<Arc<RawValue>>(
                             web3_request,
-                            Some(Duration::from_secs(30)),
-                            // TODO: should this be block 0 instead?
-                            Some(&U64::one()),
-                            // TODO: is this a good way to allow lagged archive nodes a try
-                            Some(&head_block_num.saturating_sub(5.into()).clamp(U64::one(), U64::MAX)),
+                            // Some(Duration::from_secs(30)),
+                            // // TODO: should this be block 0 instead?
+                            // Some(&U64::one()),
+                            // // TODO: is this a good way to allow lagged archive nodes a try
+                            // Some(&head_block_num.saturating_sub(5.into()).clamp(U64::one(), U64::MAX)),
                         )
                         .await?
                 } else {
-                    parsed?.into()
+                    jsonrpc::ParsedResponse::from_value(result?, web3_request.id()).into()
                 }
 
                 // TODO: if parsed is an error, return a null instead
@@ -1668,18 +1657,10 @@ impl Web3ProxyApp {
                     )).into());
                 }
 
-                // TODO: think more about this timeout. we should probably have a `request_expires_at` Duration on the web3_request
-                // TODO: different user tiers should have different timeouts
-                // erigon's timeout is 300, so keep this a few seconds shorter
-                let max_wait = Some(Duration::from_secs(290));
-
                 // TODO: why is this clone needed?
                 let web3_request = web3_request.clone();
 
                 if let Some(cache_key) = web3_request.cache_key.clone() {
-                    let from_block_num = cache_key.from_block_num().copied();
-                    let to_block_num = cache_key.to_block_num().copied();
-                    let cache_jsonrpc_errors = cache_key.cache_errors();
                     let cache_key_hash = cache_key.hash();
 
                     // don't cache anything larger than 16 MiB
@@ -1695,13 +1676,10 @@ impl Web3ProxyApp {
                         // this is a cache_key that we know won't cache
                         // NOTICE! We do **NOT** use get which means the key's hotness is not updated. we don't use time-to-idler here so thats fine. but be careful if that changes
                         timeout(
-                            Duration::from_secs(295),
+                            web3_request.ttl(),
                             self.balanced_rpcs
                             .try_proxy_connection::<Arc<RawValue>>(
                                 &web3_request,
-                                max_wait,
-                                None,
-                                None,
                             )
                         ).await??
                     } else {
@@ -1719,13 +1697,10 @@ impl Web3ProxyApp {
                             Err(_) => {
                                 // TODO: should we try to cache this? whatever has the semaphore //should// handle that for us
                                 timeout(
-                                    Duration::from_secs(295),
+                                    web3_request.ttl(),
                                     self.balanced_rpcs
                                     .try_proxy_connection::<Arc<RawValue>>(
                                         &web3_request,
-                                        max_wait,
-                                        None,
-                                        None,
                                     )
                                 ).await??
                             }
@@ -1743,13 +1718,12 @@ impl Web3ProxyApp {
                                                 let response_data = timeout(Duration::from_secs(290), app.balanced_rpcs
                                                     .try_proxy_connection::<Arc<RawValue>>(
                                                         &web3_request,
-                                                        max_wait,
-                                                        from_block_num.as_ref(),
-                                                        to_block_num.as_ref(),
                                                 )).await;
 
                                                 match response_data {
                                                     Ok(response_data) => {
+                                                        let cache_jsonrpc_errors = web3_request.cache_key.as_ref().map(|x| x.cache_errors()).expect("cache_key should always exist here");
+
                                                         if !cache_jsonrpc_errors && let Err(err) = response_data {
                                                             // if we are not supposed to cache jsonrpc errors,
                                                             // then we must not convert Provider errors into a JsonRpcResponseEnum
@@ -1810,13 +1784,10 @@ impl Web3ProxyApp {
                     x
                 } else {
                     let mut x = timeout(
-                        Duration::from_secs(295),
+                        web3_request.ttl(),
                         self.balanced_rpcs
                         .try_proxy_connection::<Arc<RawValue>>(
                             &web3_request,
-                            max_wait,
-                            None,
-                            None,
                         )
                     ).await??;
 

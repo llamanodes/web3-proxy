@@ -205,8 +205,7 @@ impl OpenRequestHandle {
         {
             let params: serde_json::Value = serde_json::to_value(params)?;
             let request = jsonrpc::JsonRpcRequest::new(
-                // TODO: proper id
-                jsonrpc::JsonRpcId::Number(1),
+                self.web3_request.id().into(),
                 method.to_string(),
                 params,
             )
@@ -438,6 +437,8 @@ impl OpenRequestHandle {
         tokio::spawn(async move {
             self.rpc.peak_latency.as_ref().unwrap().report(latency);
             self.rpc.median_latency.as_ref().unwrap().record(latency);
+
+            // TODO: app median latency
         });
 
         response

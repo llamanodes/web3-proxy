@@ -1074,7 +1074,7 @@ impl Web3Rpc {
         error_handler: Option<RequestErrorHandler>,
         max_wait: Option<Duration>,
     ) -> Web3ProxyResult<R> {
-        let web3_request = Web3Request::new_internal(method.into(), params, None).await;
+        let web3_request = Web3Request::new_internal(method.into(), params, None, max_wait).await;
 
         self.authorized_request(&web3_request, error_handler, max_wait)
             .await

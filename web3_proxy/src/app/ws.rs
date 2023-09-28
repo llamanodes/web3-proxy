@@ -81,8 +81,9 @@ impl Web3ProxyApp {
                         };
 
                         let subscription_web3_request = Web3Request::new(
-                            &app,
+                            app.clone(),
                             authorization.clone(),
+                            None,
                             RequestOrMethod::Method("eth_subscribe(newHeads)".into(), 0),
                             Some(new_head),
                         )
@@ -144,8 +145,9 @@ impl Web3ProxyApp {
                     while let Some(Ok(new_txid)) = pending_txid_firehose.next().await {
                         // TODO: include the head_block here?
                         let subscription_web3_request = Web3Request::new(
-                            &app,
+                            app.clone(),
                             authorization.clone(),
+                            None,
                             RequestOrMethod::Method(
                                 "eth_subscribe(newPendingTransactions)".into(),
                                 0,

@@ -406,6 +406,7 @@ pub enum JsonRpcId {
     None,
     Number(u64),
     String(String),
+    Raw(Box<RawValue>),
 }
 
 impl JsonRpcId {
@@ -417,6 +418,7 @@ impl JsonRpcId {
                 serde_json::from_value(json!(x)).expect("number id should always work")
             }
             Self::String(x) => serde_json::from_str(&x).expect("string id should always work"),
+            Self::Raw(x) => x,
         }
     }
 }
@@ -487,7 +489,7 @@ impl JsonRpcRequestEnum {
     /// returns the id of the first invalid result (if any). None is good
     pub async fn tarpit_invalid(
         &self,
-        app: &Web3ProxyApp,
+        app: &Arc<Web3ProxyApp>,
         authorization: &Arc<Authorization>,
         duration: Duration,
     ) -> Result<(), AxumResponse> {
@@ -504,7 +506,8 @@ impl JsonRpcRequestEnum {
 
         // TODO: create a stat so we can penalize
         // TODO: what request size
-        let metadata = Web3Request::new(app, authorization.clone(), request, None).await;
+        let metadata =
+            Web3Request::new(app.clone(), authorization.clone(), None, request, None).await;
 
         metadata
             .user_error_response

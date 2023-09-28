@@ -5,12 +5,13 @@ use crate::app::{Web3ProxyApp, APP_USER_AGENT};
 use crate::balance::Balance;
 use crate::caches::RegisteredUserRateLimitKey;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
-use crate::globals::{global_app, global_db_replica_conn};
+use crate::globals::global_db_replica_conn;
 use crate::jsonrpc::{self, JsonRpcId, JsonRpcParams, JsonRpcRequest};
 use crate::response_cache::JsonRpcQueryCacheKey;
 use crate::rpcs::blockchain::Web3ProxyBlock;
 use crate::rpcs::one::Web3Rpc;
 use crate::stats::{AppStat, BackendRequests};
+use crate::task_locals::APP;
 use crate::user_token::UserBearerToken;
 use anyhow::Context;
 use axum::headers::authorization::Bearer;
@@ -369,6 +370,8 @@ pub struct Web3Request {
     /// We use Instant and not timestamps to avoid problems with leap seconds and similar issues
     #[derivative(Default(value = "Instant::now()"))]
     pub start_instant: Instant,
+    #[derivative(Default(value = "Instant::now() + Duration::from_secs(295)"))]
+    pub expire_instant: Instant,
     /// if this is empty, there was a cache_hit
     /// otherwise, it is populated with any rpc servers that were used by this request
     pub backend_requests: BackendRequests,
@@ -480,17 +483,22 @@ impl ResponseOrBytes<'_> {
 
 impl Web3Request {
     pub async fn new<R: Into<RequestOrMethod>>(
-        app: &Web3ProxyApp,
+        app: Arc<Web3ProxyApp>,
         authorization: Arc<Authorization>,
+        max_wait: Option<Duration>,
         request: R,
         head_block: Option<Web3ProxyBlock>,
     ) -> Arc<Self> {
         // TODO: get this out of tracing instead (where we have a String from Amazon's LB)
         let request_ulid = Ulid::new();
 
+        let start_instant = Instant::now();
+
+        let expire_instant = start_instant + max_wait.unwrap_or_else(|| Duration::from_secs(295));
+
         let kafka_debug_logger = if matches!(authorization.checks.proxy_mode, ProxyMode::Debug) {
             KafkaDebugLogger::try_new(
-                app,
+                &app,
                 authorization.clone(),
                 head_block.as_ref().map(|x| x.number()),
                 "web3_proxy:rpc",
@@ -535,7 +543,8 @@ impl Web3Request {
             response_from_backup_rpc: false.into(),
             response_millis: 0.into(),
             response_timestamp: 0.into(),
-            start_instant: Instant::now(),
+            start_instant,
+            expire_instant,
             stat_sender: app.stat_sender.clone(),
             usd_per_cu: app.config.usd_per_cu.unwrap_or_default(),
             user_error_response: false.into(),
@@ -549,9 +558,8 @@ impl Web3Request {
         method: String,
         params: &P,
         head_block: Option<Web3ProxyBlock>,
+        max_wait: Option<Duration>,
     ) -> Arc<Self> {
-        let app = global_app().expect("the app should be running");
-
         let authorization = Arc::new(Authorization::internal().unwrap());
 
         // TODO: we need a real id! increment a counter on the app
@@ -559,7 +567,8 @@ impl Web3Request {
 
         let request = JsonRpcRequest::new(id, method, json!(params)).unwrap();
 
-        Self::new(&app, authorization, request, head_block).await
+        APP.with(|app| Self::new(app.clone(), authorization, max_wait, request, head_block))
+            .await
     }
 
     #[inline]
@@ -570,6 +579,31 @@ impl Web3Request {
     #[inline]
     pub fn id(&self) -> Box<RawValue> {
         self.request.id()
+    }
+
+    pub fn max_block_needed(&self) -> Option<&U64> {
+        if let Some(cache_key) = &self.cache_key {
+            cache_key.to_block_num()
+        } else {
+            None
+        }
+    }
+
+    pub fn min_block_needed(&self) -> Option<&U64> {
+        if let Some(cache_key) = &self.cache_key {
+            cache_key.from_block_num()
+        } else {
+            None
+        }
+    }
+
+    pub fn ttl(&self) -> Duration {
+        // TODO: don't hard code this. erigon's timeout is 5 minutes. and we give it a few seconds of headrom
+        Duration::from_secs(295).saturating_sub(self.start_instant.elapsed())
+    }
+
+    pub fn ttl_expired(&self) -> bool {
+        self.ttl().is_zero()
     }
 
     pub fn try_send_stat(mut self) -> Web3ProxyResult<()> {

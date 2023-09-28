@@ -1,5 +1,6 @@
 use std::num::NonZeroU64;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{error, info};
 use web3_proxy::app::BILLING_PERIOD_SECONDS;
 use web3_proxy::config::TopConfig;
@@ -215,6 +216,7 @@ impl MigrateStatsToV2SubCommand {
                         response_millis: int_response_millis.into(),
                         // This is overwritten later on
                         start_instant: Instant::now(),
+                        expire_instant: Instant::now() + Duration::from_secs(295),
                         stat_sender: Some(stat_sender.clone()),
                         user_error_response: false.into(),
                         usd_per_cu: top_config.app.usd_per_cu.unwrap_or_default(),
