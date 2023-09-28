@@ -241,7 +241,7 @@ impl Web3Rpc {
         let mut head_block = self
             .head_block_sender
             .as_ref()
-            .and_then(|x| x.borrow().as_ref().map(|x| *x.number()))
+            .and_then(|x| x.borrow().as_ref().map(|x| x.number()))
             .unwrap_or_default();
 
         if let Some(max_block) = max_block {
@@ -390,14 +390,14 @@ impl Web3Rpc {
     }
 
     /// TODO: get rid of this now that consensus rpcs does it
-    pub fn has_block_data(&self, needed_block_num: &U64) -> bool {
+    pub fn has_block_data(&self, needed_block_num: U64) -> bool {
         let head_block_num = match self.head_block_sender.as_ref().unwrap().borrow().as_ref() {
             None => return false,
-            Some(x) => *x.number(),
+            Some(x) => x.number(),
         };
 
         // this rpc doesn't have that block yet. still syncing
-        if needed_block_num > &head_block_num {
+        if needed_block_num > head_block_num {
             trace!(
                 "{} has head {} but needs {}",
                 self,
@@ -412,7 +412,7 @@ impl Web3Rpc {
 
         let oldest_block_num = head_block_num.saturating_sub(block_data_limit);
 
-        if needed_block_num < &oldest_block_num {
+        if needed_block_num < oldest_block_num {
             trace!(
                 "{} needs {} but the oldest available is {}",
                 self,
@@ -553,7 +553,7 @@ impl Web3Rpc {
                 return Err(anyhow::anyhow!("head_block is too old!").into());
             }
 
-            let block_number = *head_block.number();
+            let block_number = head_block.number();
 
             let to = if let Some(txid) = head_block.transactions().last().cloned() {
                 let tx = self
@@ -1240,7 +1240,7 @@ impl fmt::Debug for Web3Rpc {
 
         if let Some(head_block_watch) = self.head_block_sender.as_ref() {
             if let Some(head_block) = head_block_watch.borrow().as_ref() {
-                f.field("head_num", head_block.number());
+                f.field("head_num", &head_block.number());
                 f.field("head_hash", head_block.hash());
             } else {
                 f.field("head_num", &None::<()>);
@@ -1291,11 +1291,11 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(x.has_block_data(&0.into()));
-        assert!(x.has_block_data(&1.into()));
+        assert!(x.has_block_data(0.into()));
+        assert!(x.has_block_data(1.into()));
         assert!(x.has_block_data(head_block.number()));
-        assert!(!x.has_block_data(&(head_block.number() + 1)));
-        assert!(!x.has_block_data(&(head_block.number() + 1000)));
+        assert!(!x.has_block_data(head_block.number() + 1));
+        assert!(!x.has_block_data(head_block.number() + 1000));
     }
 
     #[test]
@@ -1325,13 +1325,13 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!x.has_block_data(&0.into()));
-        assert!(!x.has_block_data(&1.into()));
-        assert!(!x.has_block_data(&(head_block.number() - block_data_limit - 1)));
-        assert!(x.has_block_data(&(head_block.number() - block_data_limit)));
+        assert!(!x.has_block_data(0.into()));
+        assert!(!x.has_block_data(1.into()));
+        assert!(!x.has_block_data(head_block.number() - block_data_limit - 1));
+        assert!(x.has_block_data(head_block.number() - block_data_limit));
         assert!(x.has_block_data(head_block.number()));
-        assert!(!x.has_block_data(&(head_block.number() + 1)));
-        assert!(!x.has_block_data(&(head_block.number() + 1000)));
+        assert!(!x.has_block_data(head_block.number() + 1));
+        assert!(!x.has_block_data(head_block.number() + 1000));
     }
 
     /*
@@ -1374,11 +1374,11 @@ mod tests {
             head_block: AsyncRwLock::new(Some(head_block.clone())),
         };
 
-        assert!(!x.has_block_data(&0.into()));
-        assert!(!x.has_block_data(&1.into()));
-        assert!(!x.has_block_data(&head_block.number()));
-        assert!(!x.has_block_data(&(head_block.number() + 1)));
-        assert!(!x.has_block_data(&(head_block.number() + 1000)));
+        assert!(!x.has_block_data(0.into()));
+        assert!(!x.has_block_data(1.into()));
+        assert!(!x.has_block_data(head_block.number());
+        assert!(!x.has_block_data(head_block.number() + 1));
+        assert!(!x.has_block_data(head_block.number() + 1000));
     }
     */
 }

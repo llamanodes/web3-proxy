@@ -208,7 +208,7 @@ async fn _status(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, Bytes) {
         "hostname": app.hostname,
         "payment_factory_address": app.config.deposit_factory_contract,
         "pending_txid_firehose": app.pending_txid_firehose,
-        "private_rpcs": app.private_rpcs,
+        "private_rpcs": app.protected_rpcs,
         "uptime": app.start.elapsed().as_secs(),
         "version": APP_USER_AGENT,
     });

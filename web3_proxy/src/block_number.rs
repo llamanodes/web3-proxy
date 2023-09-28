@@ -15,16 +15,16 @@ use serde_json::json;
 use tracing::{error, trace, warn};
 
 #[allow(non_snake_case)]
-pub fn BlockNumber_to_U64(block_num: BlockNumber, latest_block: &U64) -> (U64, bool) {
+pub fn BlockNumber_to_U64(block_num: BlockNumber, latest_block: U64) -> (U64, bool) {
     match block_num {
         BlockNumber::Earliest => (U64::zero(), false),
         BlockNumber::Finalized => {
             warn!("finalized block requested! not yet implemented!");
-            (*latest_block - 10, false)
+            (latest_block - 10, false)
         }
         BlockNumber::Latest => {
             // change "latest" to a number
-            (*latest_block, true)
+            (latest_block, true)
         }
         BlockNumber::Number(x) => {
             // we already have a number
@@ -33,11 +33,11 @@ pub fn BlockNumber_to_U64(block_num: BlockNumber, latest_block: &U64) -> (U64, b
         BlockNumber::Pending => {
             // modified is false because we want the backend to see "pending"
             // TODO: think more about how to handle Pending
-            (*latest_block, false)
+            (latest_block, false)
         }
         BlockNumber::Safe => {
             warn!("safe block requested! not yet implemented!");
-            (*latest_block - 3, false)
+            (latest_block - 3, false)
         }
     }
 }
@@ -56,7 +56,7 @@ impl BlockNumAndHash {
 
 impl From<&Web3ProxyBlock> for BlockNumAndHash {
     fn from(value: &Web3ProxyBlock) -> Self {
-        let n = *value.number();
+        let n = value.number();
         let h = *value.hash();
 
         Self(n, h)
@@ -114,7 +114,7 @@ pub async fn clean_block_number(
                     // TODO: "BlockNumber" needs a better name
                     // TODO: move this to a helper function?
                     if let Ok(block_num) = serde_json::from_value::<U64>(x.clone()) {
-                        let head_block_num = *latest_block.number();
+                        let head_block_num = latest_block.number();
 
                         if block_num > head_block_num {
                             return Err(Web3ProxyError::UnknownBlockNumber {
@@ -141,7 +141,7 @@ pub async fn clean_block_number(
                         let (block_num, change) =
                             BlockNumber_to_U64(block_number, latest_block.number());
 
-                        if block_num == *latest_block.number() {
+                        if block_num == latest_block.number() {
                             (latest_block.into(), change)
                         } else {
                             let block_hash = rpcs

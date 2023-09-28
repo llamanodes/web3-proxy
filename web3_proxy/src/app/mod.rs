@@ -5,7 +5,7 @@ use crate::config::{AppConfig, TopConfig};
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, RequestOrMethod, Web3Request};
 use crate::frontend::rpc_proxy_ws::ProxyMode;
-use crate::globals::{global_db_conn, DatabaseError, DB_CONN, DB_REPLICA};
+use crate::globals::{global_db_conn, DatabaseError, APP, DB_CONN, DB_REPLICA};
 use crate::jsonrpc::{
     self, JsonRpcErrorData, JsonRpcId, JsonRpcParams, JsonRpcRequest, JsonRpcRequestEnum,
     JsonRpcResultData, SingleResponse,
@@ -72,9 +72,9 @@ pub struct Web3ProxyApp {
     /// Send requests to the best server available
     pub balanced_rpcs: Arc<Web3Rpcs>,
     /// Send 4337 Abstraction Bundler requests to one of these servers
-    pub bundler_4337_rpcs: Option<Arc<Web3Rpcs>>,
+    pub bundler_4337_rpcs: Arc<Web3Rpcs>,
     /// application config
-    /// TODO: this will need a large refactor to handle reloads while running. maybe use a watch::Receiver?
+    /// TODO: this will need a large refactor to handle reloads while running. maybe use a watch::Receiver and a task_local?
     pub config: AppConfig,
     pub http_client: Option<reqwest::Client>,
     /// track JSONRPC responses
@@ -109,8 +109,7 @@ pub struct Web3ProxyApp {
     /// we do this because each pending login is a row in the database
     pub login_rate_limiter: Option<RedisRateLimiter>,
     /// Send private requests (like eth_sendRawTransaction) to all these servers
-    /// TODO: include another type so that we can use private miner relays that do not use JSONRPC requests
-    pub private_rpcs: Option<Arc<Web3Rpcs>>,
+    pub protected_rpcs: Arc<Web3Rpcs>,
     pub prometheus_port: Arc<AtomicU16>,
     /// cache authenticated users so that we don't have to query the database on the hot path
     // TODO: should the key be our RpcSecretKey class instead of Ulid?
@@ -457,60 +456,42 @@ impl Web3ProxyApp {
         app_handles.push(balanced_handle);
 
         // prepare a Web3Rpcs to hold all our private connections
-        // only some chains have this, so this is optional
-        // TODO: remove this. it should only be done by apply_top_config
-        let private_rpcs = if top_config.private_rpcs.is_none() {
-            warn!("No private relays configured. Any transactions will be broadcast to the public mempool!");
-            None
-        } else {
-            // TODO: do something with the spawn handle
-            let (private_rpcs, private_handle, _) = Web3Rpcs::spawn(
-                chain_id,
-                // private rpcs don't get subscriptions, so no need for max_head_block_lag
-                None,
-                0,
-                0,
-                "protected rpcs".into(),
-                // subscribing to new heads here won't work well. if they are fast, they might be ahead of balanced_rpcs
-                // they also often have low rate limits
-                // however, they are well connected to miners/validators. so maybe using them as a safety check would be good
-                // TODO: but maybe we could include privates in the "backup" tier
-                None,
-                None,
-            )
-            .await
-            .web3_context("spawning private_rpcs")?;
+        // only some chains have this, so this might be empty
+        // TODO: set min_sum_soft_limit > 0 if any private rpcs are configured. this way we don't accidently leak to the public mempool if they are all offline
+        let (private_rpcs, private_handle, _) = Web3Rpcs::spawn(
+            chain_id,
+            // private rpcs don't get subscriptions, so no need for max_head_block_lag
+            None,
+            0,
+            0,
+            "protected rpcs".into(),
+            // subscribing to new heads here won't work well. if they are fast, they might be ahead of balanced_rpcs
+            // they also often have low rate limits
+            // however, they are well connected to miners/validators. so maybe using them as a safety check would be good
+            // TODO: but maybe we could include privates in the "backup" tier
+            None,
+            None,
+        )
+        .await
+        .web3_context("spawning private_rpcs")?;
 
-            app_handles.push(private_handle);
+        app_handles.push(private_handle);
 
-            Some(private_rpcs)
-        };
+        // prepare a Web3Rpcs to hold all our 4337 Abstraction Bundler connections (if any)
+        let (bundler_4337_rpcs, bundler_4337_rpcs_handle, _) = Web3Rpcs::spawn(
+            chain_id,
+            // bundler_4337_rpcs don't get subscriptions, so no need for max_head_block_lag
+            None,
+            0,
+            0,
+            "eip4337 rpcs".into(),
+            None,
+            None,
+        )
+        .await
+        .web3_context("spawning bundler_4337_rpcs")?;
 
-        // prepare a Web3Rpcs to hold all our 4337 Abstraction Bundler connections
-        // only some chains have this, so this is optional
-        // TODO: remove this. it should only be done by apply_top_config
-        let bundler_4337_rpcs = if top_config.bundler_4337_rpcs.is_none() {
-            warn!("No bundler_4337_rpcs configured");
-            None
-        } else {
-            // TODO: do something with the spawn handle
-            let (bundler_4337_rpcs, bundler_4337_rpcs_handle, _) = Web3Rpcs::spawn(
-                chain_id,
-                // bundler_4337_rpcs don't get subscriptions, so no need for max_head_block_lag
-                None,
-                0,
-                0,
-                "eip4337 rpcs".into(),
-                None,
-                None,
-            )
-            .await
-            .web3_context("spawning bundler_4337_rpcs")?;
-
-            app_handles.push(bundler_4337_rpcs_handle);
-
-            Some(bundler_4337_rpcs)
-        };
+        app_handles.push(bundler_4337_rpcs_handle);
 
         let hostname = hostname::get()
             .ok()
@@ -552,7 +533,7 @@ impl Web3ProxyApp {
             kafka_producer,
             login_rate_limiter,
             pending_txid_firehose: deduped_txid_firehose,
-            private_rpcs,
+            protected_rpcs: private_rpcs,
             prometheus_port: prometheus_port.clone(),
             rpc_secret_key_cache,
             start: Instant::now(),
@@ -563,12 +544,14 @@ impl Web3ProxyApp {
             watch_consensus_head_receiver,
         };
 
+        let app = Arc::new(app);
+
+        APP.set(app.clone()).unwrap();
+
         // TODO: do apply_top_config once we don't duplicate the db
         if let Err(err) = app.apply_top_config_db(&top_config).await {
             warn!(?err, "unable to fully apply config while starting!");
         };
-
-        let app = Arc::new(app);
 
         // watch for config changes
         // TODO: move this to its own function/struct
@@ -650,42 +633,25 @@ impl Web3ProxyApp {
 
         let balanced = self
             .balanced_rpcs
-            .apply_server_configs(self, new_top_config.balanced_rpcs.clone())
+            .apply_server_configs(self, &new_top_config.balanced_rpcs)
             .await
             .web3_context("updating balanced rpcs");
 
-        let private = if let Some(private_rpc_configs) = new_top_config.private_rpcs.clone() {
-            if let Some(ref private_rpcs) = self.private_rpcs {
-                private_rpcs
-                    .apply_server_configs(self, private_rpc_configs)
-                    .await
-                    .web3_context("updating private_rpcs")
-            } else {
-                // TODO: maybe we should have private_rpcs just be empty instead of being None
-                todo!("handle toggling private_rpcs")
-            }
-        } else {
-            Ok(())
-        };
+        let protected = self
+            .protected_rpcs
+            .apply_server_configs(self, &new_top_config.private_rpcs)
+            .await
+            .web3_context("updating private_rpcs");
 
-        let bundler_4337 =
-            if let Some(bundler_4337_rpc_configs) = new_top_config.bundler_4337_rpcs.clone() {
-                if let Some(ref bundler_4337_rpcs) = self.bundler_4337_rpcs {
-                    bundler_4337_rpcs
-                        .apply_server_configs(self, bundler_4337_rpc_configs.clone())
-                        .await
-                        .web3_context("updating bundler_4337_rpcs")
-                } else {
-                    // TODO: maybe we should have bundler_4337_rpcs just be empty instead of being None
-                    todo!("handle toggling bundler_4337_rpcs")
-                }
-            } else {
-                Ok(())
-            };
+        let bundler_4337 = self
+            .bundler_4337_rpcs
+            .apply_server_configs(self, &new_top_config.bundler_4337_rpcs)
+            .await
+            .web3_context("updating bundler_4337_rpcs");
 
         // TODO: log all the errors if there are multiple
         balanced?;
-        private?;
+        protected?;
         bundler_4337?;
 
         Ok(())
@@ -1129,46 +1095,38 @@ impl Web3ProxyApp {
         self: &Arc<Self>,
         web3_request: &Arc<Web3Request>,
     ) -> Web3ProxyResult<Arc<RawValue>> {
-        if let Some(protected_rpcs) = self.private_rpcs.as_ref() {
-            if !protected_rpcs.is_empty() {
-                let protected_response = protected_rpcs
-                    .try_send_all_synced_connections(
-                        web3_request,
-                        None,
-                        None,
-                        Some(Duration::from_secs(10)),
-                        Some(Level::TRACE.into()),
-                        Some(3),
-                    )
-                    .await;
+        if self.protected_rpcs.is_empty() {
+            let num_public_rpcs = match web3_request.proxy_mode() {
+                // TODO: how many balanced rpcs should we send to? configurable? percentage of total?
+                ProxyMode::Best | ProxyMode::Debug => Some(4),
+                ProxyMode::Fastest(0) => None,
+                // TODO: how many balanced rpcs should we send to? configurable? percentage of total?
+                // TODO: what if we do 2 per tier? we want to blast the third party rpcs
+                // TODO: maybe having the third party rpcs in their own Web3Rpcs would be good for this
+                ProxyMode::Fastest(x) => Some(x * 4),
+                ProxyMode::Versus => None,
+            };
 
-                return protected_response;
-            }
+            // no private rpcs to send to. send to a few public rpcs
+            // try_send_all_upstream_servers puts the request id into the response. no need to do that ourselves here.
+            self.balanced_rpcs
+                .try_send_all_synced_connections(
+                    web3_request,
+                    Some(Duration::from_secs(10)),
+                    Some(Level::TRACE.into()),
+                    num_public_rpcs,
+                )
+                .await
+        } else {
+            self.protected_rpcs
+                .try_send_all_synced_connections(
+                    web3_request,
+                    Some(Duration::from_secs(10)),
+                    Some(Level::TRACE.into()),
+                    Some(3),
+                )
+                .await
         }
-
-        let num_public_rpcs = match web3_request.proxy_mode() {
-            // TODO: how many balanced rpcs should we send to? configurable? percentage of total?
-            ProxyMode::Best | ProxyMode::Debug => Some(4),
-            ProxyMode::Fastest(0) => None,
-            // TODO: how many balanced rpcs should we send to? configurable? percentage of total?
-            // TODO: what if we do 2 per tier? we want to blast the third party rpcs
-            // TODO: maybe having the third party rpcs in their own Web3Rpcs would be good for this
-            ProxyMode::Fastest(x) => Some(x * 4),
-            ProxyMode::Versus => None,
-        };
-
-        // no private rpcs to send to. send to a few public rpcs
-        // try_send_all_upstream_servers puts the request id into the response. no need to do that ourselves here.
-        self.balanced_rpcs
-            .try_send_all_synced_connections(
-                web3_request,
-                None,
-                None,
-                Some(Duration::from_secs(10)),
-                Some(Level::TRACE.into()),
-                num_public_rpcs,
-            )
-            .await
     }
 
     /// proxy request with up to 3 tries.
@@ -1353,21 +1311,11 @@ impl Web3ProxyApp {
             | "eth_getUserOperationByHash"
             | "eth_getUserOperationReceipt"
             | "eth_supportedEntryPoints"
-            | "web3_bundlerVersion" => match self.bundler_4337_rpcs.as_ref() {
-                Some(bundler_4337_rpcs) => {
-                    bundler_4337_rpcs
+            | "web3_bundlerVersion" => self.bundler_4337_rpcs
                         .try_proxy_connection::<Arc<RawValue>>(
                             web3_request,
                         )
-                        .await?
-                }
-                None => {
-                    // TODO: stats even when we error!
-                    // TODO: dedicated error for no 4337 bundlers
-                    return Err(Web3ProxyError::NoServersSynced);
-                }
-            },
-            // TODO: id
+                        .await?,
             "eth_accounts" => jsonrpc::ParsedResponse::from_value(serde_json::Value::Array(vec![]), web3_request.id()).into(),
             "eth_blockNumber" => {
                 match web3_request.head_block.clone().or(self.balanced_rpcs.head_block()) {

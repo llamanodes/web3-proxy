@@ -26,7 +26,7 @@ struct ConsensusRpcData {
 
 impl ConsensusRpcData {
     fn new(rpc: &Web3Rpc, head: &Web3ProxyBlock) -> Self {
-        let head_block_num = *head.number();
+        let head_block_num = head.number();
 
         let block_data_limit = rpc.block_data_limit();
 
@@ -119,7 +119,7 @@ impl RankedRpcs {
         let mut votes: Vec<_> = votes
             .into_iter()
             .filter_map(|(block, (rpcs, sum_soft_limit))| {
-                if *block.number() < max_lag_block
+                if block.number() < max_lag_block
                     || sum_soft_limit < min_sum_soft_limit
                     || rpcs.len() < min_synced_rpcs
                 {
@@ -133,7 +133,7 @@ impl RankedRpcs {
         // sort the votes
         votes.sort_by_key(|(block, sum_soft_limit, _)| {
             (
-                Reverse(*block.number()),
+                Reverse(block.number()),
                 // TODO: block total difficulty (if we have it)
                 Reverse(*sum_soft_limit),
                 // TODO: median/peak latency here?
@@ -158,7 +158,7 @@ impl RankedRpcs {
                     continue;
                 }
 
-                if *x_head.number() < max_lag_block {
+                if x_head.number() < max_lag_block {
                     // server is too far behind
                     continue;
                 }
@@ -167,7 +167,7 @@ impl RankedRpcs {
             }
 
             ranked_rpcs
-                .sort_by_cached_key(|x| x.sort_for_load_balancing_on(Some(*best_block.number())));
+                .sort_by_cached_key(|x| x.sort_for_load_balancing_on(Some(best_block.number())));
 
             // consensus found!
             trace!(?ranked_rpcs);
@@ -357,7 +357,7 @@ impl Web3Rpcs {
     /// note: you probably want to use `head_block` instead
     /// TODO: return a ref?
     pub fn head_block_num(&self) -> Option<U64> {
-        self.head_block().map(|x| *x.number())
+        self.head_block().map(|x| x.number())
     }
 
     pub fn synced(&self) -> bool {
@@ -502,7 +502,7 @@ impl ConsensusFinder {
             Some(old_consensus_connections) => {
                 let old_head_block = &old_consensus_connections.head_block;
 
-                match consensus_head_block.number().cmp(old_head_block.number()) {
+                match consensus_head_block.number().cmp(&old_head_block.number()) {
                     Ordering::Equal => {
                         // multiple blocks with the same fork!
                         if consensus_head_block.hash() == old_head_block.hash() {
@@ -818,7 +818,7 @@ impl ConsensusFinder {
 
         trace!("max_lag_block_number: {}", max_lag_block_number);
 
-        let lowest_block_number = lowest_block.number().max(&max_lag_block_number);
+        let lowest_block_number = lowest_block.number().max(max_lag_block_number);
 
         // TODO: should lowest block number be set such that the rpc won't ever go backwards?
         trace!("safe lowest_block_number: {}", lowest_block_number);

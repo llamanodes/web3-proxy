@@ -48,8 +48,10 @@ pub struct CliConfig {
 pub struct TopConfig {
     pub app: AppConfig,
     pub balanced_rpcs: HashMap<String, Web3RpcConfig>,
-    pub private_rpcs: Option<HashMap<String, Web3RpcConfig>>,
-    pub bundler_4337_rpcs: Option<HashMap<String, Web3RpcConfig>>,
+    #[serde(default = "Default::default")]
+    pub private_rpcs: HashMap<String, Web3RpcConfig>,
+    #[serde(default = "Default::default")]
+    pub bundler_4337_rpcs: HashMap<String, Web3RpcConfig>,
     /// unknown config options get put here
     #[serde(flatten, default = "HashMap::default")]
     pub extra: HashMap<String, serde_json::Value>,

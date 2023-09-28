@@ -144,7 +144,7 @@ impl Web3Rpcs {
     pub async fn apply_server_configs(
         &self,
         app: &Web3ProxyApp,
-        rpc_configs: HashMap<String, Web3RpcConfig>,
+        rpc_configs: &HashMap<String, Web3RpcConfig>,
     ) -> Web3ProxyResult<()> {
         // safety checks
         if rpc_configs.len() < app.config.min_synced_rpcs {
@@ -202,8 +202,8 @@ impl Web3Rpcs {
 
                 names_to_keep.push(server_name.clone());
 
-                let handle = tokio::spawn(server_config.spawn(
-                    server_name,
+                let handle = tokio::spawn(server_config.clone().spawn(
+                    server_name.clone(),
                     vredis_pool,
                     server_id,
                     chain_id,
@@ -653,8 +653,6 @@ impl Web3Rpcs {
     pub async fn all_connections(
         &self,
         web3_request: &Arc<Web3Request>,
-        min_block_needed: Option<&U64>,
-        max_block_needed: Option<&U64>,
         max_count: Option<usize>,
         error_level: Option<RequestErrorHandler>,
     ) -> Result<Vec<OpenRequestHandle>, Option<Instant>> {
@@ -679,7 +677,8 @@ impl Web3Rpcs {
         let mut selected_rpcs = Vec::with_capacity(max_count);
 
         // TODO: this sorts them all even though we probably won't need all of them. think about this more
-        all_rpcs.sort_by_cached_key(|x| x.sort_for_load_balancing_on(max_block_needed.copied()));
+        all_rpcs
+            .sort_by_cached_key(|x| x.sort_for_load_balancing_on(web3_request.max_block_needed()));
 
         trace!("all_rpcs: {:#?}", all_rpcs);
 
@@ -687,14 +686,14 @@ impl Web3Rpcs {
             trace!("trying {}", rpc);
 
             // TODO: use a helper function for these
-            if let Some(block_needed) = min_block_needed {
+            if let Some(block_needed) = web3_request.min_block_needed() {
                 if !rpc.has_block_data(block_needed) {
                     trace!("{} is missing min_block_needed. skipping", rpc);
                     continue;
                 }
             }
 
-            if let Some(block_needed) = max_block_needed {
+            if let Some(block_needed) = web3_request.max_block_needed() {
                 if !rpc.has_block_data(block_needed) {
                     trace!("{} is missing max_block_needed. skipping", rpc);
                     continue;
@@ -994,7 +993,7 @@ impl Web3Rpcs {
         let head_block_num = watch_consensus_rpcs
             .borrow_and_update()
             .as_ref()
-            .map(|x| *x.head_block.number());
+            .map(|x| x.head_block.number());
 
         // TODO: error? warn? debug? trace?
         if head_block_num.is_none() {
@@ -1050,8 +1049,6 @@ impl Web3Rpcs {
     pub async fn try_send_all_synced_connections(
         self: &Arc<Self>,
         web3_request: &Arc<Web3Request>,
-        min_block_needed: Option<&U64>,
-        max_block_needed: Option<&U64>,
         max_wait: Option<Duration>,
         error_level: Option<RequestErrorHandler>,
         max_sends: Option<usize>,
@@ -1068,13 +1065,7 @@ impl Web3Rpcs {
             }
 
             match self
-                .all_connections(
-                    web3_request,
-                    min_block_needed,
-                    max_block_needed,
-                    max_sends,
-                    error_level,
-                )
+                .all_connections(web3_request, max_sends, error_level)
                 .await
             {
                 Ok(active_request_handles) => {
@@ -1110,8 +1101,8 @@ impl Web3Rpcs {
                 Err(None) => {
                     warn!(
                         ?self,
-                        ?min_block_needed,
-                        ?max_block_needed,
+                        min_block_needed=?web3_request.min_block_needed(),
+                        max_block_needed=?web3_request.max_block_needed(),
                         "No servers in sync on! Retrying",
                     );
 
@@ -1423,11 +1414,11 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!head_rpc.has_block_data(lagged_block.number.as_ref().unwrap()));
-        assert!(!head_rpc.has_block_data(head_block.number.as_ref().unwrap()));
+        assert!(!head_rpc.has_block_data(lagged_block.number.unwrap()));
+        assert!(!head_rpc.has_block_data(head_block.number.unwrap()));
 
-        assert!(!lagged_rpc.has_block_data(lagged_block.number.as_ref().unwrap()));
-        assert!(!lagged_rpc.has_block_data(head_block.number.as_ref().unwrap()));
+        assert!(!lagged_rpc.has_block_data(lagged_block.number.unwrap()));
+        assert!(!lagged_rpc.has_block_data(head_block.number.unwrap()));
 
         let head_rpc = Arc::new(head_rpc);
         let lagged_rpc = Arc::new(lagged_rpc);
@@ -1483,13 +1474,7 @@ mod tests {
 
         // all_backend_connections gives all non-backup servers regardless of sync status
         let m = Arc::new(Web3Request::default());
-        assert_eq!(
-            rpcs.all_connections(&m, None, None, None, None)
-                .await
-                .unwrap()
-                .len(),
-            2
-        );
+        assert_eq!(rpcs.all_connections(&m, None, None).await.unwrap().len(), 2);
 
         // best_synced_backend_connection which servers to be synced with the head block should not find any nodes
         let m = Arc::new(Web3Request::default());
@@ -1544,11 +1529,11 @@ mod tests {
         // TODO: how do we spawn this and wait for it to process things? subscribe and watch consensus connections?
         // rpcs.process_incoming_blocks(block_receiver, pending_tx_sender)
 
-        assert!(head_rpc.has_block_data(lagged_block.number.as_ref().unwrap()));
-        assert!(!head_rpc.has_block_data(head_block.number.as_ref().unwrap()));
+        assert!(head_rpc.has_block_data(lagged_block.number.unwrap()));
+        assert!(!head_rpc.has_block_data(head_block.number.unwrap()));
 
-        assert!(lagged_rpc.has_block_data(lagged_block.number.as_ref().unwrap()));
-        assert!(!lagged_rpc.has_block_data(head_block.number.as_ref().unwrap()));
+        assert!(lagged_rpc.has_block_data(lagged_block.number.unwrap()));
+        assert!(!lagged_rpc.has_block_data(head_block.number.unwrap()));
 
         assert_eq!(rpcs.num_synced_rpcs(), 2);
 
@@ -1574,11 +1559,11 @@ mod tests {
 
         assert_eq!(rpcs.num_synced_rpcs(), 1);
 
-        assert!(head_rpc.has_block_data(lagged_block.number.as_ref().unwrap()));
-        assert!(head_rpc.has_block_data(head_block.number.as_ref().unwrap()));
+        assert!(head_rpc.has_block_data(lagged_block.number.unwrap()));
+        assert!(head_rpc.has_block_data(head_block.number.unwrap()));
 
-        assert!(lagged_rpc.has_block_data(lagged_block.number.as_ref().unwrap()));
-        assert!(!lagged_rpc.has_block_data(head_block.number.as_ref().unwrap()));
+        assert!(lagged_rpc.has_block_data(lagged_block.number.unwrap()));
+        assert!(!lagged_rpc.has_block_data(head_block.number.unwrap()));
 
         // TODO: make sure the handle is for the expected rpc
         let m = Arc::new(Web3Request::default());
@@ -1652,8 +1637,8 @@ mod tests {
 
         assert!(pruned_rpc.has_block_data(head_block.number()));
         assert!(archive_rpc.has_block_data(head_block.number()));
-        assert!(!pruned_rpc.has_block_data(&1.into()));
-        assert!(archive_rpc.has_block_data(&1.into()));
+        assert!(!pruned_rpc.has_block_data(1.into()));
+        assert!(archive_rpc.has_block_data(1.into()));
 
         let pruned_rpc = Arc::new(pruned_rpc);
         let archive_rpc = Arc::new(archive_rpc);
@@ -1842,10 +1827,9 @@ mod tests {
 
         // best_synced_backend_connection requires servers to be synced with the head block
         // TODO: test with and without passing the head_block.number?
+        // TODO: check block_2.number()
         let m = Arc::new(Web3Request::default());
-        let head_connections = rpcs
-            .all_connections(&m, Some(block_2.number()), None, None, None)
-            .await;
+        let head_connections = rpcs.all_connections(&m, None, None).await;
 
         debug!("head_connections: {:#?}", head_connections);
 
@@ -1855,10 +1839,9 @@ mod tests {
             "wrong number of connections"
         );
 
+        // TODO: check block_1.number()
         let m = Arc::new(Web3Request::default());
-        let all_connections = rpcs
-            .all_connections(&m, Some(block_1.number()), None, None, None)
-            .await;
+        let all_connections = rpcs.all_connections(&m, None, None).await;
 
         debug!("all_connections: {:#?}", all_connections);
 
@@ -1869,7 +1852,7 @@ mod tests {
         );
 
         let m = Arc::new(Web3Request::default());
-        let all_connections = rpcs.all_connections(&m, None, None, None, None).await;
+        let all_connections = rpcs.all_connections(&m, None, None).await;
 
         debug!("all_connections: {:#?}", all_connections);
 

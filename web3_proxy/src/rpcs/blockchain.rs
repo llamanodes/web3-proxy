@@ -105,11 +105,8 @@ impl Web3ProxyBlock {
     }
 
     #[inline(always)]
-    pub fn number(&self) -> &U64 {
-        self.0
-            .number
-            .as_ref()
-            .expect("saved blocks must have a number")
+    pub fn number(&self) -> U64 {
+        self.0.number.expect("saved blocks must have a number")
     }
 
     #[inline(always)]
@@ -165,7 +162,7 @@ impl Web3Rpcs {
 
             // TODO: if there is an existing entry with a different block_hash,
             // TODO: use entry api to handle changing existing entries
-            self.blocks_by_number.insert(*block_num, block_hash).await;
+            self.blocks_by_number.insert(block_num, block_hash).await;
 
             for uncle in block.uncles() {
                 self.blocks_by_hash.invalidate(uncle).await;
@@ -255,7 +252,7 @@ impl Web3Rpcs {
             // double check that it matches the blocks_by_number cache
             let cached_hash = self
                 .blocks_by_number
-                .get_with_by_ref(block.number(), async { *hash })
+                .get_with(block.number(), async { *hash })
                 .await;
 
             if cached_hash == *hash {
@@ -349,7 +346,7 @@ impl Web3Rpcs {
 
         // be sure the requested block num exists
         // TODO: is this okay? what if we aren't synced?!
-        let mut head_block_num = *consensus_head_receiver
+        let mut head_block_num = consensus_head_receiver
             .borrow_and_update()
             .as_ref()
             .web3_context("no consensus head block")?
@@ -370,7 +367,7 @@ impl Web3Rpcs {
                 consensus_head_receiver.changed().await?;
 
                 if let Some(head) = consensus_head_receiver.borrow_and_update().as_ref() {
-                    head_block_num = *head.number();
+                    head_block_num = head.number();
                 }
             }
         }

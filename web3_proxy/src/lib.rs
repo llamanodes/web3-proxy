@@ -25,6 +25,5 @@ pub mod relational_db;
 pub mod response_cache;
 pub mod rpcs;
 pub mod stats;
-pub mod task_locals;
 pub mod test_utils;
 pub mod user_token;

@@ -106,8 +106,8 @@ impl TestApp {
                 },
             )]),
             // influxdb_client: influx.map(|x| x.client),
-            private_rpcs: None,
-            bundler_4337_rpcs: None,
+            private_rpcs: Default::default(),
+            bundler_4337_rpcs: Default::default(),
             extra: Default::default(),
         };
 

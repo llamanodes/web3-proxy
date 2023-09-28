@@ -5,13 +5,12 @@ use crate::app::{Web3ProxyApp, APP_USER_AGENT};
 use crate::balance::Balance;
 use crate::caches::RegisteredUserRateLimitKey;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
-use crate::globals::global_db_replica_conn;
+use crate::globals::{global_db_replica_conn, APP};
 use crate::jsonrpc::{self, JsonRpcId, JsonRpcParams, JsonRpcRequest};
 use crate::response_cache::JsonRpcQueryCacheKey;
 use crate::rpcs::blockchain::Web3ProxyBlock;
 use crate::rpcs::one::Web3Rpc;
 use crate::stats::{AppStat, BackendRequests};
-use crate::task_locals::APP;
 use crate::user_token::UserBearerToken;
 use anyhow::Context;
 use axum::headers::authorization::Bearer;
@@ -214,7 +213,7 @@ impl KafkaDebugLogger {
     fn try_new(
         app: &Web3ProxyApp,
         authorization: Arc<Authorization>,
-        head_block_num: Option<&U64>,
+        head_block_num: Option<U64>,
         kafka_topic: &str,
         request_ulid: Ulid,
     ) -> Option<Arc<Self>> {
@@ -233,9 +232,7 @@ impl KafkaDebugLogger {
 
         let chain_id = app.config.chain_id;
 
-        let head_block_num = head_block_num
-            .copied()
-            .or_else(|| app.balanced_rpcs.head_block_num());
+        let head_block_num = head_block_num.or_else(|| app.balanced_rpcs.head_block_num());
 
         // TODO: would be nice to have the block hash too
 
@@ -482,34 +479,26 @@ impl ResponseOrBytes<'_> {
 }
 
 impl Web3Request {
-    pub async fn new<R: Into<RequestOrMethod>>(
-        app: &Arc<Web3ProxyApp>,
+    #[allow(clippy::too_many_arguments)]
+    fn new_with_options<R: Into<RequestOrMethod>>(
         authorization: Arc<Authorization>,
+        chain_id: u64,
+        head_block: Option<Web3ProxyBlock>,
+        kafka_debug_logger: Option<Arc<KafkaDebugLogger>>,
         max_wait: Option<Duration>,
         request: R,
-        head_block: Option<Web3ProxyBlock>,
+        stat_sender: Option<mpsc::UnboundedSender<AppStat>>,
+        usd_per_cu: Decimal,
     ) -> Arc<Self> {
-        // TODO: get this out of tracing instead (where we have a String from Amazon's LB)
-        let request_ulid = Ulid::new();
-
         let start_instant = Instant::now();
 
         let expire_instant = start_instant + max_wait.unwrap_or_else(|| Duration::from_secs(295));
 
-        let kafka_debug_logger = if matches!(authorization.checks.proxy_mode, ProxyMode::Debug) {
-            KafkaDebugLogger::try_new(
-                app,
-                authorization.clone(),
-                head_block.as_ref().map(|x| x.number()),
-                "web3_proxy:rpc",
-                request_ulid,
-            )
-        } else {
-            None
-        };
-
         let request: RequestOrMethod = request.into();
 
+        // we VERY INTENTIONALLY log to kafka BEFORE calculating the cache key
+        // this is because calculating the cache_key may modify the params!
+        // for example, if the request specifies "latest" as the block number, we replace it with the actual latest block number
         if let Some(ref kafka_debug_logger) = kafka_debug_logger {
             if let Some(request) = request.jsonrpc_request() {
                 // TODO: channels might be more ergonomic than spawned futures
@@ -521,12 +510,8 @@ impl Web3Request {
             }
         }
 
-        // we VERY INTENTIONALLY log to kafka BEFORE calculating the cache key
-        // this is because calculating the cache_key may modify the params!
-        // for example, if the request specifies "latest" as the block number, we replace it with the actual latest block number
+        // now that kafka has logged the user's original params, we can calculate the cache key
         let cache_key = None;
-
-        let chain_id = app.config.chain_id;
 
         let x = Self {
             archive_request: false.into(),
@@ -545,12 +530,52 @@ impl Web3Request {
             response_timestamp: 0.into(),
             start_instant,
             expire_instant,
-            stat_sender: app.stat_sender.clone(),
-            usd_per_cu: app.config.usd_per_cu.unwrap_or_default(),
+            stat_sender,
+            usd_per_cu,
             user_error_response: false.into(),
         };
 
         Arc::new(x)
+    }
+
+    pub async fn new<R: Into<RequestOrMethod>>(
+        app: &Arc<Web3ProxyApp>,
+        authorization: Arc<Authorization>,
+        max_wait: Option<Duration>,
+        request: R,
+        head_block: Option<Web3ProxyBlock>,
+    ) -> Arc<Self> {
+        // TODO: get this out of tracing instead (where we have a String from Amazon's LB)
+        let request_ulid = Ulid::new();
+
+        let kafka_debug_logger = if matches!(authorization.checks.proxy_mode, ProxyMode::Debug) {
+            KafkaDebugLogger::try_new(
+                app,
+                authorization.clone(),
+                head_block.as_ref().map(|x| x.number()),
+                "web3_proxy:rpc",
+                request_ulid,
+            )
+        } else {
+            None
+        };
+
+        let chain_id = app.config.chain_id;
+
+        let stat_sender = app.stat_sender.clone();
+
+        let usd_per_cu = app.config.usd_per_cu.unwrap_or_default();
+
+        Self::new_with_options(
+            authorization,
+            chain_id,
+            head_block,
+            kafka_debug_logger,
+            max_wait,
+            request,
+            stat_sender,
+            usd_per_cu,
+        )
     }
 
     /// TODO: change this to just take the app. put the app in a global
@@ -567,9 +592,9 @@ impl Web3Request {
 
         let request = JsonRpcRequest::new(id, method, json!(params)).unwrap();
 
-        let app = APP.with(|app| app.clone());
+        let app = APP.get().unwrap();
 
-        Self::new(&app, authorization, max_wait, request, head_block).await
+        Self::new(app, authorization, max_wait, request, head_block).await
     }
 
     #[inline]
