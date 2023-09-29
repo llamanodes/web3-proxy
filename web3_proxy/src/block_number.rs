@@ -305,7 +305,8 @@ impl CacheMode {
                 Ok(CacheMode::CacheSuccessForever)
             }
             "eth_getLogs" => {
-                // TODO: think about this more
+                /*
+                // TODO: think about this more. this seems like it partly belongs in clean_block_number
                 // TODO: jsonrpc has a specific code for this
                 let obj = params
                     .get_mut(0)
@@ -365,6 +366,11 @@ impl CacheMode {
                         cache_errors: true,
                     })
                 }
+                */
+                Ok(CacheMode::Cache {
+                    block: head_block.into(),
+                    cache_errors: true,
+                })
             }
             "eth_getTransactionByHash" => {
                 // TODO: not sure how best to look these up
