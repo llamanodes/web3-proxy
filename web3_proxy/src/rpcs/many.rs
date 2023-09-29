@@ -1383,6 +1383,8 @@ mod tests {
             ..Default::default()
         };
 
+        let future_block_num = head_block.number.unwrap() + U64::one();
+
         let lagged_block = Arc::new(lagged_block);
         let head_block = Arc::new(head_block);
 
@@ -1473,15 +1475,30 @@ mod tests {
         assert!(rpcs.head_block_hash().is_none());
 
         // all_backend_connections gives all non-backup servers regardless of sync status
-        let m = Arc::new(Web3Request::default());
-        assert_eq!(rpcs.all_connections(&m, None, None).await.unwrap().len(), 2);
+        let r = Web3Request::new_internal(
+            "eth_getBlockByNumber".to_string(),
+            &(lagged_block.number.unwrap(), false),
+            Some(Web3ProxyBlock::try_from(head_block.clone()).unwrap()),
+            None,
+        )
+        .await;
+        assert_eq!(rpcs.all_connections(&r, None, None).await.unwrap().len(), 2);
 
         // best_synced_backend_connection which servers to be synced with the head block should not find any nodes
-        let m = Arc::new(Web3Request::default());
-        let x = rpcs
-            .wait_for_best_rpc(&m, &mut vec![], Some(RequestErrorHandler::DebugLevel))
-            .await
-            .unwrap();
+        let r = Web3Request::new_internal(
+            "eth_getBlockByNumber".to_string(),
+            &(head_block.number.unwrap(), false),
+            Some(Web3ProxyBlock::try_from(head_block.clone()).unwrap()),
+            None,
+        )
+        .await;
+        let x = timeout(
+            Duration::from_millis(100),
+            rpcs.wait_for_best_rpc(&r, &mut vec![], Some(RequestErrorHandler::DebugLevel)),
+        )
+        .await
+        .unwrap()
+        .unwrap();
 
         info!(?x);
 
@@ -1566,32 +1583,54 @@ mod tests {
         assert!(!lagged_rpc.has_block_data(head_block.number.unwrap()));
 
         // TODO: make sure the handle is for the expected rpc
-        let m = Arc::new(Web3Request::default());
+        let r = Web3Request::new_internal(
+            "eth_getBlockByNumber".to_string(),
+            &(future_block_num, false),
+            Some(Web3ProxyBlock::try_from(head_block.clone()).unwrap()),
+            None,
+        )
+        .await;
         assert!(matches!(
-            rpcs.wait_for_best_rpc(&m, &mut vec![], None).await,
+            rpcs.wait_for_best_rpc(&r, &mut vec![], None).await,
             Ok(OpenRequestResult::Handle(_))
         ));
 
         // TODO: make sure the handle is for the expected rpc
-        // TODO: actually test a future block. this Web3Request doesn't require block #0
-        let m = Arc::new(Web3Request::default());
+        let r = Web3Request::new_internal(
+            "eth_getBlockByNumber".to_string(),
+            &(lagged_block.number.unwrap(), false),
+            Some(Web3ProxyBlock::try_from(head_block.clone()).unwrap()),
+            Some(Duration::from_millis(100)),
+        )
+        .await;
         assert!(matches!(
-            rpcs.wait_for_best_rpc(&m, &mut vec![], None,).await,
+            rpcs.wait_for_best_rpc(&r, &mut vec![], None,).await,
             Ok(OpenRequestResult::Handle(_))
         ));
 
         // TODO: make sure the handle is for the expected rpc
-        // TODO: actually test a future block. this Web3Request doesn't require block #1
-        let m = Arc::new(Web3Request::default());
+        let r = Web3Request::new_internal(
+            "eth_getBlockByNumber".to_string(),
+            &(head_block.number.unwrap(), false),
+            Some(Web3ProxyBlock::try_from(head_block.clone()).unwrap()),
+            Some(Duration::from_millis(100)),
+        )
+        .await;
         assert!(matches!(
-            rpcs.wait_for_best_rpc(&m, &mut vec![], None,).await,
+            rpcs.wait_for_best_rpc(&r, &mut vec![], None,).await,
             Ok(OpenRequestResult::Handle(_))
         ));
 
         // future block should not get a handle
-        // TODO: actually test a future block. this Web3Request doesn't require block #2
-        let m = Arc::new(Web3Request::default());
-        let future_rpc = rpcs.wait_for_best_rpc(&m, &mut vec![], None).await;
+        let future_block_num = head_block.as_ref().number.unwrap() + U64::one();
+        let r = Web3Request::new_internal(
+            "eth_getBlockByNumber".to_string(),
+            &(future_block_num, false),
+            Some(Web3ProxyBlock::try_from(head_block.clone()).unwrap()),
+            Some(Duration::from_millis(100)),
+        )
+        .await;
+        let future_rpc = rpcs.wait_for_best_rpc(&r, &mut vec![], None).await;
         assert!(matches!(future_rpc, Ok(OpenRequestResult::NotReady)));
     }
 
@@ -1690,24 +1729,43 @@ mod tests {
 
         // best_synced_backend_connection requires servers to be synced with the head block
         // TODO: test with and without passing the head_block.number?
-        let m = Arc::new(Web3Request::default());
-        let best_available_server = rpcs.wait_for_best_rpc(&m, &mut vec![], None).await;
+        let r = Web3Request::new_internal(
+            "eth_getBlockByNumber".to_string(),
+            &(head_block.number(), false),
+            Some(head_block.clone()),
+            Some(Duration::from_millis(100)),
+        )
+        .await;
+        let best_available_server = rpcs.wait_for_best_rpc(&r, &mut vec![], None).await.unwrap();
 
         debug!("best_available_server: {:#?}", best_available_server);
 
         assert!(matches!(
-            best_available_server.unwrap(),
+            best_available_server,
             OpenRequestResult::Handle(_)
         ));
 
-        let m = Arc::new(Web3Request::default());
-        let _best_available_server_from_none = rpcs.wait_for_best_rpc(&m, &mut vec![], None).await;
+        let r = Web3Request::new_internal(
+            "eth_getBlockByNumber".to_string(),
+            &(head_block.number(), false),
+            Some(head_block.clone()),
+            Some(Duration::from_millis(100)),
+        )
+        .await;
+        let _best_available_server_from_none =
+            rpcs.wait_for_best_rpc(&r, &mut vec![], None).await.unwrap();
 
         // assert_eq!(best_available_server, best_available_server_from_none);
 
         // TODO: actually test a future block. this Web3Request doesn't require block #1
-        let m = Arc::new(Web3Request::default());
-        let best_archive_server = rpcs.wait_for_best_rpc(&m, &mut vec![], None).await;
+        let r = Web3Request::new_internal(
+            "eth_getBlockByNumber".to_string(),
+            &(head_block.number(), false),
+            Some(head_block.clone()),
+            Some(Duration::from_millis(100)),
+        )
+        .await;
+        let best_archive_server = rpcs.wait_for_best_rpc(&r, &mut vec![], None).await;
 
         match best_archive_server {
             Ok(OpenRequestResult::Handle(x)) => {

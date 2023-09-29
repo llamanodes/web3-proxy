@@ -80,7 +80,7 @@ impl Web3ProxyApp {
                             continue;
                         };
 
-                        let subscription_web3_request = Web3Request::new(
+                        let subscription_web3_request = Web3Request::new_with_app(
                             &app,
                             authorization.clone(),
                             None,
@@ -144,7 +144,7 @@ impl Web3ProxyApp {
 
                     while let Some(Ok(new_txid)) = pending_txid_firehose.next().await {
                         // TODO: include the head_block here?
-                        let subscription_web3_request = Web3Request::new(
+                        let subscription_web3_request = Web3Request::new_with_app(
                             &app,
                             authorization.clone(),
                             None,

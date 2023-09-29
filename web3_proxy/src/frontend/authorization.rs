@@ -538,7 +538,7 @@ impl Web3Request {
         Arc::new(x)
     }
 
-    pub async fn new<R: Into<RequestOrMethod>>(
+    pub async fn new_with_app<R: Into<RequestOrMethod>>(
         app: &Arc<Web3ProxyApp>,
         authorization: Arc<Authorization>,
         max_wait: Option<Duration>,
@@ -592,9 +592,21 @@ impl Web3Request {
 
         let request = JsonRpcRequest::new(id, method, json!(params)).unwrap();
 
-        let app = APP.get().unwrap();
-
-        Self::new(app, authorization, max_wait, request, head_block).await
+        if let Some(app) = APP.get() {
+            Self::new_with_app(app, authorization, max_wait, request, head_block).await
+        } else {
+            // TODO: no app, so what should happens with chain_id?
+            Self::new_with_options(
+                authorization,
+                0,
+                head_block,
+                None,
+                max_wait,
+                request,
+                None,
+                Default::default(),
+            )
+        }
     }
 
     #[inline]
