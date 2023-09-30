@@ -8,7 +8,6 @@ use std::{
     hash::{Hash, Hasher},
 };
 use tokio::sync::{broadcast, mpsc};
-use tokio::task::yield_now;
 
 struct DedupedBroadcasterTask<T>
 where
