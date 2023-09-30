@@ -38,14 +38,14 @@ siwe = { git = "https://github.com/llamanodes/siwe-rs", rev = "013be5204ff1c8577
 anyhow = { version = "1.0.75", features = ["backtrace"] }
 arc-swap = { version = "1.6.0" }
 argh = "0.1.12"
-async-stripe = { version = "0.22.2", default-features = false, features = ["billing", "checkout", "connect", "runtime-tokio-hyper-rustls", "webhook-events"] }
+async-stripe = { version = "0.25.1", default-features = false, features = ["billing", "checkout", "connect", "runtime-tokio-hyper-rustls", "webhook-events"] }
 async-trait = "0.1.73"
 axum = { version = "0.6.20", features = ["headers", "tracing", "ws"] }
 axum-client-ip = "0.4.2"
 axum-macros = "0.3.8"
 base64 = "0.21.4"
 chrono = { version = "0.4.31" }
-console-subscriber = { version = "0.1.10", features = ["env-filter", "parking_lot"], optional = true }
+console-subscriber = { version = "0.2.0", features = ["env-filter", "parking_lot"], optional = true }
 counter = "0.5.7"
 derivative = "2.2.0"
 derive_more = { version = "0.99.17", features = ["nightly"] }
@@ -56,7 +56,7 @@ fstrings = "0.2"
 futures = { version = "0.3.28" }
 glob = "0.3.1"
 handlebars = "4.4.0"
-hashbrown = { version = "0.14.0", features = ["serde", "nightly"] }
+hashbrown = { version = "0.14.1", features = ["serde", "nightly"] }
 hdrhistogram = "7.5.2"
 hostname = "0.3.1"
 http = "0.2.9"
@@ -70,7 +70,7 @@ nanorand = { version = "0.7.0", default-features = false, features = ["std", "tl
 num = { version = "0.4.1" }
 num-traits = "0.2.16"
 once_cell = { version = "1.18.0" }
-ordered-float = {version = "3.9.1" }
+ordered-float = {version = "4.1.0" }
 pagerduty-rs = { version = "0.1.6", default-features = false, features = ["async", "rustls", "sync"] }
 parking_lot = { version = "0.12.1", features = ["arc_lock", "nightly"] }
 rdkafka = { version = "0.34.0", features = ["tracing"] }
@@ -87,9 +87,9 @@ serde_prometheus = "0.2.4"
 strum = { version = "0.25.0", features = ["derive"] }
 time = { version = "0.3" }
 tokio = { version = "1.32.0", features = ["full", "tracing"] }
-tokio-console = { version = "0.1.9", optional = true }
+tokio-console = { version = "0.1.10", optional = true }
 tokio-stream = { version = "0.1.14", features = ["sync"] }
-toml = "0.8.0"
+toml = "0.8.1"
 tower = { version = "0.4.13", features = ["timeout", "tracing"] }
 tower-http = { version = "0.4.4", features = ["cors", "normalize-path", "sensitive-headers", "trace"] }
 tracing = "0.1"
