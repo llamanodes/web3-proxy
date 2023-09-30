@@ -305,6 +305,7 @@ impl CacheMode {
                 Ok(CacheMode::CacheSuccessForever)
             }
             "eth_getLogs" => {
+                /*
                 // TODO: think about this more
                 // TODO: jsonrpc has a specific code for this
                 let obj = params
@@ -365,6 +366,11 @@ impl CacheMode {
                         cache_errors: true,
                     })
                 }
+                */
+                Ok(CacheMode::Cache {
+                    block: head_block.into(),
+                    cache_errors: true,
+                })
             }
             "eth_getTransactionByHash" => {
                 // TODO: not sure how best to look these up
