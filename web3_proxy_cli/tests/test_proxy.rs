@@ -242,6 +242,17 @@ async fn it_matches_anvil() {
         .unwrap();
     info!(?deploy_tx);
 
+    let head_block_num: U64 = quorum_provider
+        .request("eth_getBlockNumber", ("latest", false))
+        .await
+        .unwrap();
+
+    let future_block: Option<ArcBlock> = quorum_provider
+        .request("eth_getBlockByNumber", (head_block_num + U64::one(), false))
+        .await
+        .unwrap();
+    assert!(future_block.is_none());
+
     // todo!("lots more requests");
 
     // todo!("compare batch requests");

@@ -28,7 +28,6 @@ pub enum OpenRequestResult {
 
 /// Make RPC requests through this handle and drop it when you are done.
 /// Opening this handle checks rate limits. Developers, try to keep opening a handle and using it as close together as possible
-#[derive(Debug)]
 pub struct OpenRequestHandle {
     web3_request: Arc<Web3Request>,
     error_handler: RequestErrorHandler,
@@ -61,6 +60,15 @@ struct EthCallParams((EthCallFirstParams, Option<serde_json::Value>));
 struct EthCallFirstParams {
     to: Option<Address>,
     data: Option<Bytes>,
+}
+
+impl std::fmt::Debug for OpenRequestHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenRequestHandle")
+            .field("method", &self.web3_request.request.method())
+            .field("rpc", &self.rpc.name)
+            .finish_non_exhaustive()
+    }
 }
 
 impl From<Level> for RequestErrorHandler {
