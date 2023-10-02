@@ -20,8 +20,9 @@ pipeline {
     stages {
         stage('Temporary Cleanup') {
             steps {
+                sh 'cargo clean'
                 cleanWs()
-            }
+            } 
         }
         stage('Check and Cancel Old Builds') {
             steps {
