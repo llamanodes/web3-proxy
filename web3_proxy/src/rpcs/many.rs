@@ -648,8 +648,8 @@ impl Web3Rpcs {
     /// get all rpc servers that are not rate limited
     /// this prefers synced servers, but it will return servers even if they aren't fully in sync.
     /// This is useful for broadcasting signed transactions.
-    // TODO: better type on this that can return an anyhow::Result
-    // TODO: this is broken
+    /// TODO: better type on this that can return an anyhow::Result
+    /// TODO: redo this to just return all the connections. better to do rate limits at the end
     pub async fn all_connections(
         &self,
         web3_request: &Arc<Web3Request>,
@@ -1899,7 +1899,6 @@ mod tests {
             automatic_block_limit: false,
             backup: false,
             block_data_limit: 64.into(),
-            // tier: 0,
             head_block_sender: Some(tx_mock_geth),
             peak_latency: Some(new_peak_latency()),
             ..Default::default()
@@ -1911,7 +1910,6 @@ mod tests {
             automatic_block_limit: false,
             backup: false,
             block_data_limit: u64::MAX.into(),
-            // tier: 1,
             head_block_sender: Some(tx_mock_erigon_archive),
             peak_latency: Some(new_peak_latency()),
             ..Default::default()
@@ -1987,6 +1985,25 @@ mod tests {
             "wrong number of connections"
         );
 
+        // this should give us both servers
+        let r = Web3Request::new_internal(
+            "eth_getBlockByNumber".to_string(),
+            &(block_1.number() - U64::from(32), false),
+            Some(block_2.clone()),
+            Some(Duration::from_millis(100)),
+        )
+        .await;
+        let all_connections = rpcs.all_connections(&r, None, None).await;
+
+        debug!("all_connections: {:#?}", all_connections);
+
+        assert_eq!(
+            all_connections.unwrap().len(),
+            2,
+            "wrong number of connections"
+        );
+
+        // this should give us only the archive server
         let r = Web3Request::new_internal(
             "eth_getBlockByNumber".to_string(),
             &(block_1.number() - U64::from(100), false),
@@ -2000,7 +2017,7 @@ mod tests {
 
         assert_eq!(
             all_connections.unwrap().len(),
-            2,
+            1,
             "wrong number of connections"
         );
     }

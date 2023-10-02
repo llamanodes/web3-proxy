@@ -391,39 +391,42 @@ impl Web3Rpc {
 
     /// TODO: get rid of this now that consensus rpcs does it
     pub fn has_block_data(&self, needed_block_num: U64) -> bool {
-        // TODO: this needs a max of our overall head block number
-        let head_block_num = match self.head_block_sender.as_ref().unwrap().borrow().as_ref() {
-            None => return false,
-            Some(x) => x.number(),
-        };
+        if let Some(head_block_sender) = self.head_block_sender.as_ref() {
+            // TODO: this needs a max of our overall head block number
+            let head_block_num = match head_block_sender.borrow().as_ref() {
+                None => return false,
+                Some(x) => x.number(),
+            };
 
-        // this rpc doesn't have that block yet. still syncing
-        if needed_block_num > head_block_num {
-            trace!(
-                "{} has head {} but needs {}",
-                self,
-                head_block_num,
-                needed_block_num,
-            );
-            return false;
+            // this rpc doesn't have that block yet. still syncing
+            if needed_block_num > head_block_num {
+                trace!(
+                    "{} has head {} but needs {}",
+                    self,
+                    head_block_num,
+                    needed_block_num,
+                );
+                return false;
+            }
+
+            // if this is a pruning node, we might not actually have the block
+            let block_data_limit: U64 = self.block_data_limit();
+
+            let oldest_block_num = head_block_num.saturating_sub(block_data_limit);
+
+            if needed_block_num < oldest_block_num {
+                trace!(
+                    "{} needs {} but the oldest available is {}",
+                    self,
+                    needed_block_num,
+                    oldest_block_num
+                );
+                return false;
+            }
+            true
+        } else {
+            false
         }
-
-        // if this is a pruning node, we might not actually have the block
-        let block_data_limit: U64 = self.block_data_limit();
-
-        let oldest_block_num = head_block_num.saturating_sub(block_data_limit);
-
-        if needed_block_num < oldest_block_num {
-            trace!(
-                "{} needs {} but the oldest available is {}",
-                self,
-                needed_block_num,
-                oldest_block_num
-            );
-            return false;
-        }
-
-        true
     }
 
     /// query the web3 provider to confirm it is on the expected chain with the expected data available
