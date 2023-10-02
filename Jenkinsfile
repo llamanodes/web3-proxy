@@ -19,6 +19,9 @@ pipeline {
     }
     stages {
         stage('Check and Cancel Old Builds') {
+            environment {
+                type="jobs"
+            }
             steps {
                 script {
                     def jobName = env.JOB_NAME
