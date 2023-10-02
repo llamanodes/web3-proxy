@@ -66,11 +66,12 @@ impl From<&Web3ProxyBlock> for BlockNumAndHash {
 
 /// modify params to always have a block hash and not "latest"
 /// TODO: this should replace all block numbers with hashes, not just "latest"
-pub async fn clean_block_number(
-    params: &mut serde_json::Value,
+#[async_recursion]
+pub async fn clean_block_number<'a>(
+    params: &'a mut serde_json::Value,
     block_param_id: usize,
-    latest_block: &Web3ProxyBlock,
-    app: &Web3ProxyApp,
+    head_block: &'a Web3ProxyBlock,
+    app: Option<&'a Web3ProxyApp>,
 ) -> Web3ProxyResult<BlockNumAndHash> {
     match params.as_array_mut() {
         None => {
@@ -81,7 +82,7 @@ pub async fn clean_block_number(
             None => {
                 if params.len() == block_param_id {
                     // add the latest block number to the end of the params
-                    params.push(json!(latest_block.number()));
+                    params.push(json!(head_block.number()));
                 } else {
                     // don't modify the request. only cache with current block
                     // TODO: more useful log that include the
@@ -89,7 +90,7 @@ pub async fn clean_block_number(
                 }
 
                 // don't modify params, just cache with the current block
-                Ok(latest_block.into())
+                Ok(head_block.into())
             }
             Some(x) => {
                 // dig into the json value to find a BlockNumber or similar block identifier
@@ -101,13 +102,22 @@ pub async fn clean_block_number(
                         let block_hash: H256 =
                             serde_json::from_value(block_hash).context("decoding blockHash")?;
 
-                        let block = app
-                            .balanced_rpcs
-                            .block(&block_hash, None, None)
-                            .await
-                            .context("fetching block number from hash")?;
+                        if block_hash == *head_block.hash() {
+                            (head_block.into(), false)
+                        } else if let Some(app) = app {
+                            let block = app
+                                .balanced_rpcs
+                                .block(&block_hash, None, None)
+                                .await
+                                .context("fetching block number from hash")?;
 
-                        (BlockNumAndHash::from(&block), false)
+                            (BlockNumAndHash::from(&block), false)
+                        } else {
+                            return Err(anyhow::anyhow!(
+                                "app missing. cannot find block number from hash"
+                            )
+                            .into());
+                        }
                     } else {
                         return Err(anyhow::anyhow!("blockHash missing").into());
                     }
@@ -116,38 +126,48 @@ pub async fn clean_block_number(
                     // TODO: "BlockNumber" needs a better name
                     // TODO: move this to a helper function?
                     if let Ok(block_num) = serde_json::from_value::<U64>(x.clone()) {
-                        let head_block_num = latest_block.number();
+                        let head_block_num = head_block.number();
 
                         if block_num > head_block_num {
+                            // TODO: option to wait for the block
                             return Err(Web3ProxyError::UnknownBlockNumber {
                                 known: head_block_num,
                                 unknown: block_num,
                             });
                         }
 
-                        let block_hash = app
-                            .balanced_rpcs
-                            .block_hash(&block_num)
-                            .await
-                            .context("fetching block hash from number")?;
+                        if block_num == head_block_num {
+                            (head_block.into(), false)
+                        } else if let Some(app) = app {
+                            let block_hash = app
+                                .balanced_rpcs
+                                .block_hash(&block_num)
+                                .await
+                                .context("fetching block hash from number")?;
 
-                        let block = app
-                            .balanced_rpcs
-                            .block(&block_hash, None, None)
-                            .await
-                            .context("fetching block from hash")?;
+                            let block = app
+                                .balanced_rpcs
+                                .block(&block_hash, None, None)
+                                .await
+                                .context("fetching block from hash")?;
 
-                        // TODO: do true here? will that work for **all** methods on **all** chains? if not we need something smarter
-                        (BlockNumAndHash::from(&block), false)
+                            // TODO: do true here? will that work for **all** methods on **all** chains? if not we need something smarter
+                            (BlockNumAndHash::from(&block), false)
+                        } else {
+                            return Err(anyhow::anyhow!(
+                                "app missing. cannot find block number from hash"
+                            )
+                            .into());
+                        }
                     } else if let Ok(block_number) =
                         serde_json::from_value::<BlockNumber>(x.clone())
                     {
                         let (block_num, change) =
-                            BlockNumber_to_U64(block_number, latest_block.number());
+                            BlockNumber_to_U64(block_number, head_block.number());
 
-                        if block_num == latest_block.number() {
-                            (latest_block.into(), change)
-                        } else {
+                        if block_num == head_block.number() {
+                            (head_block.into(), change)
+                        } else if let Some(app) = app {
                             let block_hash = app
                                 .balanced_rpcs
                                 .block_hash(&block_num)
@@ -161,15 +181,29 @@ pub async fn clean_block_number(
                                 .context("fetching block from hash")?;
 
                             (BlockNumAndHash::from(&block), change)
+                        } else {
+                            return Err(anyhow::anyhow!(
+                                "app missing. cannot find block number from hash"
+                            )
+                            .into());
                         }
                     } else if let Ok(block_hash) = serde_json::from_value::<H256>(x.clone()) {
-                        let block = app
-                            .balanced_rpcs
-                            .block(&block_hash, None, None)
-                            .await
-                            .context("fetching block number from hash")?;
+                        if block_hash == *head_block.hash() {
+                            (head_block.into(), false)
+                        } else if let Some(app) = app {
+                            let block = app
+                                .balanced_rpcs
+                                .block(&block_hash, None, None)
+                                .await
+                                .context("fetching block number from hash")?;
 
-                        (BlockNumAndHash::from(&block), false)
+                            (BlockNumAndHash::from(&block), false)
+                        } else {
+                            return Err(anyhow::anyhow!(
+                                "app missing. cannot find block number from hash"
+                            )
+                            .into());
+                        }
                     } else {
                         return Err(anyhow::anyhow!(
                             "param not a block identifier, block number, or block hash"
@@ -239,7 +273,6 @@ fn get_block_param_id(method: &str) -> Option<usize> {
 impl CacheMode {
     /// like `try_new`, but instead of erroring, it will default to caching with the head block
     /// returns None if this request should not be cached
-    #[async_recursion]
     pub async fn new<'a>(
         request: &'a mut JsonRpcRequest,
         head_block: Option<&'a Web3ProxyBlock>,
@@ -458,17 +491,12 @@ impl CacheMode {
             "net_version" => Ok(CacheMode::CacheSuccessForever),
             method => match get_block_param_id(method) {
                 Some(block_param_id) => {
-                    if let Some(app) = app {
-                        let block =
-                            clean_block_number(params, block_param_id, head_block, app).await?;
+                    let block = clean_block_number(params, block_param_id, head_block, app).await?;
 
-                        Ok(CacheMode::Cache {
-                            block,
-                            cache_errors: true,
-                        })
-                    } else {
-                        Ok(CacheMode::CacheNever)
-                    }
+                    Ok(CacheMode::Cache {
+                        block,
+                        cache_errors: true,
+                    })
                 }
                 None => Err(Web3ProxyError::UnhandledMethod(method.to_string().into())),
             },
@@ -513,7 +541,7 @@ mod test {
     use super::CacheMode;
     use crate::{
         jsonrpc::{JsonRpcId, JsonRpcRequest},
-        rpcs::{blockchain::Web3ProxyBlock, many::Web3Rpcs},
+        rpcs::blockchain::Web3ProxyBlock,
     };
     use ethers::types::{Block, H256};
     use serde_json::json;
@@ -531,11 +559,6 @@ mod test {
         };
 
         let head_block = Web3ProxyBlock::try_new(Arc::new(head_block)).unwrap();
-
-        let (empty, _handle, _ranked_rpc_reciver) =
-            Web3Rpcs::spawn(1, None, 1, 1, "test".into(), None, None)
-                .await
-                .unwrap();
 
         let id = JsonRpcId::Number(9);
 
@@ -575,11 +598,6 @@ mod test {
         let id = JsonRpcId::Number(99);
 
         let mut request = JsonRpcRequest::new(id, method.to_string(), params).unwrap();
-
-        let (empty, _handle, _ranked_rpc_reciver) =
-            Web3Rpcs::spawn(1, None, 1, 1, "test".into(), None, None)
-                .await
-                .unwrap();
 
         let x = CacheMode::try_new(&mut request, Some(&head_block), None)
             .await

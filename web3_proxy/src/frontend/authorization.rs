@@ -640,14 +640,14 @@ impl Web3Request {
     }
 
     pub fn max_block_needed(&self) -> Option<U64> {
-        todo!()
+        self.cache_mode.to_block().map(|x| *x.num())
     }
 
     pub fn min_block_needed(&self) -> Option<U64> {
         if self.archive_request.load(atomic::Ordering::Relaxed) {
             Some(U64::zero())
         } else {
-            todo!()
+            self.cache_mode.from_block().map(|x| *x.num())
         }
     }
 
