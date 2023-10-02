@@ -102,7 +102,7 @@ pipeline {
                     }
                     steps {
                         script {
-                            myBuildandPush.buildAndPush()
+                            buildAndPush()
                         }
                     }
                 }
