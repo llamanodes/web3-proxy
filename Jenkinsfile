@@ -18,10 +18,12 @@ pipeline {
         LATEST_BRANCH="main"
     }
     stages {
-        stage('Check and Cancel Old Builds') {
-            environment {
-                type="jobs"
+        stage('Temporary Cleanup') {
+            steps {
+                cleanWs()
             }
+        }
+        stage('Check and Cancel Old Builds') {
             steps {
                 script {
                     def jobName = env.JOB_NAME
