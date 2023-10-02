@@ -192,15 +192,11 @@ impl MigrateStatsToV2SubCommand {
 
                     let request = RequestOrMethod::Method(method, int_request_bytes as usize);
 
-                    // cache isn't needed on this
-                    let cache_key = None;
-
                     // Create Web3Request
                     let web3_request = Web3Request {
                         archive_request: x.archive_request.into(),
                         authorization: authorization.clone(),
                         backend_requests: Mutex::new(backend_rpcs),
-                        cache_key,
                         chain_id,
                         error_response: x.error_response.into(),
                         head_block: None,
@@ -214,12 +210,12 @@ impl MigrateStatsToV2SubCommand {
                         response_from_backup_rpc: false.into(),
                         response_timestamp: x.period_datetime.timestamp().into(),
                         response_millis: int_response_millis.into(),
-                        // This is overwritten later on
-                        start_instant: Instant::now(),
-                        expire_instant: Instant::now() + Duration::from_secs(295),
                         stat_sender: Some(stat_sender.clone()),
                         user_error_response: false.into(),
                         usd_per_cu: top_config.app.usd_per_cu.unwrap_or_default(),
+                        cache_mode: Default::default(),
+                        start_instant: Instant::now(),
+                        expire_instant: Instant::now() + Duration::from_secs(1),
                     };
 
                     web3_request.try_send_stat()?;

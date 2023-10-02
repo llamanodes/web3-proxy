@@ -391,6 +391,7 @@ impl Web3Rpc {
 
     /// TODO: get rid of this now that consensus rpcs does it
     pub fn has_block_data(&self, needed_block_num: U64) -> bool {
+        // TODO: this needs a max of our overall head block number
         let head_block_num = match self.head_block_sender.as_ref().unwrap().borrow().as_ref() {
             None => return false,
             Some(x) => x.number(),

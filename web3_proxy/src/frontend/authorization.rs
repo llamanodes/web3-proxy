@@ -3,6 +3,7 @@
 use super::rpc_proxy_ws::ProxyMode;
 use crate::app::{Web3ProxyApp, APP_USER_AGENT};
 use crate::balance::Balance;
+use crate::block_number::CacheMode;
 use crate::caches::RegisteredUserRateLimitKey;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::globals::{global_db_replica_conn, APP};
@@ -309,7 +310,7 @@ impl KafkaDebugLogger {
 
     /// for opt-in debug usage, log the request to kafka
     /// TODO: generic type for request
-    pub fn log_debug_request(&self, request: &JsonRpcRequest) -> JoinHandle<KafkaLogResult> {
+    pub fn log_debug_request(&self, request: &RequestOrMethod) -> JoinHandle<KafkaLogResult> {
         // TODO: is rust message pack a good choice? try rkyv instead
         let payload =
             rmp_serde::to_vec(&request).expect("requests should always serialize with rmp");
@@ -332,7 +333,7 @@ impl KafkaDebugLogger {
     }
 }
 
-#[derive(Debug, Default, From)]
+#[derive(Debug, Default, From, Serialize)]
 pub enum RequestOrMethod {
     Request(JsonRpcRequest),
     /// sometimes we don't have a full request. for example, when we are logging a websocket subscription
@@ -351,7 +352,7 @@ pub struct Web3Request {
 
     pub authorization: Arc<Authorization>,
 
-    pub cache_key: Option<JsonRpcQueryCacheKey>,
+    pub cache_mode: CacheMode,
 
     /// TODO: this should probably be in a global config. although maybe if we run multiple chains in one process this will be useful
     pub chain_id: u64,
@@ -480,46 +481,47 @@ impl ResponseOrBytes<'_> {
 
 impl Web3Request {
     #[allow(clippy::too_many_arguments)]
-    fn new_with_options<R: Into<RequestOrMethod>>(
+    async fn new_with_options(
         authorization: Arc<Authorization>,
         chain_id: u64,
         head_block: Option<Web3ProxyBlock>,
         kafka_debug_logger: Option<Arc<KafkaDebugLogger>>,
         max_wait: Option<Duration>,
-        request: R,
+        mut request: RequestOrMethod,
         stat_sender: Option<mpsc::UnboundedSender<AppStat>>,
         usd_per_cu: Decimal,
+        app: Option<&Web3ProxyApp>,
     ) -> Arc<Self> {
         let start_instant = Instant::now();
 
+        // TODO: get this default from config, or from user settings
         let expire_instant = start_instant + max_wait.unwrap_or_else(|| Duration::from_secs(295));
 
-        let request: RequestOrMethod = request.into();
+        // let request: RequestOrMethod = request.into();
 
         // we VERY INTENTIONALLY log to kafka BEFORE calculating the cache key
         // this is because calculating the cache_key may modify the params!
         // for example, if the request specifies "latest" as the block number, we replace it with the actual latest block number
         if let Some(ref kafka_debug_logger) = kafka_debug_logger {
-            if let Some(request) = request.jsonrpc_request() {
-                // TODO: channels might be more ergonomic than spawned futures
-                // spawned things run in parallel easier but generally need more Arcs
-                kafka_debug_logger.log_debug_request(request);
-            } else {
-                // there probably isn't a new request attached to this metadata.
-                // this happens with websocket subscriptions
-            }
+            // TODO: channels might be more ergonomic than spawned futures
+            // spawned things run in parallel easier but generally need more Arcs
+            kafka_debug_logger.log_debug_request(&request);
         }
 
         // now that kafka has logged the user's original params, we can calculate the cache key
-        let cache_key = None;
+        let cache_mode = match &mut request {
+            RequestOrMethod::Request(x) => CacheMode::new(x, head_block.as_ref(), app).await,
+            _ => CacheMode::CacheNever,
+        };
 
         let x = Self {
             archive_request: false.into(),
             authorization,
             backend_requests: Default::default(),
-            cache_key,
+            cache_mode,
             chain_id,
             error_response: false.into(),
+            expire_instant,
             head_block: head_block.clone(),
             kafka_debug_logger,
             no_servers: 0.into(),
@@ -529,7 +531,6 @@ impl Web3Request {
             response_millis: 0.into(),
             response_timestamp: 0.into(),
             start_instant,
-            expire_instant,
             stat_sender,
             usd_per_cu,
             user_error_response: false.into(),
@@ -538,11 +539,11 @@ impl Web3Request {
         Arc::new(x)
     }
 
-    pub async fn new_with_app<R: Into<RequestOrMethod>>(
-        app: &Arc<Web3ProxyApp>,
+    pub async fn new_with_app(
+        app: &Web3ProxyApp,
         authorization: Arc<Authorization>,
         max_wait: Option<Duration>,
-        request: R,
+        request: RequestOrMethod,
         head_block: Option<Web3ProxyBlock>,
     ) -> Arc<Self> {
         // TODO: get this out of tracing instead (where we have a String from Amazon's LB)
@@ -575,10 +576,11 @@ impl Web3Request {
             request,
             stat_sender,
             usd_per_cu,
+            Some(app),
         )
+        .await
     }
 
-    /// TODO: change this to just take the app. put the app in a global
     pub async fn new_internal<P: JsonRpcParams>(
         method: String,
         params: &P,
@@ -590,22 +592,24 @@ impl Web3Request {
         // TODO: we need a real id! increment a counter on the app
         let id = JsonRpcId::Number(1);
 
+        // TODO: this seems inefficient
         let request = JsonRpcRequest::new(id, method, json!(params)).unwrap();
 
         if let Some(app) = APP.get() {
-            Self::new_with_app(app, authorization, max_wait, request, head_block).await
+            Self::new_with_app(app, authorization, max_wait, request.into(), head_block).await
         } else {
-            // TODO: no app, so what should happens with chain_id?
             Self::new_with_options(
                 authorization,
                 0,
                 head_block,
                 None,
                 max_wait,
-                request,
+                request.into(),
                 None,
                 Default::default(),
+                None,
             )
+            .await
         }
     }
 
@@ -614,36 +618,46 @@ impl Web3Request {
         self.backend_requests.lock().clone()
     }
 
+    pub fn cache_key(&self) -> Option<u64> {
+        match &self.cache_mode {
+            CacheMode::CacheNever => None,
+            x => {
+                let x = JsonRpcQueryCacheKey::new(x, &self.request).hash();
+
+                Some(x)
+            }
+        }
+    }
+
+    #[inline]
+    pub fn cache_jsonrpc_errors(&self) -> bool {
+        self.cache_mode.cache_jsonrpc_errors()
+    }
+
     #[inline]
     pub fn id(&self) -> Box<RawValue> {
         self.request.id()
     }
 
     pub fn max_block_needed(&self) -> Option<U64> {
-        if let Some(cache_key) = &self.cache_key {
-            cache_key.to_block_num().copied()
-        } else {
-            None
-        }
+        todo!()
     }
 
     pub fn min_block_needed(&self) -> Option<U64> {
         if self.archive_request.load(atomic::Ordering::Relaxed) {
             Some(U64::zero())
-        } else if let Some(cache_key) = &self.cache_key {
-            cache_key.from_block_num().copied()
         } else {
-            None
+            todo!()
         }
     }
 
     pub fn ttl(&self) -> Duration {
-        // TODO: don't hard code this. erigon's timeout is 5 minutes. and we give it a few seconds of headrom
-        Duration::from_secs(295).saturating_sub(self.start_instant.elapsed())
+        self.expire_instant
+            .saturating_duration_since(Instant::now())
     }
 
     pub fn ttl_expired(&self) -> bool {
-        self.ttl().is_zero()
+        self.expire_instant < Instant::now()
     }
 
     pub fn try_send_stat(mut self) -> Web3ProxyResult<()> {

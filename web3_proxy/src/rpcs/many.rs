@@ -680,13 +680,14 @@ impl Web3Rpcs {
         all_rpcs
             .sort_by_cached_key(|x| x.sort_for_load_balancing_on(web3_request.max_block_needed()));
 
-        trace!("all_rpcs: {:#?}", all_rpcs);
+        trace!("unfiltered all_rpcs: {:#?}", all_rpcs);
 
         for rpc in all_rpcs {
             trace!("trying {}", rpc);
 
             // TODO: use a helper function for these
             if let Some(block_needed) = web3_request.min_block_needed() {
+                trace!("min_block_needed: {}", block_needed);
                 if !rpc.has_block_data(block_needed) {
                     trace!("{} is missing min_block_needed. skipping", rpc);
                     continue;
@@ -694,6 +695,7 @@ impl Web3Rpcs {
             }
 
             if let Some(block_needed) = web3_request.max_block_needed() {
+                trace!("max_block_needed: {}", block_needed);
                 if !rpc.has_block_data(block_needed) {
                     trace!("{} is missing max_block_needed. skipping", rpc);
                     continue;
@@ -741,6 +743,7 @@ impl Web3Rpcs {
     ) -> Web3ProxyResult<R> {
         let head_block = self.head_block();
 
+        // TODO: i think we actually always want balanced_rpcs on this!
         let web3_request =
             Web3Request::new_internal(method.into(), params, head_block, max_wait).await;
 
@@ -1055,6 +1058,7 @@ impl Web3Rpcs {
     ) -> Web3ProxyResult<Arc<RawValue>> {
         let mut watch_consensus_rpcs = self.watch_ranked_rpcs.subscribe();
 
+        // todo!() we are inconsistent with max_wait and web3_request.expires_at
         let start = Instant::now();
 
         loop {
@@ -1479,7 +1483,7 @@ mod tests {
             "eth_getBlockByNumber".to_string(),
             &(lagged_block.number.unwrap(), false),
             Some(Web3ProxyBlock::try_from(head_block.clone()).unwrap()),
-            None,
+            Some(Duration::from_millis(100)),
         )
         .await;
         assert_eq!(rpcs.all_connections(&r, None, None).await.unwrap().len(), 2);
@@ -1489,16 +1493,13 @@ mod tests {
             "eth_getBlockByNumber".to_string(),
             &(head_block.number.unwrap(), false),
             Some(Web3ProxyBlock::try_from(head_block.clone()).unwrap()),
-            None,
+            Some(Duration::from_millis(100)),
         )
         .await;
-        let x = timeout(
-            Duration::from_millis(100),
-            rpcs.wait_for_best_rpc(&r, &mut vec![], Some(RequestErrorHandler::DebugLevel)),
-        )
-        .await
-        .unwrap()
-        .unwrap();
+        let x = rpcs
+            .wait_for_best_rpc(&r, &mut vec![], Some(RequestErrorHandler::DebugLevel))
+            .await
+            .unwrap();
 
         info!(?x);
 
@@ -1587,7 +1588,7 @@ mod tests {
             "eth_getBlockByNumber".to_string(),
             &(future_block_num, false),
             Some(Web3ProxyBlock::try_from(head_block.clone()).unwrap()),
-            None,
+            Some(Duration::from_millis(100)),
         )
         .await;
         assert!(matches!(
@@ -1622,7 +1623,7 @@ mod tests {
         ));
 
         // future block should not get a handle
-        let future_block_num = head_block.as_ref().number.unwrap() + U64::one();
+        let future_block_num = head_block.as_ref().number.unwrap() + U64::from(10);
         let r = Web3Request::new_internal(
             "eth_getBlockByNumber".to_string(),
             &(future_block_num, false),
@@ -1631,7 +1632,92 @@ mod tests {
         )
         .await;
         let future_rpc = rpcs.wait_for_best_rpc(&r, &mut vec![], None).await;
+
+        info!(?future_rpc);
+
         assert!(matches!(future_rpc, Ok(OpenRequestResult::NotReady)));
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_server_selection_when_not_enough() {
+        let now = chrono::Utc::now().timestamp().into();
+
+        let head_block = Block {
+            hash: Some(H256::random()),
+            number: Some(1_000_000.into()),
+            parent_hash: H256::random(),
+            timestamp: now,
+            ..Default::default()
+        };
+
+        let head_block: Web3ProxyBlock = Arc::new(head_block).try_into().unwrap();
+
+        let lagged_rpc = Web3Rpc {
+            name: "lagged".to_string(),
+            soft_limit: 3_000,
+            automatic_block_limit: false,
+            backup: false,
+            block_data_limit: 64.into(),
+            tier: 1.into(),
+            head_block_sender: None,
+            ..Default::default()
+        };
+
+        assert!(!lagged_rpc.has_block_data(head_block.number()));
+
+        let lagged_rpc = Arc::new(lagged_rpc);
+
+        let (block_sender, _) = mpsc::unbounded_channel();
+        let (watch_ranked_rpcs, _) = watch::channel(None);
+        let (watch_consensus_head_sender, _watch_consensus_head_receiver) = watch::channel(None);
+
+        let chain_id = 1;
+
+        let mut by_name = HashMap::new();
+        by_name.insert(lagged_rpc.name.clone(), lagged_rpc.clone());
+
+        let rpcs = Web3Rpcs {
+            block_sender,
+            blocks_by_hash: CacheBuilder::new(100).build(),
+            blocks_by_number: CacheBuilder::new(100).build(),
+            by_name: RwLock::new(by_name),
+            chain_id,
+            max_head_block_age: Duration::from_secs(60),
+            max_head_block_lag: 5.into(),
+            min_sum_soft_limit: 100,
+            min_synced_rpcs: 2,
+            name: "test".into(),
+            pending_txid_firehose_sender: None,
+            watch_head_block: Some(watch_consensus_head_sender),
+            watch_ranked_rpcs,
+        };
+
+        let mut connection_heads = ConsensusFinder::new(None, None);
+
+        // min sum soft limit will require 2 servers
+        let x = connection_heads
+            .process_block_from_rpc(&rpcs, Some(head_block.clone()), lagged_rpc.clone())
+            .await
+            .unwrap();
+        assert!(!x);
+
+        assert_eq!(rpcs.num_synced_rpcs(), 0);
+
+        // best_synced_backend_connection requires servers to be synced with the head block
+        let r = Web3Request::new_internal(
+            "eth_getBlockByNumber".to_string(),
+            &("latest", false),
+            Some(head_block.clone()),
+            Some(Duration::from_millis(100)),
+        )
+        .await;
+        let best_available_server = rpcs.wait_for_best_rpc(&r, &mut vec![], None).await.unwrap();
+
+        debug!("best_available_server: {:#?}", best_available_server);
+
+        assert!(matches!(best_available_server, OpenRequestResult::NotReady));
+
+        todo!();
     }
 
     #[test_log::test(tokio::test)]
@@ -1772,7 +1858,7 @@ mod tests {
                 assert_eq!(x.clone_connection().name, "archive".to_string())
             }
             x => {
-                error!("unexpected result: {:?}", x);
+                panic!("unexpected result: {:?}", x);
             }
         }
     }
@@ -1884,10 +1970,14 @@ mod tests {
         assert_eq!(rpcs.num_synced_rpcs(), 1);
 
         // best_synced_backend_connection requires servers to be synced with the head block
-        // TODO: test with and without passing the head_block.number?
-        // TODO: check block_2.number()
-        let m = Arc::new(Web3Request::default());
-        let head_connections = rpcs.all_connections(&m, None, None).await;
+        let r = Web3Request::new_internal(
+            "eth_getBlockByNumber".to_string(),
+            &(block_2.number(), false),
+            Some(block_2.clone()),
+            Some(Duration::from_millis(100)),
+        )
+        .await;
+        let head_connections = rpcs.all_connections(&r, None, None).await;
 
         debug!("head_connections: {:#?}", head_connections);
 
@@ -1897,9 +1987,14 @@ mod tests {
             "wrong number of connections"
         );
 
-        // TODO: check block_1.number()
-        let m = Arc::new(Web3Request::default());
-        let all_connections = rpcs.all_connections(&m, None, None).await;
+        let r = Web3Request::new_internal(
+            "eth_getBlockByNumber".to_string(),
+            &(block_1.number() - U64::from(100), false),
+            Some(block_2.clone()),
+            Some(Duration::from_millis(100)),
+        )
+        .await;
+        let all_connections = rpcs.all_connections(&r, None, None).await;
 
         debug!("all_connections: {:#?}", all_connections);
 
@@ -1908,17 +2003,6 @@ mod tests {
             2,
             "wrong number of connections"
         );
-
-        let m = Arc::new(Web3Request::default());
-        let all_connections = rpcs.all_connections(&m, None, None).await;
-
-        debug!("all_connections: {:#?}", all_connections);
-
-        assert_eq!(
-            all_connections.unwrap().len(),
-            2,
-            "wrong number of connections"
-        )
     }
 }
 

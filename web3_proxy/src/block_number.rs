@@ -1,11 +1,12 @@
 //! Helper functions for turning ether's BlockNumber into numbers and updating incoming queries to match.
+use crate::app::Web3ProxyApp;
 use crate::jsonrpc::JsonRpcRequest;
-use crate::rpcs::many::Web3Rpcs;
 use crate::{
     errors::{Web3ProxyError, Web3ProxyResult},
     rpcs::blockchain::Web3ProxyBlock,
 };
 use anyhow::Context;
+use async_recursion::async_recursion;
 use derive_more::From;
 use ethers::{
     prelude::{BlockNumber, U64},
@@ -42,7 +43,7 @@ pub fn BlockNumber_to_U64(block_num: BlockNumber, latest_block: U64) -> (U64, bo
     }
 }
 
-#[derive(Clone, Debug, Eq, From, PartialEq)]
+#[derive(Clone, Debug, Eq, From, Hash, PartialEq)]
 pub struct BlockNumAndHash(U64, H256);
 
 impl BlockNumAndHash {
@@ -69,7 +70,7 @@ pub async fn clean_block_number(
     params: &mut serde_json::Value,
     block_param_id: usize,
     latest_block: &Web3ProxyBlock,
-    rpcs: &Web3Rpcs,
+    app: &Web3ProxyApp,
 ) -> Web3ProxyResult<BlockNumAndHash> {
     match params.as_array_mut() {
         None => {
@@ -100,7 +101,8 @@ pub async fn clean_block_number(
                         let block_hash: H256 =
                             serde_json::from_value(block_hash).context("decoding blockHash")?;
 
-                        let block = rpcs
+                        let block = app
+                            .balanced_rpcs
                             .block(&block_hash, None, None)
                             .await
                             .context("fetching block number from hash")?;
@@ -123,12 +125,14 @@ pub async fn clean_block_number(
                             });
                         }
 
-                        let block_hash = rpcs
+                        let block_hash = app
+                            .balanced_rpcs
                             .block_hash(&block_num)
                             .await
                             .context("fetching block hash from number")?;
 
-                        let block = rpcs
+                        let block = app
+                            .balanced_rpcs
                             .block(&block_hash, None, None)
                             .await
                             .context("fetching block from hash")?;
@@ -144,12 +148,14 @@ pub async fn clean_block_number(
                         if block_num == latest_block.number() {
                             (latest_block.into(), change)
                         } else {
-                            let block_hash = rpcs
+                            let block_hash = app
+                                .balanced_rpcs
                                 .block_hash(&block_num)
                                 .await
                                 .context("fetching block hash from number")?;
 
-                            let block = rpcs
+                            let block = app
+                                .balanced_rpcs
                                 .block(&block_hash, None, None)
                                 .await
                                 .context("fetching block from hash")?;
@@ -157,7 +163,8 @@ pub async fn clean_block_number(
                             (BlockNumAndHash::from(&block), change)
                         }
                     } else if let Ok(block_hash) = serde_json::from_value::<H256>(x.clone()) {
-                        let block = rpcs
+                        let block = app
+                            .balanced_rpcs
                             .block(&block_hash, None, None)
                             .await
                             .context("fetching block number from hash")?;
@@ -186,10 +193,9 @@ pub async fn clean_block_number(
 
 /// TODO: change this to also return the hash needed?
 /// this replaces any "latest" identifiers in the JsonRpcRequest with the current block number which feels like the data is structured wrong
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Default, Hash, Eq, PartialEq)]
 pub enum CacheMode {
     CacheSuccessForever,
-    CacheNever,
     Cache {
         block: BlockNumAndHash,
         /// cache jsonrpc errors (server errors are never cached)
@@ -201,6 +207,8 @@ pub enum CacheMode {
         /// cache jsonrpc errors (server errors are never cached)
         cache_errors: bool,
     },
+    #[default]
+    CacheNever,
 }
 
 fn get_block_param_id(method: &str) -> Option<usize> {
@@ -230,12 +238,14 @@ fn get_block_param_id(method: &str) -> Option<usize> {
 
 impl CacheMode {
     /// like `try_new`, but instead of erroring, it will default to caching with the head block
-    pub async fn new(
-        request: &mut JsonRpcRequest,
-        head_block: &Web3ProxyBlock,
-        rpcs: &Web3Rpcs,
+    /// returns None if this request should not be cached
+    #[async_recursion]
+    pub async fn new<'a>(
+        request: &'a mut JsonRpcRequest,
+        head_block: Option<&'a Web3ProxyBlock>,
+        app: Option<&'a Web3ProxyApp>,
     ) -> Self {
-        match Self::try_new(request, head_block, rpcs).await {
+        match Self::try_new(request, head_block, app).await {
             Ok(x) => x,
             Err(Web3ProxyError::NoBlocksKnown) => {
                 warn!(
@@ -243,9 +253,14 @@ impl CacheMode {
                     params = ?request.params,
                     "no servers available to get block from params. caching with head block"
                 );
-                CacheMode::Cache {
-                    block: head_block.into(),
-                    cache_errors: true,
+                if let Some(head_block) = head_block {
+                    // TODO: strange to get NoBlocksKnown **and** have a head block. think about this more
+                    CacheMode::Cache {
+                        block: head_block.into(),
+                        cache_errors: true,
+                    }
+                } else {
+                    CacheMode::CacheNever
                 }
             }
             Err(err) => {
@@ -255,9 +270,13 @@ impl CacheMode {
                     ?err,
                     "could not get block from params. caching with head block"
                 );
-                CacheMode::Cache {
-                    block: head_block.into(),
-                    cache_errors: true,
+                if let Some(head_block) = head_block {
+                    CacheMode::Cache {
+                        block: head_block.into(),
+                        cache_errors: true,
+                    }
+                } else {
+                    CacheMode::CacheNever
                 }
             }
         }
@@ -265,18 +284,29 @@ impl CacheMode {
 
     pub async fn try_new(
         request: &mut JsonRpcRequest,
-        head_block: &Web3ProxyBlock,
-        rpcs: &Web3Rpcs,
+        head_block: Option<&Web3ProxyBlock>,
+        app: Option<&Web3ProxyApp>,
     ) -> Web3ProxyResult<Self> {
         let params = &mut request.params;
 
         if matches!(params, serde_json::Value::Null) {
             // no params given. cache with the head block
-            return Ok(Self::Cache {
-                block: head_block.into(),
-                cache_errors: true,
-            });
+            if let Some(head_block) = head_block {
+                return Ok(Self::Cache {
+                    block: head_block.into(),
+                    cache_errors: true,
+                });
+            } else {
+                return Ok(Self::CacheNever);
+            }
         }
+
+        if head_block.is_none() {
+            // since we don't have a head block, i don't trust our anything enough to cache
+            return Ok(Self::CacheNever);
+        }
+
+        let head_block = head_block.expect("head_block was just checked above");
 
         if let Some(params) = params.as_array() {
             if params.is_empty() {
@@ -318,7 +348,7 @@ impl CacheMode {
             }
             "eth_getLogs" => {
                 /*
-                // TODO: think about this more. this seems like it partly belongs in clean_block_number
+                // TODO: think about this more
                 // TODO: jsonrpc has a specific code for this
                 let obj = params
                     .get_mut(0)
@@ -428,16 +458,52 @@ impl CacheMode {
             "net_version" => Ok(CacheMode::CacheSuccessForever),
             method => match get_block_param_id(method) {
                 Some(block_param_id) => {
-                    let block =
-                        clean_block_number(params, block_param_id, head_block, rpcs).await?;
+                    if let Some(app) = app {
+                        let block =
+                            clean_block_number(params, block_param_id, head_block, app).await?;
 
-                    Ok(CacheMode::Cache {
-                        block,
-                        cache_errors: true,
-                    })
+                        Ok(CacheMode::Cache {
+                            block,
+                            cache_errors: true,
+                        })
+                    } else {
+                        Ok(CacheMode::CacheNever)
+                    }
                 }
                 None => Err(Web3ProxyError::UnhandledMethod(method.to_string().into())),
             },
+        }
+    }
+
+    pub fn cache_jsonrpc_errors(&self) -> bool {
+        match self {
+            Self::CacheNever => false,
+            Self::CacheSuccessForever => true,
+            Self::Cache { cache_errors, .. } => *cache_errors,
+            Self::CacheRange { cache_errors, .. } => *cache_errors,
+        }
+    }
+
+    pub fn from_block(&self) -> Option<&BlockNumAndHash> {
+        match self {
+            Self::CacheSuccessForever => None,
+            Self::CacheNever => None,
+            Self::Cache { block, .. } => Some(block),
+            Self::CacheRange { from_block, .. } => Some(from_block),
+        }
+    }
+
+    #[inline]
+    pub fn is_some(&self) -> bool {
+        !matches!(self, Self::CacheNever)
+    }
+
+    pub fn to_block(&self) -> Option<&BlockNumAndHash> {
+        match self {
+            Self::CacheSuccessForever => None,
+            Self::CacheNever => None,
+            Self::Cache { block, .. } => Some(block),
+            Self::CacheRange { to_block, .. } => Some(to_block),
         }
     }
 }
@@ -475,7 +541,8 @@ mod test {
 
         let mut request = JsonRpcRequest::new(id, method.to_string(), params).unwrap();
 
-        let x = CacheMode::try_new(&mut request, &head_block, &empty)
+        // TODO: instead of empty, check None?
+        let x = CacheMode::try_new(&mut request, Some(&head_block), None)
             .await
             .unwrap();
 
@@ -514,7 +581,7 @@ mod test {
                 .await
                 .unwrap();
 
-        let x = CacheMode::try_new(&mut request, &head_block, &empty)
+        let x = CacheMode::try_new(&mut request, Some(&head_block), None)
             .await
             .unwrap();
 

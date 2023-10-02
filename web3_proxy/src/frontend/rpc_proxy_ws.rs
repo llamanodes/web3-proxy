@@ -326,7 +326,8 @@ async fn websocket_proxy_web3_rpc(
     match &json_request.method[..] {
         "eth_subscribe" => {
             let web3_request =
-                Web3Request::new_with_app(app, authorization, None, json_request, None).await;
+                Web3Request::new_with_app(app, authorization, None, json_request.into(), None)
+                    .await;
 
             // TODO: how can we subscribe with proxy_mode?
             match app
@@ -352,7 +353,8 @@ async fn websocket_proxy_web3_rpc(
         }
         "eth_unsubscribe" => {
             let web3_request =
-                Web3Request::new_with_app(app, authorization, None, json_request, None).await;
+                Web3Request::new_with_app(app, authorization, None, json_request.into(), None)
+                    .await;
 
             // sometimes we get a list, sometimes we get the id directly
             // check for the list first, then just use the whole thing

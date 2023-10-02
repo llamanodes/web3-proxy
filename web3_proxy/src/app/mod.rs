@@ -3,7 +3,7 @@ mod ws;
 use crate::caches::{RegisteredUserRateLimitKey, RpcSecretKeyCache, UserBalanceCache};
 use crate::config::{AppConfig, TopConfig};
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
-use crate::frontend::authorization::{Authorization, RequestOrMethod, Web3Request};
+use crate::frontend::authorization::{Authorization, Web3Request};
 use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::globals::{global_db_conn, DatabaseError, APP, DB_CONN, DB_REPLICA};
 use crate::jsonrpc::{
@@ -1136,14 +1136,8 @@ impl Web3ProxyApp {
         authorization: Arc<Authorization>,
         head_block: Option<Web3ProxyBlock>,
     ) -> (StatusCode, jsonrpc::SingleResponse, Vec<Arc<Web3Rpc>>) {
-        let web3_request = Web3Request::new_with_app(
-            self,
-            authorization,
-            None,
-            RequestOrMethod::Request(request),
-            head_block,
-        )
-        .await;
+        let web3_request =
+            Web3Request::new_with_app(self, authorization, None, request.into(), head_block).await;
 
         // TODO: trace/kafka log request.params before we send them to _proxy_request_with_caching which might modify them
 
@@ -1608,19 +1602,19 @@ impl Web3ProxyApp {
                 // TODO: why is this clone needed?
                 let web3_request = web3_request.clone();
 
-                if let Some(cache_key) = web3_request.cache_key.clone() {
-                    let cache_key_hash = cache_key.hash();
-
+                if web3_request.cache_mode.is_some() {
                     // don't cache anything larger than 16 MiB
                     let max_response_cache_bytes = 16 * (1024 ^ 2);  // self.config.max_response_cache_bytes;
 
+                    let cache_key = web3_request.cache_key().expect("key must exist if cache_mode does");
+
                     // TODO: try to fetch out of s3
 
-                    let x: SingleResponse = if let Some(data) = self.jsonrpc_response_cache.get(&cache_key_hash).await {
+                    let x: SingleResponse = if let Some(data) = self.jsonrpc_response_cache.get(&cache_key).await {
                         // it was cached! easy!
                         // TODO: wait. this currently panics. why?
                         jsonrpc::ParsedResponse::from_response_data(data, web3_request.id()).into()
-                    } else if self.jsonrpc_response_failed_cache_keys.contains_key(&cache_key_hash) {
+                    } else if self.jsonrpc_response_failed_cache_keys.contains_key(&cache_key) {
                         // this is a cache_key that we know won't cache
                         // NOTICE! We do **NOT** use get which means the key's hotness is not updated. we don't use time-to-idler here so thats fine. but be careful if that changes
                         timeout(
@@ -1636,7 +1630,7 @@ impl Web3ProxyApp {
                         // TODO: if we got the semaphore, do the try_get_with
                         // TODO: if the response is too big to cache mark the cache_key as not cacheable. maybe CacheMode can check that cache?
 
-                        let s = self.jsonrpc_response_semaphores.get_with(cache_key_hash, async move {
+                        let s = self.jsonrpc_response_semaphores.get_with(cache_key, async move {
                             Arc::new(Semaphore::new(1))
                         }).await;
 
@@ -1662,17 +1656,18 @@ impl Web3ProxyApp {
                                     async move {
                                         app
                                             .jsonrpc_response_cache
-                                            .try_get_with::<_, Web3ProxyError>(cache_key.hash(), async {
-                                                let response_data = timeout(Duration::from_secs(290), app.balanced_rpcs
+                                            .try_get_with::<_, Web3ProxyError>(cache_key, async {
+                                                let duration = web3_request.ttl().saturating_sub(Duration::from_secs(1));
+
+                                                // TODO: dynamic timeout based on whats left on web3_request
+                                                let response_data = timeout(duration, app.balanced_rpcs
                                                     .try_proxy_connection::<Arc<RawValue>>(
                                                         &web3_request,
                                                 )).await;
 
                                                 match response_data {
                                                     Ok(response_data) => {
-                                                        let cache_jsonrpc_errors = web3_request.cache_key.as_ref().map(|x| x.cache_errors()).expect("cache_key should always exist here");
-
-                                                        if !cache_jsonrpc_errors && let Err(err) = response_data {
+                                                        if !web3_request.cache_jsonrpc_errors() && let Err(err) = response_data {
                                                             // if we are not supposed to cache jsonrpc errors,
                                                             // then we must not convert Provider errors into a JsonRpcResponseEnum
                                                             // return all the errors now. moka will not cache Err results
@@ -1705,7 +1700,7 @@ impl Web3ProxyApp {
                                 let mut x = match tokio::spawn(f).await? {
                                     Ok(response_data) => Ok(jsonrpc::ParsedResponse::from_response_data(response_data, Default::default()).into()),
                                     Err(err) => {
-                                        self.jsonrpc_response_failed_cache_keys.insert(cache_key_hash, ()).await;
+                                        self.jsonrpc_response_failed_cache_keys.insert(cache_key, ()).await;
 
                                         if let Web3ProxyError::StreamResponse(x) = err.as_ref() {
                                             let x = x.lock().take().expect("stream processing should only happen once");
