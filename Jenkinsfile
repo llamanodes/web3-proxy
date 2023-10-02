@@ -1,4 +1,4 @@
-@Library('jenkins_lib@main') _
+// @Library('jenkins_lib@main') _
 
 def buildAndPush() {
     // env.ARCH is the system architecture. some apps can be generic (amd64, arm64),
@@ -108,20 +108,20 @@ pipeline {
                 }
             }
         }
-        stage('push latest') {
-            parallel {
-                stage('maybe push latest_arm64_graviton2 tag') {
-                    agent any
-                    environment {
-                        ARCH="arm64_graviton2"
-                    }
-                    steps {
-                        script {
-                            myPushLatest.maybePushLatest()
-                        }
-                    }
-                }
-            }
-        }
+        // stage('push latest') {
+        //     parallel {
+        //         stage('maybe push latest_arm64_graviton2 tag') {
+        //             agent any
+        //             environment {
+        //                 ARCH="arm64_graviton2"
+        //             }
+        //             steps {
+        //                 script {
+        //                     myPushLatest.maybePushLatest()
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
     }
 }
