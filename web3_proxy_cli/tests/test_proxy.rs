@@ -243,7 +243,7 @@ async fn it_matches_anvil() {
     info!(?deploy_tx);
 
     let head_block_num: U64 = quorum_provider
-        .request("eth_getBlockNumber", ("latest", false))
+        .request("eth_blockNumber", ())
         .await
         .unwrap();
 

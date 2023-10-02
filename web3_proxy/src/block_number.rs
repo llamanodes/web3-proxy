@@ -229,20 +229,20 @@ pub async fn clean_block_number<'a>(
 /// this replaces any "latest" identifiers in the JsonRpcRequest with the current block number which feels like the data is structured wrong
 #[derive(Debug, Default, Hash, Eq, PartialEq)]
 pub enum CacheMode {
-    CacheSuccessForever,
-    Cache {
+    SuccessForever,
+    Standard {
         block: BlockNumAndHash,
         /// cache jsonrpc errors (server errors are never cached)
         cache_errors: bool,
     },
-    CacheRange {
+    Range {
         from_block: BlockNumAndHash,
         to_block: BlockNumAndHash,
         /// cache jsonrpc errors (server errors are never cached)
         cache_errors: bool,
     },
     #[default]
-    CacheNever,
+    Never,
 }
 
 fn get_block_param_id(method: &str) -> Option<usize> {
@@ -288,12 +288,12 @@ impl CacheMode {
                 );
                 if let Some(head_block) = head_block {
                     // TODO: strange to get NoBlocksKnown **and** have a head block. think about this more
-                    CacheMode::Cache {
+                    CacheMode::Standard {
                         block: head_block.into(),
                         cache_errors: true,
                     }
                 } else {
-                    CacheMode::CacheNever
+                    CacheMode::Never
                 }
             }
             Err(err) => {
@@ -304,12 +304,12 @@ impl CacheMode {
                     "could not get block from params. caching with head block"
                 );
                 if let Some(head_block) = head_block {
-                    CacheMode::Cache {
+                    CacheMode::Standard {
                         block: head_block.into(),
                         cache_errors: true,
                     }
                 } else {
-                    CacheMode::CacheNever
+                    CacheMode::Never
                 }
             }
         }
@@ -325,18 +325,18 @@ impl CacheMode {
         if matches!(params, serde_json::Value::Null) {
             // no params given. cache with the head block
             if let Some(head_block) = head_block {
-                return Ok(Self::Cache {
+                return Ok(Self::Standard {
                     block: head_block.into(),
                     cache_errors: true,
                 });
             } else {
-                return Ok(Self::CacheNever);
+                return Ok(Self::Never);
             }
         }
 
         if head_block.is_none() {
             // since we don't have a head block, i don't trust our anything enough to cache
-            return Ok(Self::CacheNever);
+            return Ok(Self::Never);
         }
 
         let head_block = head_block.expect("head_block was just checked above");
@@ -344,7 +344,7 @@ impl CacheMode {
         if let Some(params) = params.as_array() {
             if params.is_empty() {
                 // no params given. cache with the head block
-                return Ok(Self::Cache {
+                return Ok(Self::Standard {
                     block: head_block.into(),
                     cache_errors: true,
                 });
@@ -354,9 +354,9 @@ impl CacheMode {
         match request.method.as_str() {
             "debug_traceTransaction" => {
                 // TODO: make sure re-orgs work properly!
-                Ok(CacheMode::CacheSuccessForever)
+                Ok(CacheMode::SuccessForever)
             }
-            "eth_gasPrice" => Ok(CacheMode::Cache {
+            "eth_gasPrice" => Ok(CacheMode::Standard {
                 block: head_block.into(),
                 cache_errors: false,
             }),
@@ -364,20 +364,20 @@ impl CacheMode {
                 // TODO: double check that any node can serve this
                 // TODO: can a block change? like what if it gets orphaned?
                 // TODO: make sure re-orgs work properly!
-                Ok(CacheMode::CacheSuccessForever)
+                Ok(CacheMode::SuccessForever)
             }
             "eth_getBlockByNumber" => {
                 // TODO: double check that any node can serve this
                 // TODO: CacheSuccessForever if the block is old enough
                 // TODO: make sure re-orgs work properly!
-                Ok(CacheMode::Cache {
+                Ok(CacheMode::Standard {
                     block: head_block.into(),
                     cache_errors: true,
                 })
             }
             "eth_getBlockTransactionCountByHash" => {
                 // TODO: double check that any node can serve this
-                Ok(CacheMode::CacheSuccessForever)
+                Ok(CacheMode::SuccessForever)
             }
             "eth_getLogs" => {
                 /*
@@ -442,7 +442,7 @@ impl CacheMode {
                     })
                 }
                 */
-                Ok(CacheMode::Cache {
+                Ok(CacheMode::Standard {
                     block: head_block.into(),
                     cache_errors: true,
                 })
@@ -450,7 +450,7 @@ impl CacheMode {
             "eth_getTransactionByHash" => {
                 // TODO: not sure how best to look these up
                 // try full nodes first. retry will use archive
-                Ok(CacheMode::Cache {
+                Ok(CacheMode::Standard {
                     block: head_block.into(),
                     cache_errors: true,
                 })
@@ -458,12 +458,12 @@ impl CacheMode {
             "eth_getTransactionByBlockHashAndIndex" => {
                 // TODO: check a Cache of recent hashes
                 // try full nodes first. retry will use archive
-                Ok(CacheMode::CacheSuccessForever)
+                Ok(CacheMode::SuccessForever)
             }
             "eth_getTransactionReceipt" => {
                 // TODO: not sure how best to look these up
                 // try full nodes first. retry will use archive
-                Ok(CacheMode::Cache {
+                Ok(CacheMode::Standard {
                     block: head_block.into(),
                     cache_errors: true,
                 })
@@ -472,28 +472,28 @@ impl CacheMode {
                 // TODO: check a Cache of recent hashes
                 // try full nodes first. retry will use archive
                 // TODO: what happens if this block is uncled later?
-                Ok(CacheMode::CacheSuccessForever)
+                Ok(CacheMode::SuccessForever)
             }
             "eth_getUncleCountByBlockHash" => {
                 // TODO: check a Cache of recent hashes
                 // try full nodes first. retry will use archive
                 // TODO: what happens if this block is uncled later?
-                Ok(CacheMode::CacheSuccessForever)
+                Ok(CacheMode::SuccessForever)
             }
             "eth_maxPriorityFeePerGas" => {
                 // TODO: this might be too aggressive. i think it can change before a block is mined
-                Ok(CacheMode::Cache {
+                Ok(CacheMode::Standard {
                     block: head_block.into(),
                     cache_errors: false,
                 })
             }
-            "net_listening" => Ok(CacheMode::CacheSuccessForever),
-            "net_version" => Ok(CacheMode::CacheSuccessForever),
+            "net_listening" => Ok(CacheMode::SuccessForever),
+            "net_version" => Ok(CacheMode::SuccessForever),
             method => match get_block_param_id(method) {
                 Some(block_param_id) => {
                     let block = clean_block_number(params, block_param_id, head_block, app).await?;
 
-                    Ok(CacheMode::Cache {
+                    Ok(CacheMode::Standard {
                         block,
                         cache_errors: true,
                     })
@@ -505,33 +505,33 @@ impl CacheMode {
 
     pub fn cache_jsonrpc_errors(&self) -> bool {
         match self {
-            Self::CacheNever => false,
-            Self::CacheSuccessForever => true,
-            Self::Cache { cache_errors, .. } => *cache_errors,
-            Self::CacheRange { cache_errors, .. } => *cache_errors,
+            Self::Never => false,
+            Self::SuccessForever => true,
+            Self::Standard { cache_errors, .. } => *cache_errors,
+            Self::Range { cache_errors, .. } => *cache_errors,
         }
     }
 
     pub fn from_block(&self) -> Option<&BlockNumAndHash> {
         match self {
-            Self::CacheSuccessForever => None,
-            Self::CacheNever => None,
-            Self::Cache { block, .. } => Some(block),
-            Self::CacheRange { from_block, .. } => Some(from_block),
+            Self::SuccessForever => None,
+            Self::Never => None,
+            Self::Standard { block, .. } => Some(block),
+            Self::Range { from_block, .. } => Some(from_block),
         }
     }
 
     #[inline]
     pub fn is_some(&self) -> bool {
-        !matches!(self, Self::CacheNever)
+        !matches!(self, Self::Never)
     }
 
     pub fn to_block(&self) -> Option<&BlockNumAndHash> {
         match self {
-            Self::CacheSuccessForever => None,
-            Self::CacheNever => None,
-            Self::Cache { block, .. } => Some(block),
-            Self::CacheRange { to_block, .. } => Some(to_block),
+            Self::SuccessForever => None,
+            Self::Never => None,
+            Self::Standard { block, .. } => Some(block),
+            Self::Range { to_block, .. } => Some(to_block),
         }
     }
 }
@@ -571,7 +571,7 @@ mod test {
 
         assert_eq!(
             x,
-            CacheMode::Cache {
+            CacheMode::Standard {
                 block: (&head_block).into(),
                 cache_errors: true
             }
@@ -608,10 +608,40 @@ mod test {
 
         assert_eq!(
             x,
-            CacheMode::Cache {
+            CacheMode::Standard {
                 block: (&head_block).into(),
                 cache_errors: true
             }
         );
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_eth_call_future() {
+        let method = "eth_call";
+
+        let head_block_num = 18173997;
+
+        let params = json!([{"data": "0xdeadbeef", "to": "0x0000000000000000000000000000000000000000"}, head_block_num + 1]);
+
+        let head_block: Block<H256> = Block {
+            number: Some(head_block_num.into()),
+            hash: Some(H256::random()),
+            ..Default::default()
+        };
+
+        let head_block = Web3ProxyBlock::try_new(Arc::new(head_block)).unwrap();
+
+        let id = JsonRpcId::Number(99);
+
+        let mut request = JsonRpcRequest::new(id, method.to_string(), params).unwrap();
+
+        let x = CacheMode::try_new(&mut request, Some(&head_block), None)
+            .await
+            .unwrap();
+
+        // "latest" should have been changed to the block number
+        assert_eq!(request.params.get(1), Some(&json!(head_block.number())));
+
+        assert_eq!(x, CacheMode::Never);
     }
 }

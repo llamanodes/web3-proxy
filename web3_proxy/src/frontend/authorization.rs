@@ -511,7 +511,7 @@ impl Web3Request {
         // now that kafka has logged the user's original params, we can calculate the cache key
         let cache_mode = match &mut request {
             RequestOrMethod::Request(x) => CacheMode::new(x, head_block.as_ref(), app).await,
-            _ => CacheMode::CacheNever,
+            _ => CacheMode::Never,
         };
 
         let x = Self {
@@ -620,7 +620,7 @@ impl Web3Request {
 
     pub fn cache_key(&self) -> Option<u64> {
         match &self.cache_mode {
-            CacheMode::CacheNever => None,
+            CacheMode::Never => None,
             x => {
                 let x = JsonRpcQueryCacheKey::new(x, &self.request).hash();
 
