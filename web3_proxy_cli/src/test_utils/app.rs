@@ -126,6 +126,7 @@ impl TestApp {
             let flush_stat_buffer_sender = flush_stat_buffer_sender.clone();
             let shutdown_sender = shutdown_sender.clone();
 
+            // TODO: thread isn't enough! this needs its own process for the globals to be isolated!
             thread::spawn(move || {
                 let runtime = Builder::new_multi_thread()
                     .enable_all()
@@ -176,6 +177,32 @@ impl TestApp {
         self.flush_stat_buffer_sender.send(tx).await?;
 
         let x = rx.await?;
+
+        Ok(x)
+    }
+
+    pub async fn flush_stats_and_wait(&self) -> anyhow::Result<FlushedStats> {
+        let mut x = FlushedStats::default();
+
+        loop {
+            // give stats time to get into the channel
+            // TODO: do this better
+            sleep(Duration::from_secs(5)).await;
+
+            // Flush all stats here
+            // TODO: the test should maybe pause time so that stats definitely flush from our queries.
+            let flush_count = self.flush_stats().await?;
+
+            x += flush_count;
+
+            if flush_count.relational_frontend_requests + flush_count.timeseries_frontend_requests
+                == 0
+            {
+                break;
+            }
+
+            info!(?flush_count);
+        }
 
         Ok(x)
     }

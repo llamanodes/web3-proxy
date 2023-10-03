@@ -184,7 +184,8 @@ async fn test_user_balance_decreases() {
     }
 
     // Flush all stats here
-    let _ = x.flush_stats().await.unwrap();
+    let flushed = x.flush_stats_and_wait().await.unwrap();
+    info!(?flushed);
     // assert_eq!(flush_count.timeseries, 0);
     // assert!(flush_count.relational > 0);
 
@@ -222,7 +223,8 @@ async fn test_user_balance_decreases() {
     }
 
     // Flush all stats here
-    let _ = x.flush_stats().await.unwrap();
+    let flushed = x.flush_stats_and_wait().await.unwrap();
+    info!(?flushed);
     // assert_eq!(flush_count.timeseries, 0);
     // assert!(flush_count.relational == 1);
 
@@ -357,7 +359,8 @@ async fn test_referral_bonus_non_concurrent() {
     }
 
     // Flush all stats here
-    let _ = x.flush_stats().await.unwrap();
+    let flushed = x.flush_stats_and_wait().await.unwrap();
+    info!(?flushed);
     // we can't assert because the intervals might flush for us
     // assert_eq!(flush_count.timeseries, 0);
     // assert!(flush_count.relational > 0);
@@ -521,7 +524,8 @@ async fn test_referral_bonus_concurrent_referrer_only() {
     }
 
     // Flush all stats here
-    let _ = x.flush_stats().await.unwrap();
+    let flushed = x.flush_stats_and_wait().await.unwrap();
+    info!(?flushed);
     // assert_eq!(flush_count.timeseries, 0);
     // assert!(flush_count.relational > 0);
 
@@ -705,7 +709,8 @@ async fn test_referral_bonus_concurrent_referrer_and_user() {
     }
 
     // Flush all stats here
-    let _ = x.flush_stats().await.unwrap();
+    let flushed = x.flush_stats_and_wait().await.unwrap();
+    info!(?flushed);
     // assert_eq!(flush_count.timeseries, 0);
     // assert!(flush_count.relational > 0);
 

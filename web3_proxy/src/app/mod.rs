@@ -546,7 +546,9 @@ impl Web3ProxyApp {
 
         let app = Arc::new(app);
 
-        APP.set(app.clone()).unwrap();
+        if let Err(app) = APP.set(app.clone()) {
+            error!(?app, "global APP can only be set once!");
+        };
 
         // TODO: do apply_top_config once we don't duplicate the db
         if let Err(err) = app.apply_top_config_db(&top_config).await {

@@ -24,7 +24,7 @@ async fn it_migrates_the_db() {
     let x = TestApp::spawn(&a, Some(&db), None, None).await;
 
     // we call flush stats more to be sure it works than because we expect it to save any stats
-    x.flush_stats().await.unwrap();
+    x.flush_stats_and_wait().await.unwrap();
 
     // drop x first to avoid spurious warnings about anvil/influx/mysql shutting down before the app
     drop(x);
@@ -105,7 +105,7 @@ async fn it_starts_and_stops() {
     assert_eq!(anvil_result, proxy_result.unwrap());
 
     // this won't do anything since stats aren't tracked when there isn't a db
-    let flushed = x.flush_stats().await.unwrap();
+    let flushed = x.flush_stats_and_wait().await.unwrap();
     assert_eq!(flushed.relational, 0);
     assert_eq!(flushed.timeseries, 0);
 

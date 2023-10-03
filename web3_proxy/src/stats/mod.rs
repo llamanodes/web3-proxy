@@ -13,7 +13,7 @@ use crate::frontend::authorization::{Authorization, AuthorizationType, Web3Reque
 use crate::rpcs::one::Web3Rpc;
 use anyhow::{anyhow, Context};
 use chrono::{DateTime, Months, TimeZone, Utc};
-use derive_more::From;
+use derive_more::{AddAssign, From};
 use entities::{referee, referrer, rpc_accounting_v2};
 use influxdb2::models::DataPoint;
 use migration::sea_orm::prelude::Decimal;
@@ -39,7 +39,7 @@ pub enum StatType {
 
 pub type BackendRequests = Mutex<Vec<Arc<Web3Rpc>>>;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(AddAssign, Copy, Clone, Debug, Default)]
 pub struct FlushedStats {
     /// the number of rows saved to the relational database.
     /// rows can contain multiple requests
