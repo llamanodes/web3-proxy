@@ -467,7 +467,7 @@ impl StatBuffer {
                     }
                     Err(err) => {
                         // TODO: what can cause this?
-                        error!(?err, "unable to build global stat!");
+                        error!(?err, %new_frontend_requests, % is_internal, "unable to build global stat!");
                     }
                 };
             }
