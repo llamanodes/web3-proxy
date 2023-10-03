@@ -1206,9 +1206,16 @@ impl fmt::Debug for Web3Rpcs {
         // TODO: the default formatter takes forever to write. this is too quiet though
         let consensus_rpcs = self.watch_ranked_rpcs.borrow().is_some();
 
+        let names = self.by_name.read();
+
+        let names = names.values().map(|x| x.name.as_str()).collect::<Vec<_>>();
+
+        let head_block = self.head_block();
+
         f.debug_struct("Web3Rpcs")
-            .field("rpcs", &self.by_name)
+            .field("rpcs", &names)
             .field("consensus_rpcs", &consensus_rpcs)
+            .field("head_block", &head_block)
             .finish_non_exhaustive()
     }
 }
@@ -1265,6 +1272,7 @@ mod tests {
     #![allow(unused_imports)]
 
     use super::*;
+    use crate::block_number::{BlockNumAndHash, CacheMode};
     use crate::rpcs::blockchain::Web3ProxyBlock;
     use crate::rpcs::consensus::ConsensusFinder;
     use arc_swap::ArcSwap;
@@ -1700,7 +1708,7 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
-    #[ignore = "refactor needed"]
+    #[ignore = "refactor needed to make this work properly. it passes but only after waiting for long timeouts"]
     async fn test_server_selection_by_archive() {
         let now = chrono::Utc::now().timestamp().into();
 
@@ -1844,7 +1852,7 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
-    #[ignore = "refactor needed"]
+    #[ignore = "needs a rewrite that uses anvil or mocks the provider. i thought process_block_from_rpc was enough but i was wrong"]
     async fn test_all_connections() {
         // TODO: use chrono, not SystemTime
         let now: U256 = SystemTime::now()
@@ -1853,21 +1861,31 @@ mod tests {
             .as_secs()
             .into();
 
+        let geth_data_limit = 64u64;
+
+        let block_archive = Block {
+            hash: Some(H256::random()),
+            number: Some((1_000_000 - geth_data_limit * 2).into()),
+            parent_hash: H256::random(),
+            timestamp: now - geth_data_limit * 2,
+            ..Default::default()
+        };
         let block_1 = Block {
             hash: Some(H256::random()),
             number: Some(1_000_000.into()),
             parent_hash: H256::random(),
-            timestamp: now,
+            timestamp: now - 1,
             ..Default::default()
         };
         let block_2 = Block {
             hash: Some(H256::random()),
             number: Some(1_000_001.into()),
             parent_hash: block_1.hash.unwrap(),
-            timestamp: now + 1,
+            timestamp: now,
             ..Default::default()
         };
 
+        let block_archive: Web3ProxyBlock = Arc::new(block_archive).try_into().unwrap();
         let block_1: Web3ProxyBlock = Arc::new(block_1).try_into().unwrap();
         let block_2: Web3ProxyBlock = Arc::new(block_2).try_into().unwrap();
 
@@ -1879,7 +1897,7 @@ mod tests {
             soft_limit: 1_000,
             automatic_block_limit: false,
             backup: false,
-            block_data_limit: 64.into(),
+            block_data_limit: geth_data_limit.into(),
             head_block_sender: Some(tx_mock_geth),
             peak_latency: Some(new_peak_latency()),
             ..Default::default()
@@ -1896,6 +1914,8 @@ mod tests {
             ..Default::default()
         };
 
+        assert!(!mock_geth.has_block_data(block_archive.number()));
+        assert!(mock_erigon_archive.has_block_data(block_archive.number()));
         assert!(mock_geth.has_block_data(block_1.number()));
         assert!(mock_erigon_archive.has_block_data(block_1.number()));
         assert!(!mock_geth.has_block_data(block_2.number()));
@@ -1937,6 +1957,20 @@ mod tests {
         let mut consensus_finder = ConsensusFinder::new(None, None);
 
         consensus_finder
+            .process_block_from_rpc(
+                &rpcs,
+                Some(block_archive.clone()),
+                mock_erigon_archive.clone(),
+            )
+            .await
+            .unwrap();
+
+        consensus_finder
+            .process_block_from_rpc(&rpcs, Some(block_1.clone()), mock_erigon_archive.clone())
+            .await
+            .unwrap();
+
+        consensus_finder
             .process_block_from_rpc(&rpcs, Some(block_1.clone()), mock_geth.clone())
             .await
             .unwrap();
@@ -1969,11 +2003,25 @@ mod tests {
         // this should give us both servers
         let r = Web3Request::new_internal(
             "eth_getBlockByNumber".to_string(),
-            &(block_1.number() - U64::from(32), false),
+            &(block_1.number(), false),
             Some(block_2.clone()),
             Some(Duration::from_millis(100)),
         )
         .await;
+
+        match &r.cache_mode {
+            CacheMode::Standard {
+                block,
+                cache_errors,
+            } => {
+                assert_eq!(block, &BlockNumAndHash::from(&block_1));
+                assert!(cache_errors);
+            }
+            x => {
+                panic!("unexpected CacheMode: {:?}", x);
+            }
+        }
+
         let all_connections = rpcs.all_connections(&r, None, None).await;
 
         debug!("all_connections: {:#?}", all_connections);
@@ -1985,13 +2033,29 @@ mod tests {
         );
 
         // this should give us only the archive server
+        // TODO: i think this might have problems because block_1 - 100 isn't a real block and so queries for it will fail. then it falls back to caching with the head block
+        // TODO: what if we check if its an archive block while doing cache_mode.
         let r = Web3Request::new_internal(
             "eth_getBlockByNumber".to_string(),
-            &(block_1.number() - U64::from(100), false),
+            &(block_archive.number(), false),
             Some(block_2.clone()),
             Some(Duration::from_millis(100)),
         )
         .await;
+
+        match &r.cache_mode {
+            CacheMode::Standard {
+                block,
+                cache_errors,
+            } => {
+                assert_eq!(block, &BlockNumAndHash::from(&block_archive));
+                assert!(cache_errors);
+            }
+            x => {
+                panic!("unexpected CacheMode: {:?}", x);
+            }
+        }
+
         let all_connections = rpcs.all_connections(&r, None, None).await;
 
         debug!("all_connections: {:#?}", all_connections);

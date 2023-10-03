@@ -291,6 +291,7 @@ impl Web3Request {
         let start_instant = Instant::now();
 
         // TODO: get this default from config, or from user settings
+        // 5 minutes with a buffer for other things being slow
         let expire_instant = start_instant + max_wait.unwrap_or_else(|| Duration::from_secs(295));
 
         // let request: RequestOrMethod = request.into();
