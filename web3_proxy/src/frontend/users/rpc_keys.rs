@@ -1,8 +1,8 @@
 //! Handle registration, logins, and managing account data.
-use super::super::authorization::RpcSecretKey;
 use crate::app::Web3ProxyApp;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
 use crate::globals::{global_db_conn, global_db_replica_conn};
+use crate::secrets::RpcSecretKey;
 use axum::headers::{Header, Origin, Referer, UserAgent};
 use axum::{
     headers::{authorization::Bearer, Authorization},

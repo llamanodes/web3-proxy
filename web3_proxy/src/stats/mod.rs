@@ -9,7 +9,7 @@ use self::stat_buffer::BufferedRpcQueryStats;
 use crate::caches::{RpcSecretKeyCache, UserBalanceCache};
 use crate::compute_units::ComputeUnit;
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
-use crate::frontend::authorization::{Authorization, Web3Request};
+use crate::frontend::authorization::{Authorization, AuthorizationType, Web3Request};
 use crate::rpcs::one::Web3Rpc;
 use anyhow::{anyhow, Context};
 use chrono::{DateTime, Months, TimeZone, Utc};
@@ -41,11 +41,17 @@ pub type BackendRequests = Mutex<Vec<Arc<Web3Rpc>>>;
 
 #[derive(Copy, Clone, Debug)]
 pub struct FlushedStats {
+    /// the number of rows saved to the relational database.
+    /// rows can contain multiple requests
     pub relational: usize,
     pub relational_frontend_requests: u64,
+    pub relational_internal_requests: u64,
+    /// the number of data points saved to the timeseries database.
+    /// data points can contain multiple requests
     pub timeseries: usize,
-    /// the number of global frontend requests saved to influx
+    /// the number of global frontend requests saved to the time series database
     pub timeseries_frontend_requests: u64,
+    pub timeseries_internal_requests: u64,
 }
 
 /// TODO: better name? RpcQueryStatBuilder?
@@ -68,12 +74,11 @@ pub struct RpcQueryStats {
     pub compute_unit_cost: Decimal,
     /// If the request is invalid or received a jsonrpc error response (excluding reverts)
     pub user_error_response: bool,
-    /// If premium was active at the start of the request
-    pub paid_credits_used: bool,
 }
 
 #[derive(Clone, Debug, From, Hash, PartialEq, Eq)]
 pub struct RpcQueryKey {
+    pub authorization_type: AuthorizationType,
     /// unix epoch time in seconds.
     /// for the time series db, this is (close to) the time that the response was sent.
     /// for the account database, this is rounded to the week.
@@ -89,6 +94,7 @@ pub struct RpcQueryKey {
     /// 0 if the public url was used.
     rpc_secret_key_id: u64,
     /// 0 if the public url was used.
+    /// TODO: u64::MAX if the internal? or have a migration make a user for us? or keep 0 and we track that another way?
     rpc_key_user_id: u64,
 }
 
@@ -129,6 +135,7 @@ impl RpcQueryStats {
         // Depending on method, add some arithmetic around calculating credits_used
         // I think balance should not go here, this looks more like a key thingy
         RpcQueryKey {
+            authorization_type: self.authorization.authorization_type,
             response_timestamp,
             archive_needed: self.archive_request,
             error_response: self.error_response,
@@ -150,6 +157,7 @@ impl RpcQueryStats {
         let rpc_key_user_id = 0;
 
         RpcQueryKey {
+            authorization_type: self.authorization.authorization_type,
             response_timestamp: self.response_timestamp,
             archive_needed: self.archive_request,
             error_response: self.error_response,
@@ -176,6 +184,7 @@ impl RpcQueryStats {
         let method = self.method.clone();
 
         let key = RpcQueryKey {
+            authorization_type: self.authorization.authorization_type,
             response_timestamp: self.response_timestamp,
             archive_needed: self.archive_request,
             error_response: self.error_response,
@@ -591,8 +600,6 @@ impl RpcQueryStats {
 
         let method = metadata.request.method().to_string().into();
 
-        let paid_credits_used = authorization.checks.paid_credits_used;
-
         let x = Self {
             archive_request,
             authorization,
@@ -601,7 +608,6 @@ impl RpcQueryStats {
             compute_unit_cost,
             error_response,
             method,
-            paid_credits_used,
             request_bytes,
             response_bytes,
             response_millis,

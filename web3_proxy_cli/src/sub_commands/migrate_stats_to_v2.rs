@@ -4,9 +4,7 @@ use std::time::Duration;
 use tracing::{error, info};
 use web3_proxy::app::BILLING_PERIOD_SECONDS;
 use web3_proxy::config::TopConfig;
-use web3_proxy::frontend::authorization::{
-    Authorization, RequestOrMethod, RpcSecretKey, Web3Request,
-};
+use web3_proxy::frontend::authorization::{Authorization, RequestOrMethod, Web3Request};
 use web3_proxy::prelude::anyhow::{self, Context};
 use web3_proxy::prelude::argh::{self, FromArgs};
 use web3_proxy::prelude::chrono;
@@ -24,6 +22,7 @@ use web3_proxy::prelude::parking_lot::Mutex;
 use web3_proxy::prelude::tokio::sync::{broadcast, mpsc};
 use web3_proxy::prelude::tokio::time::Instant;
 use web3_proxy::rpcs::one::Web3Rpc;
+use web3_proxy::secrets::RpcSecretKey;
 use web3_proxy::stats::StatBuffer;
 
 #[derive(FromArgs, PartialEq, Eq, Debug)]

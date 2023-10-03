@@ -1,8 +1,8 @@
 //! Handle subusers, viewing subusers, and viewing accessible rpc-keys
 use crate::app::Web3ProxyApp;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
-use crate::frontend::authorization::RpcSecretKey;
 use crate::globals::{global_db_conn, global_db_replica_conn};
+use crate::secrets::RpcSecretKey;
 use anyhow::Context;
 use axum::{
     extract::Query,
