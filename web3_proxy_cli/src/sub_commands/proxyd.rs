@@ -107,28 +107,32 @@ impl ProxydSubCommand {
 
                 thread::spawn(move || loop {
                     match fs::read_to_string(&top_config_path) {
-                        Ok(new_top_config) => match toml::from_str::<TopConfig>(&new_top_config) {
-                            Ok(mut new_top_config) => {
-                                new_top_config.clean();
+                        Ok(new_top_config) => {
+                            match toml::from_str::<TopConfig>(&new_top_config) {
+                                Ok(mut new_top_config) => {
+                                    new_top_config.clean();
 
-                                if new_top_config != current_config {
-                                    trace!("current_config: {:#?}", current_config);
-                                    trace!("new_top_config: {:#?}", new_top_config);
+                                    if new_top_config != current_config {
+                                        trace!("current_config: {:#?}", current_config);
+                                        trace!("new_top_config: {:#?}", new_top_config);
 
-                                    // TODO: print the differences
-                                    // TODO: first run seems to always see differences. why?
-                                    info!("config @ {:?} changed", top_config_path);
-                                    match config_sender.send(new_top_config.clone()) {
-                                        Ok(()) => current_config = new_top_config,
-                                        Err(err) => error!(?err, "unable to apply new config"),
+                                        // TODO: print the differences
+                                        // TODO: first run seems to always see differences. why?
+                                        info!("config @ {:?} changed", top_config_path);
+                                        match config_sender.send(new_top_config.clone()) {
+                                            Ok(()) => current_config = new_top_config,
+                                            Err(err) => {
+                                                error!(?err, "unable to apply new config")
+                                            }
+                                        }
                                     }
                                 }
+                                Err(err) => {
+                                    // TODO: panic?
+                                    error!("Unable to parse config! {:#?}", err);
+                                }
                             }
-                            Err(err) => {
-                                // TODO: panic?
-                                error!("Unable to parse config! {:#?}", err);
-                            }
-                        },
+                        }
                         Err(err) => {
                             // TODO: panic?
                             error!("Unable to read config! {:#?}", err);
@@ -299,7 +303,7 @@ impl ProxydSubCommand {
         }
 
         // TODO: make sure this happens even if we exit with an error
-        if let Ok(db_conn) = global_db_conn().await {
+        if let Ok(db_conn) = global_db_conn() {
             /*
             From the sqlx docs:
 

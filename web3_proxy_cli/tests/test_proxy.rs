@@ -6,8 +6,9 @@ use tokio::{
 };
 use tracing::info;
 use web3_proxy::prelude::ethers::{
-    prelude::{Block, Transaction, TxHash, U256, U64},
+    prelude::{Block, Transaction, TxHash, H256, U256, U64},
     providers::{Http, JsonRpcClient, Quorum, QuorumProvider, WeightedProvider},
+    types::{transaction::eip2718::TypedTransaction, Address, Bytes, Eip1559TransactionRequest},
 };
 use web3_proxy::prelude::http::StatusCode;
 use web3_proxy::prelude::reqwest;
@@ -23,7 +24,7 @@ async fn it_migrates_the_db() {
     let x = TestApp::spawn(&a, Some(&db), None, None).await;
 
     // we call flush stats more to be sure it works than because we expect it to save any stats
-    x.flush_stats().await.unwrap();
+    x.flush_stats_and_wait().await.unwrap();
 
     // drop x first to avoid spurious warnings about anvil/influx/mysql shutting down before the app
     drop(x);
@@ -104,7 +105,7 @@ async fn it_starts_and_stops() {
     assert_eq!(anvil_result, proxy_result.unwrap());
 
     // this won't do anything since stats aren't tracked when there isn't a db
-    let flushed = x.flush_stats().await.unwrap();
+    let flushed = x.flush_stats_and_wait().await.unwrap();
     assert_eq!(flushed.relational, 0);
     assert_eq!(flushed.timeseries, 0);
 
@@ -116,9 +117,9 @@ async fn it_starts_and_stops() {
 /// TODO: have another test that makes sure error codes match
 #[test_log::test(tokio::test)]
 async fn it_matches_anvil() {
-    let a = TestAnvil::spawn(31337).await;
+    let chain_id = 31337;
 
-    // TODO: send some test transactions
+    let a = TestAnvil::spawn(chain_id).await;
 
     a.provider.request::<_, U64>("evm_mine", ()).await.unwrap();
 
@@ -167,11 +168,90 @@ async fn it_matches_anvil() {
     let balance: U256 = quorum_provider
         .request(
             "eth_getBalance",
-            (block_with_tx.unwrap().author.unwrap(), "latest"),
+            (block_with_tx.as_ref().unwrap().author.unwrap(), "latest"),
         )
         .await
         .unwrap();
     info!(%balance);
+
+    let singleton_deploy_from: Address = "0xBb6e024b9cFFACB947A71991E386681B1Cd1477D"
+        .parse()
+        .unwrap();
+
+    let wallet = a.wallet(0);
+
+    let x = quorum_provider
+        .request::<_, Option<Transaction>>(
+            "eth_getTransactionByHash",
+            ["0x803351deb6d745e91545a6a3e1c0ea3e9a6a02a1a4193b70edfcd2f40f71a01c"],
+        )
+        .await
+        .unwrap();
+    assert!(x.is_none());
+
+    let gas_price: U256 = quorum_provider.request("eth_gasPrice", ()).await.unwrap();
+
+    let tx = TypedTransaction::Eip1559(Eip1559TransactionRequest {
+        chain_id: Some(chain_id),
+        to: Some(singleton_deploy_from.into()),
+        gas: Some(21000.into()),
+        value: Some("24700000000000000".parse().unwrap()),
+        max_fee_per_gas: Some(gas_price * U256::from(2)),
+        ..Default::default()
+    });
+
+    let sig = wallet.sign_transaction_sync(&tx).unwrap();
+
+    let raw_tx = tx.rlp_signed(&sig);
+
+    // fund singleton deployer
+    // TODO: send through the quorum provider. it should detect that its already confirmed
+    let fund_tx_hash: H256 = a
+        .provider
+        .request("eth_sendRawTransaction", [raw_tx])
+        .await
+        .unwrap();
+    info!(%fund_tx_hash);
+
+    // deploy singleton deployer
+    // TODO: send through the quorum provider. it should detect that its already confirmed
+    let deploy_tx: H256 = a.provider.request("eth_sendRawTransaction", ["0xf9016c8085174876e8008303c4d88080b90154608060405234801561001057600080fd5b50610134806100206000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c80634af63f0214602d575b600080fd5b60cf60048036036040811015604157600080fd5b810190602081018135640100000000811115605b57600080fd5b820183602082011115606c57600080fd5b80359060200191846001830284011164010000000083111715608d57600080fd5b91908080601f016020809104026020016040519081016040528093929190818152602001838380828437600092019190915250929550509135925060eb915050565b604080516001600160a01b039092168252519081900360200190f35b6000818351602085016000f5939250505056fea26469706673582212206b44f8a82cb6b156bfcc3dc6aadd6df4eefd204bc928a4397fd15dacf6d5320564736f6c634300060200331b83247000822470"]).await.unwrap();
+    assert_eq!(
+        deploy_tx,
+        "0x803351deb6d745e91545a6a3e1c0ea3e9a6a02a1a4193b70edfcd2f40f71a01c"
+            .parse()
+            .unwrap()
+    );
+
+    let code: Bytes = quorum_provider
+        .request(
+            "eth_getCode",
+            ("0xce0042B868300000d44A59004Da54A005ffdcf9f", "latest"),
+        )
+        .await
+        .unwrap();
+    info!(%code);
+
+    let deploy_tx = quorum_provider
+        .request::<_, Option<Transaction>>(
+            "eth_getTransactionByHash",
+            ["0x803351deb6d745e91545a6a3e1c0ea3e9a6a02a1a4193b70edfcd2f40f71a01c"],
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    info!(?deploy_tx);
+
+    let head_block_num: U64 = quorum_provider
+        .request("eth_blockNumber", ())
+        .await
+        .unwrap();
+
+    let future_block: Option<ArcBlock> = quorum_provider
+        .request("eth_getBlockByNumber", (head_block_num + U64::one(), false))
+        .await
+        .unwrap();
+    assert!(future_block.is_none());
 
     // todo!("lots more requests");
 

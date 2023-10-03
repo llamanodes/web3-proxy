@@ -8,7 +8,7 @@ use tokio::stream::Stream;
 
 struct SizingBody<B> {
     inner: B,
-    request_metadata: RequestMetadata,
+    web3_request: RequestMetadata,
 }
 
 impl<B> SizingBody<B> {

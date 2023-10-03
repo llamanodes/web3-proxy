@@ -2,9 +2,9 @@
 //!
 //! WebSockets are the preferred method of receiving requests, but not all clients have good support.
 
-use super::authorization::{ip_is_authorized, key_is_authorized, Authorization, RequestMetadata};
+use super::authorization::{ip_is_authorized, key_is_authorized, Authorization, Web3Request};
 use crate::errors::{Web3ProxyError, Web3ProxyResponse};
-use crate::jsonrpc::{self, JsonRpcId};
+use crate::jsonrpc;
 use crate::{
     app::Web3ProxyApp,
     errors::Web3ProxyResult,
@@ -29,7 +29,6 @@ use handlebars::Handlebars;
 use hashbrown::HashMap;
 use http::{HeaderMap, StatusCode};
 use serde_json::json;
-use serde_json::value::RawValue;
 use std::net::IpAddr;
 use std::str::from_utf8_mut;
 use std::sync::atomic::AtomicU64;
@@ -317,26 +316,22 @@ async fn proxy_web3_socket(
 }
 
 async fn websocket_proxy_web3_rpc(
-    app: Arc<Web3ProxyApp>,
+    app: &Arc<Web3ProxyApp>,
     authorization: Arc<Authorization>,
     json_request: JsonRpcRequest,
     response_sender: &mpsc::Sender<Message>,
     subscription_count: &AtomicU64,
     subscriptions: &AsyncRwLock<HashMap<U64, AbortHandle>>,
-) -> (Box<RawValue>, Web3ProxyResult<jsonrpc::Response>) {
-    let response_id = json_request.id.clone();
-
-    // TODO: move this to a seperate function so we can use the try operator
-    let response: Web3ProxyResult<jsonrpc::Response> = match &json_request.method[..] {
+) -> Web3ProxyResult<jsonrpc::Response> {
+    match &json_request.method[..] {
         "eth_subscribe" => {
+            let web3_request =
+                Web3Request::new_with_app(app, authorization, None, json_request.into(), None)
+                    .await;
+
             // TODO: how can we subscribe with proxy_mode?
             match app
-                .eth_subscribe(
-                    authorization,
-                    json_request,
-                    subscription_count,
-                    response_sender.clone(),
-                )
+                .eth_subscribe(web3_request, subscription_count, response_sender.clone())
                 .await
             {
                 Ok((handle, response)) => {
@@ -357,25 +352,25 @@ async fn websocket_proxy_web3_rpc(
             }
         }
         "eth_unsubscribe" => {
-            let request_metadata =
-                RequestMetadata::new(&app, authorization, &json_request, None).await;
+            let web3_request =
+                Web3Request::new_with_app(app, authorization, None, json_request.into(), None)
+                    .await;
 
-            let maybe_id = json_request
-                .params
+            // sometimes we get a list, sometimes we get the id directly
+            // check for the list first, then just use the whole thing
+            let maybe_id = web3_request
+                .request
+                .params()
                 .get(0)
-                .cloned()
-                .unwrap_or(json_request.params);
+                .unwrap_or_else(|| web3_request.request.params())
+                .clone();
 
             let subscription_id: U64 = match serde_json::from_value::<U64>(maybe_id) {
                 Ok(x) => x,
                 Err(err) => {
-                    return (
-                        response_id,
-                        Err(Web3ProxyError::BadRequest(
-                            format!("unexpected params given for eth_unsubscribe: {:?}", err)
-                                .into(),
-                        )),
-                    )
+                    return Err(Web3ProxyError::BadRequest(
+                        format!("unexpected params given for eth_unsubscribe: {:?}", err).into(),
+                    ));
                 }
             };
 
@@ -392,11 +387,11 @@ async fn websocket_proxy_web3_rpc(
             };
 
             let response =
-                jsonrpc::ParsedResponse::from_value(json!(partial_response), response_id.clone());
+                jsonrpc::ParsedResponse::from_value(json!(partial_response), web3_request.id());
 
             // TODO: better way of passing in ParsedResponse
             let response = jsonrpc::SingleResponse::Parsed(response);
-            request_metadata.add_response(&response);
+            web3_request.add_response(&response);
             let response = response.parsed().await.expect("Response already parsed");
 
             Ok(response.into())
@@ -405,32 +400,27 @@ async fn websocket_proxy_web3_rpc(
             .proxy_web3_rpc(authorization, json_request.into())
             .await
             .map(|(_, response, _)| response),
-    };
-
-    (response_id, response)
+    }
 }
 
 /// websockets support a few more methods than http clients
 async fn handle_socket_payload(
-    app: Arc<Web3ProxyApp>,
+    app: &Arc<Web3ProxyApp>,
     authorization: &Arc<Authorization>,
     payload: &str,
     response_sender: &mpsc::Sender<Message>,
     subscription_count: &AtomicU64,
     subscriptions: Arc<AsyncRwLock<HashMap<U64, AbortHandle>>>,
 ) -> Web3ProxyResult<(Message, Option<OwnedSemaphorePermit>)> {
-    let (authorization, semaphore) = authorization.check_again(&app).await?;
+    let (authorization, semaphore) = authorization.check_again(app).await?;
 
     // TODO: handle batched requests
     let (response_id, response) = match serde_json::from_str::<JsonRpcRequest>(payload) {
         Ok(json_request) => {
-            // // TODO: move tarpit code to an invidual request, or change this to handle enums
-            // json_request
-            //     .tarpit_invalid(&app, &authorization, Duration::from_secs(2))
-            //     .await?;
+            let request_id = json_request.id.clone();
 
             // TODO: move this to a seperate function so we can use the try operator
-            websocket_proxy_web3_rpc(
+            let x = websocket_proxy_web3_rpc(
                 app,
                 authorization.clone(),
                 json_request,
@@ -438,12 +428,11 @@ async fn handle_socket_payload(
                 subscription_count,
                 &subscriptions,
             )
-            .await
+            .await;
+
+            (request_id, x)
         }
-        Err(err) => {
-            let id = JsonRpcId::None.to_raw_value();
-            (id, Err(err.into()))
-        }
+        Err(err) => (Default::default(), Err(err.into())),
     };
 
     let response_str = match response {
@@ -488,7 +477,7 @@ async fn read_web3_socket(
                         let (response_msg, _semaphore) = match msg {
                             Message::Text(payload) => {
                                 match handle_socket_payload(
-                                    app,
+                                    &app,
                                     &authorization,
                                     &payload,
                                     &response_sender,
@@ -522,7 +511,7 @@ async fn read_web3_socket(
                                 let payload = from_utf8_mut(&mut payload).unwrap();
 
                                 let (m, s) = match handle_socket_payload(
-                                    app,
+                                    &app,
                                     &authorization,
                                     payload,
                                     &response_sender,
@@ -586,4 +575,18 @@ async fn write_web3_socket(
     }
 
     // TODO: decrement counter for open websockets
+}
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn nulls_and_defaults() {
+        let x = serde_json::Value::Null;
+        let x = serde_json::to_string(&x).unwrap();
+
+        let y: Box<serde_json::value::RawValue> = Default::default();
+        let y = serde_json::to_string(&y).unwrap();
+
+        assert_eq!(x, y);
+    }
 }

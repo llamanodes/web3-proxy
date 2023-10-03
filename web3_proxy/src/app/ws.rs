@@ -2,8 +2,8 @@
 
 use super::Web3ProxyApp;
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
-use crate::frontend::authorization::{Authorization, RequestMetadata, RequestOrMethod};
-use crate::jsonrpc::{self, JsonRpcRequest};
+use crate::frontend::authorization::{RequestOrMethod, Web3Request};
+use crate::jsonrpc;
 use crate::response_cache::JsonRpcResponseEnum;
 use axum::extract::ws::{CloseFrame, Message};
 use deferred_rate_limiter::DeferredRateLimitResult;
@@ -24,14 +24,14 @@ use tracing::{error, trace};
 impl Web3ProxyApp {
     pub async fn eth_subscribe<'a>(
         self: &'a Arc<Self>,
-        authorization: Arc<Authorization>,
-        jsonrpc_request: JsonRpcRequest,
+        web3_request: Arc<Web3Request>,
         subscription_count: &'a AtomicU64,
         // TODO: taking a sender for Message instead of the exact json we are planning to send feels wrong, but its easier for now
         response_sender: mpsc::Sender<Message>,
     ) -> Web3ProxyResult<(AbortHandle, jsonrpc::ParsedResponse)> {
-        let subscribe_to = jsonrpc_request
-            .params
+        let subscribe_to = web3_request
+            .request
+            .params()
             .get(0)
             .and_then(|x| x.as_str())
             .ok_or_else(|| {
@@ -42,20 +42,12 @@ impl Web3ProxyApp {
         // only premium users are allowed to subscribe to the other things
         if !(self.config.free_subscriptions
             || subscribe_to == "newHeads"
-            || authorization.active_premium().await)
+            || web3_request.authorization.active_premium().await)
         {
             return Err(Web3ProxyError::AccessDenied(
                 "eth_subscribe for this event requires an active premium account".into(),
             ));
         }
-
-        let request_metadata = RequestMetadata::new(
-            self,
-            authorization.clone(),
-            RequestOrMethod::Request(&jsonrpc_request),
-            None,
-        )
-        .await;
 
         let (subscription_abort_handle, subscription_registration) = AbortHandle::new_pair();
 
@@ -64,9 +56,6 @@ impl Web3ProxyApp {
         let subscription_id = subscription_count.fetch_add(1, atomic::Ordering::SeqCst);
         let subscription_id = U64::from(subscription_id);
 
-        // save the id so we can use it in the response
-        let id = jsonrpc_request.id.clone();
-
         // TODO: calling `json!` on every request is probably not fast. but it works for now
         // TODO: i think we need a stricter EthSubscribeRequest type that JsonRpcRequest can turn into
         // TODO: DRY This up. lots of duplication between newHeads and newPendingTransactions
@@ -74,6 +63,7 @@ impl Web3ProxyApp {
             "newHeads" => {
                 let head_block_receiver = self.watch_consensus_head_receiver.clone();
                 let app = self.clone();
+                let authorization = web3_request.authorization.clone();
 
                 tokio::spawn(async move {
                     trace!("newHeads subscription {:?}", subscription_id);
@@ -90,16 +80,17 @@ impl Web3ProxyApp {
                             continue;
                         };
 
-                        let subscription_request_metadata = RequestMetadata::new(
+                        let subscription_web3_request = Web3Request::new_with_app(
                             &app,
                             authorization.clone(),
-                            RequestOrMethod::Method("eth_subscribe(newHeads)", 0),
-                            Some(&new_head),
+                            None,
+                            RequestOrMethod::Method("eth_subscribe(newHeads)".into(), 0),
+                            Some(new_head),
                         )
                         .await;
 
                         if let Some(close_message) = app
-                            .rate_limit_close_websocket(&subscription_request_metadata)
+                            .rate_limit_close_websocket(&subscription_web3_request)
                             .await
                         {
                             let _ = response_sender.send(close_message).await;
@@ -113,7 +104,7 @@ impl Web3ProxyApp {
                             "params": {
                                 "subscription": subscription_id,
                                 // TODO: option to include full transaction objects instead of just the hashes?
-                                "result": new_head.block,
+                                "result": subscription_web3_request.head_block,
                             },
                         });
 
@@ -133,7 +124,7 @@ impl Web3ProxyApp {
                             break;
                         };
 
-                        subscription_request_metadata.add_response(response_bytes);
+                        subscription_web3_request.add_response(response_bytes);
                     }
 
                     trace!("closed newHeads subscription {:?}", subscription_id);
@@ -143,6 +134,7 @@ impl Web3ProxyApp {
             "newPendingTransactions" => {
                 let pending_txid_firehose = self.pending_txid_firehose.subscribe();
                 let app = self.clone();
+                let authorization = web3_request.authorization.clone();
 
                 tokio::spawn(async move {
                     let mut pending_txid_firehose = Abortable::new(
@@ -152,17 +144,21 @@ impl Web3ProxyApp {
 
                     while let Some(Ok(new_txid)) = pending_txid_firehose.next().await {
                         // TODO: include the head_block here?
-                        let subscription_request_metadata = RequestMetadata::new(
+                        let subscription_web3_request = Web3Request::new_with_app(
                             &app,
                             authorization.clone(),
-                            RequestOrMethod::Method("eth_subscribe(newPendingTransactions)", 0),
+                            None,
+                            RequestOrMethod::Method(
+                                "eth_subscribe(newPendingTransactions)".into(),
+                                0,
+                            ),
                             None,
                         )
                         .await;
 
                         // check if we should close the websocket connection
                         if let Some(close_message) = app
-                            .rate_limit_close_websocket(&subscription_request_metadata)
+                            .rate_limit_close_websocket(&subscription_web3_request)
                             .await
                         {
                             let _ = response_sender.send(close_message).await;
@@ -185,7 +181,7 @@ impl Web3ProxyApp {
                         // we could use JsonRpcForwardedResponseEnum::num_bytes() here, but since we already have the string, this is easier
                         let response_bytes = response_str.len();
 
-                        subscription_request_metadata.add_response(response_bytes);
+                        subscription_web3_request.add_response(response_bytes);
 
                         // TODO: do clients support binary messages?
                         // TODO: can we check a content type header?
@@ -216,23 +212,21 @@ impl Web3ProxyApp {
 
         let response_data = JsonRpcResponseEnum::from(json!(subscription_id));
 
-        let response = jsonrpc::ParsedResponse::from_response_data(response_data, id);
+        let response =
+            jsonrpc::ParsedResponse::from_response_data(response_data, web3_request.id());
 
         // TODO: better way of passing in ParsedResponse
         let response = jsonrpc::SingleResponse::Parsed(response);
         // TODO: this serializes twice
-        request_metadata.add_response(&response);
+        web3_request.add_response(&response);
         let response = response.parsed().await.expect("Response already parsed");
 
         // TODO: make a `SubscriptonHandle(AbortHandle, JoinHandle)` struct?
         Ok((subscription_abort_handle, response))
     }
 
-    async fn rate_limit_close_websocket(
-        &self,
-        request_metadata: &RequestMetadata,
-    ) -> Option<Message> {
-        let authorization = &request_metadata.authorization;
+    async fn rate_limit_close_websocket(&self, web3_request: &Web3Request) -> Option<Message> {
+        let authorization = &web3_request.authorization;
 
         if !authorization.active_premium().await {
             if let Some(rate_limiter) = &self.frontend_public_rate_limiter {

@@ -1,6 +1,7 @@
 use crate::balance::Balance;
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
-use crate::frontend::authorization::{AuthorizationChecks, RpcSecretKey};
+use crate::frontend::authorization::AuthorizationChecks;
+use crate::secrets::RpcSecretKey;
 use derive_more::From;
 use entities::rpc_key;
 use migration::sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};

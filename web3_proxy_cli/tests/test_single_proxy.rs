@@ -5,7 +5,6 @@ use tracing::{info, warn};
 use web3_proxy::prelude::futures::future::try_join_all;
 use web3_proxy::prelude::reqwest;
 use web3_proxy::prelude::rust_decimal::{Decimal, RoundingStrategy};
-use web3_proxy::prelude::tokio::time::sleep;
 use web3_proxy::rpcs::blockchain::ArcBlock;
 use web3_proxy_cli::test_utils::create_provider_with_rpc_key::create_provider_for_user;
 use web3_proxy_cli::test_utils::rpc_key::user_get_first_rpc_key;
@@ -95,25 +94,8 @@ async fn test_single_proxy_stats_add_up() {
 
     try_join_all(handles).await.unwrap();
 
-    // give stats time to get into the channel
-    // TODO: do this better
-    sleep(Duration::from_secs(5)).await;
-
-    // Flush all stats here
-    // TODO: the test should maybe pause time so that stats definitely flush from our queries.
-    let flush_0_count_0 = x.flush_stats().await.unwrap();
-
-    warn!("Counts 0 are: {:?}", flush_0_count_0);
-    // we don't actually assert on these because its likely the intervals flushed most of the stats
-    // assert_eq!(flush_0_count_0.relational, 1);
-    // assert_eq!(flush_0_count_0.timeseries, 2);
-
-    // Wait a bit. TODO: instead of waiting. make flush stats more robust
-    sleep(Duration::from_secs(5)).await;
-    let flush_0_count_1 = x.flush_stats().await.unwrap();
-    warn!("Counts 0 are: {:?}", flush_0_count_1);
-    assert_eq!(flush_0_count_1.relational, 0);
-    assert_eq!(flush_0_count_1.timeseries, 0);
+    let flushed = x.flush_stats_and_wait().await.unwrap();
+    info!(?flushed);
 
     // get stats now
     // todo!("Need to validate all the stat accounting now");

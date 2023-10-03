@@ -9,11 +9,11 @@ use self::stat_buffer::BufferedRpcQueryStats;
 use crate::caches::{RpcSecretKeyCache, UserBalanceCache};
 use crate::compute_units::ComputeUnit;
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
-use crate::frontend::authorization::{Authorization, RequestMetadata};
+use crate::frontend::authorization::{Authorization, AuthorizationType, Web3Request};
 use crate::rpcs::one::Web3Rpc;
 use anyhow::{anyhow, Context};
 use chrono::{DateTime, Months, TimeZone, Utc};
-use derive_more::From;
+use derive_more::{AddAssign, From};
 use entities::{referee, referrer, rpc_accounting_v2};
 use influxdb2::models::DataPoint;
 use migration::sea_orm::prelude::Decimal;
@@ -25,7 +25,6 @@ use migration::{Expr, LockType, OnConflict};
 use num_traits::ToPrimitive;
 use parking_lot::Mutex;
 use std::borrow::Cow;
-use std::mem;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tracing::{error, instrument, trace, warn};
@@ -40,13 +39,19 @@ pub enum StatType {
 
 pub type BackendRequests = Mutex<Vec<Arc<Web3Rpc>>>;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(AddAssign, Copy, Clone, Debug, Default)]
 pub struct FlushedStats {
+    /// the number of rows saved to the relational database.
+    /// rows can contain multiple requests
     pub relational: usize,
     pub relational_frontend_requests: u64,
+    pub relational_internal_requests: u64,
+    /// the number of data points saved to the timeseries database.
+    /// data points can contain multiple requests
     pub timeseries: usize,
-    /// the number of global frontend requests saved to influx
+    /// the number of global frontend requests saved to the time series database
     pub timeseries_frontend_requests: u64,
+    pub timeseries_internal_requests: u64,
 }
 
 /// TODO: better name? RpcQueryStatBuilder?
@@ -69,12 +74,11 @@ pub struct RpcQueryStats {
     pub compute_unit_cost: Decimal,
     /// If the request is invalid or received a jsonrpc error response (excluding reverts)
     pub user_error_response: bool,
-    /// If premium was active at the start of the request
-    pub paid_credits_used: bool,
 }
 
 #[derive(Clone, Debug, From, Hash, PartialEq, Eq)]
 pub struct RpcQueryKey {
+    pub authorization_type: AuthorizationType,
     /// unix epoch time in seconds.
     /// for the time series db, this is (close to) the time that the response was sent.
     /// for the account database, this is rounded to the week.
@@ -90,6 +94,7 @@ pub struct RpcQueryKey {
     /// 0 if the public url was used.
     rpc_secret_key_id: u64,
     /// 0 if the public url was used.
+    /// TODO: u64::MAX if the internal? or have a migration make a user for us? or keep 0 and we track that another way?
     rpc_key_user_id: u64,
 }
 
@@ -130,6 +135,7 @@ impl RpcQueryStats {
         // Depending on method, add some arithmetic around calculating credits_used
         // I think balance should not go here, this looks more like a key thingy
         RpcQueryKey {
+            authorization_type: self.authorization.authorization_type,
             response_timestamp,
             archive_needed: self.archive_request,
             error_response: self.error_response,
@@ -151,6 +157,7 @@ impl RpcQueryStats {
         let rpc_key_user_id = 0;
 
         RpcQueryKey {
+            authorization_type: self.authorization.authorization_type,
             response_timestamp: self.response_timestamp,
             archive_needed: self.archive_request,
             error_response: self.error_response,
@@ -177,6 +184,7 @@ impl RpcQueryStats {
         let method = self.method.clone();
 
         let key = RpcQueryKey {
+            authorization_type: self.authorization.authorization_type,
             response_timestamp: self.response_timestamp,
             archive_needed: self.archive_request,
             error_response: self.error_response,
@@ -194,7 +202,7 @@ impl RpcQueryStats {
 /// For now there is just one, but I think there might be others later
 #[derive(Debug, From)]
 pub enum AppStat {
-    RpcQuery(RequestMetadata),
+    RpcQuery(Web3Request),
 }
 
 // TODO: move to stat_buffer.rs?
@@ -538,7 +546,7 @@ impl BufferedRpcQueryStats {
 /// We want this to run when there is **one and only one** copy of this RequestMetadata left
 /// There are often multiple copies if a request is being sent to multiple servers in parallel
 impl RpcQueryStats {
-    fn try_from_metadata(mut metadata: RequestMetadata) -> Web3ProxyResult<Self> {
+    fn try_from_metadata(metadata: Web3Request) -> Web3ProxyResult<Self> {
         // TODO: do this without a clone
         let authorization = metadata.authorization.clone();
 
@@ -547,7 +555,7 @@ impl RpcQueryStats {
         // TODO: do this without cloning. we can take their vec
         let backend_rpcs_used = metadata.backend_rpcs_used();
 
-        let request_bytes = metadata.request_bytes as u64;
+        let request_bytes = metadata.request.num_bytes() as u64;
         let response_bytes = metadata.response_bytes.load(Ordering::Relaxed);
 
         let mut error_response = metadata.error_response.load(Ordering::Relaxed);
@@ -579,7 +587,7 @@ impl RpcQueryStats {
             x => x,
         };
 
-        let cu = ComputeUnit::new(&metadata.method, metadata.chain_id, response_bytes);
+        let cu = ComputeUnit::new(metadata.request.method(), metadata.chain_id, response_bytes);
 
         let cache_hit = backend_rpcs_used.is_empty();
 
@@ -590,9 +598,7 @@ impl RpcQueryStats {
             &metadata.usd_per_cu,
         );
 
-        let method = mem::take(&mut metadata.method);
-
-        let paid_credits_used = authorization.checks.paid_credits_used;
+        let method = metadata.request.method().to_string().into();
 
         let x = Self {
             archive_request,
@@ -602,7 +608,6 @@ impl RpcQueryStats {
             compute_unit_cost,
             error_response,
             method,
-            paid_credits_used,
             request_bytes,
             response_bytes,
             response_millis,

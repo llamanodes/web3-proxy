@@ -1,10 +1,14 @@
 //! Helper functions for turning ether's BlockNumber into numbers and updating incoming queries to match.
-use crate::rpcs::many::Web3Rpcs;
+use std::time::Duration;
+
+use crate::app::Web3ProxyApp;
+use crate::jsonrpc::JsonRpcRequest;
 use crate::{
     errors::{Web3ProxyError, Web3ProxyResult},
     rpcs::blockchain::Web3ProxyBlock,
 };
 use anyhow::Context;
+use async_recursion::async_recursion;
 use derive_more::From;
 use ethers::{
     prelude::{BlockNumber, U64},
@@ -14,16 +18,16 @@ use serde_json::json;
 use tracing::{error, trace, warn};
 
 #[allow(non_snake_case)]
-pub fn BlockNumber_to_U64(block_num: BlockNumber, latest_block: &U64) -> (U64, bool) {
+pub fn BlockNumber_to_U64(block_num: BlockNumber, latest_block: U64) -> (U64, bool) {
     match block_num {
         BlockNumber::Earliest => (U64::zero(), false),
         BlockNumber::Finalized => {
             warn!("finalized block requested! not yet implemented!");
-            (*latest_block - 10, false)
+            (latest_block - 10, false)
         }
         BlockNumber::Latest => {
             // change "latest" to a number
-            (*latest_block, true)
+            (latest_block, true)
         }
         BlockNumber::Number(x) => {
             // we already have a number
@@ -32,16 +36,16 @@ pub fn BlockNumber_to_U64(block_num: BlockNumber, latest_block: &U64) -> (U64, b
         BlockNumber::Pending => {
             // modified is false because we want the backend to see "pending"
             // TODO: think more about how to handle Pending
-            (*latest_block, false)
+            (latest_block, false)
         }
         BlockNumber::Safe => {
             warn!("safe block requested! not yet implemented!");
-            (*latest_block - 3, false)
+            (latest_block - 3, false)
         }
     }
 }
 
-#[derive(Clone, Debug, Eq, From, PartialEq)]
+#[derive(Clone, Debug, Eq, From, Hash, PartialEq)]
 pub struct BlockNumAndHash(U64, H256);
 
 impl BlockNumAndHash {
@@ -55,7 +59,7 @@ impl BlockNumAndHash {
 
 impl From<&Web3ProxyBlock> for BlockNumAndHash {
     fn from(value: &Web3ProxyBlock) -> Self {
-        let n = *value.number();
+        let n = value.number();
         let h = *value.hash();
 
         Self(n, h)
@@ -64,11 +68,12 @@ impl From<&Web3ProxyBlock> for BlockNumAndHash {
 
 /// modify params to always have a block hash and not "latest"
 /// TODO: this should replace all block numbers with hashes, not just "latest"
-pub async fn clean_block_number(
-    params: &mut serde_json::Value,
+#[async_recursion]
+pub async fn clean_block_number<'a>(
+    params: &'a mut serde_json::Value,
     block_param_id: usize,
-    latest_block: &Web3ProxyBlock,
-    rpcs: &Web3Rpcs,
+    head_block: &'a Web3ProxyBlock,
+    app: Option<&'a Web3ProxyApp>,
 ) -> Web3ProxyResult<BlockNumAndHash> {
     match params.as_array_mut() {
         None => {
@@ -79,7 +84,7 @@ pub async fn clean_block_number(
             None => {
                 if params.len() == block_param_id {
                     // add the latest block number to the end of the params
-                    params.push(json!(latest_block.number()));
+                    params.push(json!(head_block.number()));
                 } else {
                     // don't modify the request. only cache with current block
                     // TODO: more useful log that include the
@@ -87,7 +92,7 @@ pub async fn clean_block_number(
                 }
 
                 // don't modify params, just cache with the current block
-                Ok(latest_block.into())
+                Ok(head_block.into())
             }
             Some(x) => {
                 // dig into the json value to find a BlockNumber or similar block identifier
@@ -99,12 +104,22 @@ pub async fn clean_block_number(
                         let block_hash: H256 =
                             serde_json::from_value(block_hash).context("decoding blockHash")?;
 
-                        let block = rpcs
-                            .block(&block_hash, None, None)
-                            .await
-                            .context("fetching block number from hash")?;
+                        if block_hash == *head_block.hash() {
+                            (head_block.into(), false)
+                        } else if let Some(app) = app {
+                            let block = app
+                                .balanced_rpcs
+                                .block(&block_hash, None, None)
+                                .await
+                                .context("fetching block number from hash")?;
 
-                        (BlockNumAndHash::from(&block), false)
+                            (BlockNumAndHash::from(&block), false)
+                        } else {
+                            return Err(anyhow::anyhow!(
+                                "app missing. cannot find block number from hash"
+                            )
+                            .into());
+                        }
                     } else {
                         return Err(anyhow::anyhow!("blockHash missing").into());
                     }
@@ -112,59 +127,69 @@ pub async fn clean_block_number(
                     // it might be a string like "latest" or a block number or a block hash
                     // TODO: "BlockNumber" needs a better name
                     // TODO: move this to a helper function?
-                    if let Ok(block_num) = serde_json::from_value::<U64>(x.clone()) {
-                        let head_block_num = *latest_block.number();
+                    let (block_num, changed) = if let Some(block_num) = x.as_u64() {
+                        (U64::from(block_num), false)
+                    } else if let Ok(block_num) = serde_json::from_value::<U64>(x.to_owned()) {
+                        (block_num, false)
+                    } else if let Ok(block_number) =
+                        serde_json::from_value::<BlockNumber>(x.to_owned())
+                    {
+                        BlockNumber_to_U64(block_number, head_block.number())
+                    } else if let Ok(block_hash) = serde_json::from_value::<H256>(x.clone()) {
+                        if block_hash == *head_block.hash() {
+                            (head_block.number(), false)
+                        } else if let Some(app) = app {
+                            // TODO: what should this max_wait be?
+                            let block = app
+                                .balanced_rpcs
+                                .block(&block_hash, None, Some(Duration::from_secs(3)))
+                                .await
+                                .context("fetching block number from hash")?;
 
-                        if block_num > head_block_num {
-                            return Err(Web3ProxyError::UnknownBlockNumber {
-                                known: head_block_num,
-                                unknown: block_num,
-                            });
+                            (block.number(), false)
+                        } else {
+                            return Err(anyhow::anyhow!(
+                                "app missing. cannot find block number from hash"
+                            )
+                            .into());
                         }
+                    } else {
+                        return Err(anyhow::anyhow!(
+                            "param not a block identifier, block number, or block hash"
+                        )
+                        .into());
+                    };
 
-                        let block_hash = rpcs
+                    let head_block_num = head_block.number();
+
+                    if block_num > head_block_num {
+                        // TODO: option to wait for the block
+                        return Err(Web3ProxyError::UnknownBlockNumber {
+                            known: head_block_num,
+                            unknown: block_num,
+                        });
+                    }
+
+                    if block_num == head_block_num {
+                        (head_block.into(), changed)
+                    } else if let Some(app) = app {
+                        let block_hash = app
+                            .balanced_rpcs
                             .block_hash(&block_num)
                             .await
                             .context("fetching block hash from number")?;
 
-                        let block = rpcs
+                        let block = app
+                            .balanced_rpcs
                             .block(&block_hash, None, None)
                             .await
                             .context("fetching block from hash")?;
 
                         // TODO: do true here? will that work for **all** methods on **all** chains? if not we need something smarter
-                        (BlockNumAndHash::from(&block), false)
-                    } else if let Ok(block_number) =
-                        serde_json::from_value::<BlockNumber>(x.clone())
-                    {
-                        let (block_num, change) =
-                            BlockNumber_to_U64(block_number, latest_block.number());
-
-                        if block_num == *latest_block.number() {
-                            (latest_block.into(), change)
-                        } else {
-                            let block_hash = rpcs
-                                .block_hash(&block_num)
-                                .await
-                                .context("fetching block hash from number")?;
-
-                            let block = rpcs
-                                .block(&block_hash, None, None)
-                                .await
-                                .context("fetching block from hash")?;
-
-                            (BlockNumAndHash::from(&block), change)
-                        }
-                    } else if let Ok(block_hash) = serde_json::from_value::<H256>(x.clone()) {
-                        let block = rpcs
-                            .block(&block_hash, None, None)
-                            .await
-                            .context("fetching block number from hash")?;
-
-                        (BlockNumAndHash::from(&block), false)
+                        (BlockNumAndHash::from(&block), changed)
                     } else {
                         return Err(anyhow::anyhow!(
-                            "param not a block identifier, block number, or block hash"
+                            "app missing. cannot find block number from hash"
                         )
                         .into());
                     }
@@ -184,21 +209,23 @@ pub async fn clean_block_number(
 }
 
 /// TODO: change this to also return the hash needed?
-#[derive(Debug, Eq, PartialEq)]
+/// this replaces any "latest" identifiers in the JsonRpcRequest with the current block number which feels like the data is structured wrong
+#[derive(Debug, Default, Hash, Eq, PartialEq)]
 pub enum CacheMode {
-    CacheSuccessForever,
-    CacheNever,
-    Cache {
+    SuccessForever,
+    Standard {
         block: BlockNumAndHash,
         /// cache jsonrpc errors (server errors are never cached)
         cache_errors: bool,
     },
-    CacheRange {
+    Range {
         from_block: BlockNumAndHash,
         to_block: BlockNumAndHash,
         /// cache jsonrpc errors (server errors are never cached)
         cache_errors: bool,
     },
+    #[default]
+    Never,
 }
 
 fn get_block_param_id(method: &str) -> Option<usize> {
@@ -227,61 +254,92 @@ fn get_block_param_id(method: &str) -> Option<usize> {
 }
 
 impl CacheMode {
-    pub async fn new(
-        method: &str,
-        params: &mut serde_json::Value,
-        head_block: &Web3ProxyBlock,
-        rpcs: &Web3Rpcs,
+    /// like `try_new`, but instead of erroring, it will default to caching with the head block
+    /// returns None if this request should not be cached
+    pub async fn new<'a>(
+        request: &'a mut JsonRpcRequest,
+        head_block: Option<&'a Web3ProxyBlock>,
+        app: Option<&'a Web3ProxyApp>,
     ) -> Self {
-        match Self::try_new(method, params, head_block, rpcs).await {
+        match Self::try_new(request, head_block, app).await {
             Ok(x) => x,
             Err(Web3ProxyError::NoBlocksKnown) => {
-                warn!(%method, ?params, "no servers available to get block from params. caching with head block");
-                CacheMode::Cache {
-                    block: head_block.into(),
-                    cache_errors: true,
+                warn!(
+                    method = %request.method,
+                    params = ?request.params,
+                    "no servers available to get block from params. caching with head block"
+                );
+                if let Some(head_block) = head_block {
+                    // TODO: strange to get NoBlocksKnown **and** have a head block. think about this more
+                    CacheMode::Standard {
+                        block: head_block.into(),
+                        cache_errors: true,
+                    }
+                } else {
+                    CacheMode::Never
                 }
             }
             Err(err) => {
-                error!(%method, ?params, ?err, "could not get block from params. caching with head block");
-                CacheMode::Cache {
-                    block: head_block.into(),
-                    cache_errors: true,
+                error!(
+                    method = %request.method,
+                    params = ?request.params,
+                    ?err,
+                    "could not get block from params. caching with head block"
+                );
+                if let Some(head_block) = head_block {
+                    CacheMode::Standard {
+                        block: head_block.into(),
+                        cache_errors: true,
+                    }
+                } else {
+                    CacheMode::Never
                 }
             }
         }
     }
 
     pub async fn try_new(
-        method: &str,
-        params: &mut serde_json::Value,
-        head_block: &Web3ProxyBlock,
-        rpcs: &Web3Rpcs,
+        request: &mut JsonRpcRequest,
+        head_block: Option<&Web3ProxyBlock>,
+        app: Option<&Web3ProxyApp>,
     ) -> Web3ProxyResult<Self> {
+        let params = &mut request.params;
+
         if matches!(params, serde_json::Value::Null) {
             // no params given. cache with the head block
-            return Ok(Self::Cache {
-                block: head_block.into(),
-                cache_errors: true,
-            });
+            if let Some(head_block) = head_block {
+                return Ok(Self::Standard {
+                    block: head_block.into(),
+                    cache_errors: true,
+                });
+            } else {
+                return Ok(Self::Never);
+            }
         }
+
+        if head_block.is_none() {
+            // since we don't have a head block, i don't trust our anything enough to cache
+            return Ok(Self::Never);
+        }
+
+        let head_block = head_block.expect("head_block was just checked above");
 
         if let Some(params) = params.as_array() {
             if params.is_empty() {
                 // no params given. cache with the head block
-                return Ok(Self::Cache {
+                return Ok(Self::Standard {
                     block: head_block.into(),
                     cache_errors: true,
                 });
             }
         }
 
-        match method {
+        match request.method.as_str() {
             "debug_traceTransaction" => {
                 // TODO: make sure re-orgs work properly!
-                Ok(CacheMode::CacheSuccessForever)
+                Ok(CacheMode::SuccessForever)
             }
-            "eth_gasPrice" => Ok(CacheMode::Cache {
+            "eth_gasPrice" => Ok(CacheMode::Standard {
                 block: head_block.into(),
                 cache_errors: false,
             }),
@@ -289,24 +347,24 @@ impl CacheMode {
                 // TODO: double check that any node can serve this
                 // TODO: can a block change? like what if it gets orphaned?
                 // TODO: make sure re-orgs work properly!
-                Ok(CacheMode::CacheSuccessForever)
+                Ok(CacheMode::SuccessForever)
             }
             "eth_getBlockByNumber" => {
                 // TODO: double check that any node can serve this
                 // TODO: CacheSuccessForever if the block is old enough
                 // TODO: make sure re-orgs work properly!
-                Ok(CacheMode::Cache {
+                Ok(CacheMode::Standard {
                     block: head_block.into(),
                     cache_errors: true,
                 })
             }
             "eth_getBlockTransactionCountByHash" => {
                 // TODO: double check that any node can serve this
-                Ok(CacheMode::CacheSuccessForever)
+                Ok(CacheMode::SuccessForever)
             }
             "eth_getLogs" => {
                 /*
-                // TODO: think about this more. this seems like it partly belongs in clean_block_number
+                // TODO: think about this more
                 // TODO: jsonrpc has a specific code for this
                 let obj = params
                     .get_mut(0)
@@ -367,7 +425,7 @@ impl CacheMode {
                     })
                 }
                 */
-                Ok(CacheMode::Cache {
+                Ok(CacheMode::Standard {
                     block: head_block.into(),
                     cache_errors: true,
                 })
@@ -375,7 +433,7 @@ impl CacheMode {
             "eth_getTransactionByHash" => {
                 // TODO: not sure how best to look these up
                 // try full nodes first. retry will use archive
-                Ok(CacheMode::Cache {
+                Ok(CacheMode::Standard {
                     block: head_block.into(),
                     cache_errors: true,
                 })
@@ -383,12 +441,12 @@ impl CacheMode {
             "eth_getTransactionByBlockHashAndIndex" => {
                 // TODO: check a Cache of recent hashes
                 // try full nodes first. retry will use archive
-                Ok(CacheMode::CacheSuccessForever)
+                Ok(CacheMode::SuccessForever)
             }
             "eth_getTransactionReceipt" => {
                 // TODO: not sure how best to look these up
                 // try full nodes first. retry will use archive
-                Ok(CacheMode::Cache {
+                Ok(CacheMode::Standard {
                     block: head_block.into(),
                     cache_errors: true,
                 })
@@ -397,29 +455,28 @@ impl CacheMode {
                 // TODO: check a Cache of recent hashes
                 // try full nodes first. retry will use archive
                 // TODO: what happens if this block is uncled later?
-                Ok(CacheMode::CacheSuccessForever)
+                Ok(CacheMode::SuccessForever)
             }
             "eth_getUncleCountByBlockHash" => {
                 // TODO: check a Cache of recent hashes
                 // try full nodes first. retry will use archive
                 // TODO: what happens if this block is uncled later?
-                Ok(CacheMode::CacheSuccessForever)
+                Ok(CacheMode::SuccessForever)
             }
             "eth_maxPriorityFeePerGas" => {
                 // TODO: this might be too aggressive. i think it can change before a block is mined
-                Ok(CacheMode::Cache {
+                Ok(CacheMode::Standard {
                     block: head_block.into(),
                     cache_errors: false,
                 })
             }
-            "net_listening" => Ok(CacheMode::CacheSuccessForever),
-            "net_version" => Ok(CacheMode::CacheSuccessForever),
+            "net_listening" => Ok(CacheMode::SuccessForever),
+            "net_version" => Ok(CacheMode::SuccessForever),
             method => match get_block_param_id(method) {
                 Some(block_param_id) => {
-                    let block =
-                        clean_block_number(params, block_param_id, head_block, rpcs).await?;
+                    let block = clean_block_number(params, block_param_id, head_block, app).await?;
 
-                    Ok(CacheMode::Cache {
+                    Ok(CacheMode::Standard {
                         block,
                         cache_errors: true,
                     })
@@ -428,12 +485,48 @@ impl CacheMode {
             },
         }
     }
+
+    pub fn cache_jsonrpc_errors(&self) -> bool {
+        match self {
+            Self::Never => false,
+            Self::SuccessForever => true,
+            Self::Standard { cache_errors, .. } => *cache_errors,
+            Self::Range { cache_errors, .. } => *cache_errors,
+        }
+    }
+
+    pub fn from_block(&self) -> Option<&BlockNumAndHash> {
+        match self {
+            Self::SuccessForever => None,
+            Self::Never => None,
+            Self::Standard { block, .. } => Some(block),
+            Self::Range { from_block, .. } => Some(from_block),
+        }
+    }
+
+    #[inline]
+    pub fn is_some(&self) -> bool {
+        !matches!(self, Self::Never)
+    }
+
+    pub fn to_block(&self) -> Option<&BlockNumAndHash> {
+        match self {
+            Self::SuccessForever => None,
+            Self::Never => None,
+            Self::Standard { block, .. } => Some(block),
+            Self::Range { to_block, .. } => Some(to_block),
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::CacheMode;
-    use crate::rpcs::{blockchain::Web3ProxyBlock, many::Web3Rpcs};
+    use crate::{
+        errors::Web3ProxyError,
+        jsonrpc::{JsonRpcId, JsonRpcRequest},
+        rpcs::blockchain::Web3ProxyBlock,
+    };
     use ethers::types::{Block, H256};
     use serde_json::json;
     use std::sync::Arc;
@@ -441,7 +534,7 @@ mod test {
     #[test_log::test(tokio::test)]
     async fn test_fee_history() {
         let method = "eth_feeHistory";
-        let mut params = json!([4, "latest", [25, 75]]);
+        let params = json!([4, "latest", [25, 75]]);
 
         let head_block = Block {
             number: Some(1.into()),
@@ -451,32 +544,32 @@ mod test {
 
         let head_block = Web3ProxyBlock::try_new(Arc::new(head_block)).unwrap();
 
-        let (empty, _handle, _ranked_rpc_reciver) =
-            Web3Rpcs::spawn(1, None, 1, 1, "test".into(), None, None)
-                .await
-                .unwrap();
+        let id = JsonRpcId::Number(9);
 
-        let x = CacheMode::try_new(method, &mut params, &head_block, &empty)
+        let mut request = JsonRpcRequest::new(id, method.to_string(), params).unwrap();
+
+        // TODO: instead of empty, check None?
+        let x = CacheMode::try_new(&mut request, Some(&head_block), None)
             .await
             .unwrap();
 
         assert_eq!(
             x,
-            CacheMode::Cache {
+            CacheMode::Standard {
                 block: (&head_block).into(),
                 cache_errors: true
             }
         );
 
         // "latest" should have been changed to the block number
-        assert_eq!(params.get(1), Some(&json!(head_block.number())));
+        assert_eq!(request.params.get(1), Some(&json!(head_block.number())));
     }
 
     #[test_log::test(tokio::test)]
     async fn test_eth_call_latest() {
         let method = "eth_call";
 
-        let mut params = json!([{"data": "0xdeadbeef", "to": "0x0000000000000000000000000000000000000000"}, "latest"]);
+        let params = json!([{"data": "0xdeadbeef", "to": "0x0000000000000000000000000000000000000000"}, "latest"]);
 
         let head_block = Block {
             number: Some(18173997.into()),
@@ -486,24 +579,61 @@ mod test {
 
         let head_block = Web3ProxyBlock::try_new(Arc::new(head_block)).unwrap();
 
-        let (empty, _handle, _ranked_rpc_reciver) =
-            Web3Rpcs::spawn(1, None, 1, 1, "test".into(), None, None)
-                .await
-                .unwrap();
+        let id = JsonRpcId::Number(99);
 
-        let x = CacheMode::try_new(method, &mut params, &head_block, &empty)
+        let mut request = JsonRpcRequest::new(id, method.to_string(), params).unwrap();
+
+        let x = CacheMode::try_new(&mut request, Some(&head_block), None)
             .await
             .unwrap();
 
         // "latest" should have been changed to the block number
-        assert_eq!(params.get(1), Some(&json!(head_block.number())));
+        assert_eq!(request.params.get(1), Some(&json!(head_block.number())));
 
         assert_eq!(
             x,
-            CacheMode::Cache {
+            CacheMode::Standard {
                 block: (&head_block).into(),
                 cache_errors: true
             }
         );
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_eth_call_future() {
+        let method = "eth_call";
+
+        let head_block_num = 18173997u64;
+        let future_block_num = head_block_num + 1;
+
+        let params = json!([{"data": "0xdeadbeef", "to": "0x0000000000000000000000000000000000000000"}, future_block_num]);
+
+        let head_block: Block<H256> = Block {
+            number: Some(head_block_num.into()),
+            hash: Some(H256::random()),
+            ..Default::default()
+        };
+
+        let head_block = Web3ProxyBlock::try_new(Arc::new(head_block)).unwrap();
+
+        let mut request = JsonRpcRequest::new(99.into(), method.to_string(), params).unwrap();
+
+        let x = CacheMode::try_new(&mut request, Some(&head_block), None)
+            .await
+            .unwrap_err();
+
+        // future blocks should get an error
+        match x {
+            Web3ProxyError::UnknownBlockNumber { known, unknown } => {
+                assert_eq!(known.as_u64(), head_block_num);
+                assert_eq!(unknown.as_u64(), future_block_num);
+            }
+            x => panic!("{:?}", x),
+        }
+
+        let x = CacheMode::new(&mut request, Some(&head_block), None).await;
+
+        // TODO: cache with the head block instead?
+        matches!(x, CacheMode::Never);
     }
 }

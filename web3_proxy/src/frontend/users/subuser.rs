@@ -1,8 +1,8 @@
 //! Handle subusers, viewing subusers, and viewing accessible rpc-keys
 use crate::app::Web3ProxyApp;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
-use crate::frontend::authorization::RpcSecretKey;
 use crate::globals::{global_db_conn, global_db_replica_conn};
+use crate::secrets::RpcSecretKey;
 use anyhow::Context;
 use axum::{
     extract::Query,
@@ -36,7 +36,7 @@ pub async fn get_keys_as_subuser(
     // First, authenticate
     let subuser = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = global_db_replica_conn().await?;
+    let db_replica = global_db_replica_conn()?;
 
     // TODO: JOIN over RPC_KEY, SUBUSER, PRIMARY_USER and return these items
 
@@ -101,7 +101,7 @@ pub async fn get_subusers(
     // First, authenticate
     let user = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = global_db_replica_conn().await?;
+    let db_replica = global_db_replica_conn()?;
 
     let rpc_key: u64 = params
         .remove("key_id")
@@ -173,7 +173,7 @@ pub async fn modify_subuser(
     // First, authenticate
     let user = app.bearer_is_authorized(bearer).await?;
 
-    let db_replica = global_db_replica_conn().await?;
+    let db_replica = global_db_replica_conn()?;
 
     trace!("Parameters are: {:?}", params);
 
@@ -257,7 +257,7 @@ pub async fn modify_subuser(
     }
 
     // TODO: There is a good chunk of duplicate logic as login-post. Consider refactoring ...
-    let db_conn = global_db_conn().await?;
+    let db_conn = global_db_conn()?;
 
     let (subuser, _subuser_rpc_keys, _status_code) = match subuser {
         None => {

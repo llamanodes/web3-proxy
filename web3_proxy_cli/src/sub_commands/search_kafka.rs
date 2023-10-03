@@ -11,9 +11,8 @@ use web3_proxy::prelude::rdkafka::{
 };
 use web3_proxy::prelude::rmp_serde;
 use web3_proxy::prelude::uuid::Uuid;
-use web3_proxy::{
-    config::TopConfig, frontend::authorization::RpcSecretKey, relational_db::connect_db,
-};
+use web3_proxy::secrets::RpcSecretKey;
+use web3_proxy::{config::TopConfig, relational_db::connect_db};
 
 /// Second subcommand.
 #[derive(FromArgs, PartialEq, Debug, Eq)]

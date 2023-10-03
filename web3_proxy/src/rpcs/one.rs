@@ -5,7 +5,7 @@ use super::request::{OpenRequestHandle, OpenRequestResult};
 use crate::app::{flatten_handle, Web3ProxyJoinHandle};
 use crate::config::{BlockAndRpc, Web3RpcConfig};
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
-use crate::frontend::authorization::RequestMetadata;
+use crate::frontend::authorization::Web3Request;
 use crate::jsonrpc::{self, JsonRpcParams, JsonRpcResultData};
 use crate::rpcs::request::RequestErrorHandler;
 use anyhow::{anyhow, Context};
@@ -34,6 +34,7 @@ use url::Url;
 #[derive(Default)]
 pub struct Web3Rpc {
     pub name: String,
+    pub chain_id: u64,
     pub block_interval: Duration,
     pub display_name: Option<String>,
     pub db_conn: Option<DatabaseConnection>,
@@ -60,7 +61,7 @@ pub struct Web3Rpc {
     /// TODO: have an enum for this so that "no limit" prints pretty?
     pub(super) block_data_limit: AtomicU64,
     /// head_block is only inside an Option so that the "Default" derive works. it will always be set.
-    pub(super) head_block: Option<watch::Sender<Option<Web3ProxyBlock>>>,
+    pub(super) head_block_sender: Option<watch::Sender<Option<Web3ProxyBlock>>>,
     /// Track head block latency.
     pub(super) head_delay: AsyncRwLock<EwmaLatency>,
     /// Track peak request latency
@@ -193,7 +194,7 @@ impl Web3Rpc {
             display_name: config.display_name,
             hard_limit,
             hard_limit_until: Some(hard_limit_until),
-            head_block: Some(head_block),
+            head_block_sender: Some(head_block),
             http_url,
             http_client,
             max_head_block_age,
@@ -238,9 +239,9 @@ impl Web3Rpc {
     /// TODO: move this to consensus.rs
     fn sort_on(&self, max_block: Option<U64>) -> (bool, Reverse<U64>, u32) {
         let mut head_block = self
-            .head_block
+            .head_block_sender
             .as_ref()
-            .and_then(|x| x.borrow().as_ref().map(|x| *x.number()))
+            .and_then(|x| x.borrow().as_ref().map(|x| x.number()))
             .unwrap_or_default();
 
         if let Some(max_block) = max_block {
@@ -389,39 +390,43 @@ impl Web3Rpc {
     }
 
     /// TODO: get rid of this now that consensus rpcs does it
-    pub fn has_block_data(&self, needed_block_num: &U64) -> bool {
-        let head_block_num = match self.head_block.as_ref().unwrap().borrow().as_ref() {
-            None => return false,
-            Some(x) => *x.number(),
-        };
+    pub fn has_block_data(&self, needed_block_num: U64) -> bool {
+        if let Some(head_block_sender) = self.head_block_sender.as_ref() {
+            // TODO: this needs a max of our overall head block number
+            let head_block_num = match head_block_sender.borrow().as_ref() {
+                None => return false,
+                Some(x) => x.number(),
+            };
 
-        // this rpc doesn't have that block yet. still syncing
-        if needed_block_num > &head_block_num {
-            trace!(
-                "{} has head {} but needs {}",
-                self,
-                head_block_num,
-                needed_block_num,
-            );
-            return false;
+            // this rpc doesn't have that block yet. still syncing
+            if needed_block_num > head_block_num {
+                trace!(
+                    "{} has head {} but needs {}",
+                    self,
+                    head_block_num,
+                    needed_block_num,
+                );
+                return false;
+            }
+
+            // if this is a pruning node, we might not actually have the block
+            let block_data_limit: U64 = self.block_data_limit();
+
+            let oldest_block_num = head_block_num.saturating_sub(block_data_limit);
+
+            if needed_block_num < oldest_block_num {
+                trace!(
+                    "{} needs {} but the oldest available is {}",
+                    self,
+                    needed_block_num,
+                    oldest_block_num
+                );
+                return false;
+            }
+            true
+        } else {
+            false
         }
-
-        // if this is a pruning node, we might not actually have the block
-        let block_data_limit: U64 = self.block_data_limit();
-
-        let oldest_block_num = head_block_num.saturating_sub(block_data_limit);
-
-        if needed_block_num < &oldest_block_num {
-            trace!(
-                "{} needs {} but the oldest available is {}",
-                self,
-                needed_block_num,
-                oldest_block_num
-            );
-            return false;
-        }
-
-        true
     }
 
     /// query the web3 provider to confirm it is on the expected chain with the expected data available
@@ -468,7 +473,7 @@ impl Web3Rpc {
         block_and_rpc_sender: &mpsc::UnboundedSender<BlockAndRpc>,
         block_map: &BlocksByHashCache,
     ) -> Web3ProxyResult<()> {
-        let head_block_sender = self.head_block.as_ref().unwrap();
+        let head_block_sender = self.head_block_sender.as_ref().unwrap();
 
         let new_head_block = match new_head_block {
             Ok(x) => {
@@ -544,7 +549,7 @@ impl Web3Rpc {
         self: &Arc<Self>,
         error_handler: Option<RequestErrorHandler>,
     ) -> Web3ProxyResult<()> {
-        let head_block = self.head_block.as_ref().unwrap().borrow().clone();
+        let head_block = self.head_block_sender.as_ref().unwrap().borrow().clone();
 
         if let Some(head_block) = head_block {
             // TODO: if head block is very old and not expected to be syncing, emit warning
@@ -552,11 +557,9 @@ impl Web3Rpc {
                 return Err(anyhow::anyhow!("head_block is too old!").into());
             }
 
-            let head_block = head_block.block;
+            let block_number = head_block.number();
 
-            let block_number = head_block.number.context("no block number")?;
-
-            let to = if let Some(txid) = head_block.transactions.last().cloned() {
+            let to = if let Some(txid) = head_block.transactions().last().cloned() {
                 let tx = self
                     .internal_request::<_, Option<Transaction>>(
                         "eth_getTransactionByHash",
@@ -944,7 +947,7 @@ impl Web3Rpc {
                 i.tick().await;
             }
         } else {
-            unimplemented!("no ws or http provider!")
+            return Err(anyhow!("no ws or http provider!").into());
         }
 
         // clear the head block. this might not be needed, but it won't hurt
@@ -961,7 +964,7 @@ impl Web3Rpc {
 
     pub async fn wait_for_request_handle(
         self: &Arc<Self>,
-        request_metadata: &Arc<RequestMetadata>,
+        web3_request: &Arc<Web3Request>,
         max_wait: Option<Duration>,
         error_handler: Option<RequestErrorHandler>,
     ) -> Web3ProxyResult<OpenRequestHandle> {
@@ -970,10 +973,7 @@ impl Web3Rpc {
         let max_wait_until = max_wait.map(|x| Instant::now() + x);
 
         loop {
-            match self
-                .try_request_handle(request_metadata, error_handler)
-                .await
-            {
+            match self.try_request_handle(web3_request, error_handler).await {
                 Ok(OpenRequestResult::Handle(handle)) => return Ok(handle),
                 Ok(OpenRequestResult::RetryAt(retry_at)) => {
                     // TODO: emit a stat?
@@ -1015,7 +1015,7 @@ impl Web3Rpc {
 
     pub async fn try_request_handle(
         self: &Arc<Self>,
-        request_metadata: &Arc<RequestMetadata>,
+        web3_request: &Arc<Web3Request>,
         error_handler: Option<RequestErrorHandler>,
     ) -> Web3ProxyResult<OpenRequestResult> {
         // TODO: if websocket is reconnecting, return an error?
@@ -1066,7 +1066,7 @@ impl Web3Rpc {
         };
 
         let handle =
-            OpenRequestHandle::new(request_metadata.clone(), self.clone(), error_handler).await;
+            OpenRequestHandle::new(web3_request.clone(), self.clone(), error_handler).await;
 
         Ok(handle.into())
     }
@@ -1078,25 +1078,23 @@ impl Web3Rpc {
         error_handler: Option<RequestErrorHandler>,
         max_wait: Option<Duration>,
     ) -> Web3ProxyResult<R> {
-        let authorization = Default::default();
+        let web3_request = Web3Request::new_internal(method.into(), params, None, max_wait).await;
 
-        self.authorized_request(method, params, &authorization, error_handler, max_wait)
+        self.authorized_request(&web3_request, error_handler, max_wait)
             .await
     }
 
-    pub async fn authorized_request<P: JsonRpcParams, R: JsonRpcResultData>(
+    pub async fn authorized_request<R: JsonRpcResultData>(
         self: &Arc<Self>,
-        method: &str,
-        params: &P,
-        request_metadata: &Arc<RequestMetadata>,
+        web3_request: &Arc<Web3Request>,
         error_handler: Option<RequestErrorHandler>,
         max_wait: Option<Duration>,
     ) -> Web3ProxyResult<R> {
         let handle = self
-            .wait_for_request_handle(request_metadata, max_wait, error_handler)
+            .wait_for_request_handle(web3_request, max_wait, error_handler)
             .await?;
 
-        let response = handle.request::<P, R>(method, params).await?;
+        let response = handle.request().await?;
         let parsed = response.parsed().await?;
         match parsed.payload {
             jsonrpc::Payload::Success { result } => Ok(result),
@@ -1174,7 +1172,7 @@ impl Serialize for Web3Rpc {
 
         // TODO: maybe this is too much data. serialize less?
         {
-            let head_block = self.head_block.as_ref().unwrap();
+            let head_block = self.head_block_sender.as_ref().unwrap();
             let head_block = head_block.borrow();
             let head_block = head_block.as_ref();
             state.serialize_field("head_block", &head_block)?;
@@ -1244,9 +1242,9 @@ impl fmt::Debug for Web3Rpc {
 
         f.field("weighted_ms", &self.weighted_peak_latency().as_millis());
 
-        if let Some(head_block_watch) = self.head_block.as_ref() {
+        if let Some(head_block_watch) = self.head_block_sender.as_ref() {
             if let Some(head_block) = head_block_watch.borrow().as_ref() {
-                f.field("head_num", head_block.number());
+                f.field("head_num", &head_block.number());
                 f.field("head_hash", head_block.hash());
             } else {
                 f.field("head_num", &None::<()>);
@@ -1293,15 +1291,15 @@ mod tests {
             automatic_block_limit: false,
             backup: false,
             block_data_limit: block_data_limit.into(),
-            head_block: Some(tx),
+            head_block_sender: Some(tx),
             ..Default::default()
         };
 
-        assert!(x.has_block_data(&0.into()));
-        assert!(x.has_block_data(&1.into()));
+        assert!(x.has_block_data(0.into()));
+        assert!(x.has_block_data(1.into()));
         assert!(x.has_block_data(head_block.number()));
-        assert!(!x.has_block_data(&(head_block.number() + 1)));
-        assert!(!x.has_block_data(&(head_block.number() + 1000)));
+        assert!(!x.has_block_data(head_block.number() + 1));
+        assert!(!x.has_block_data(head_block.number() + 1000));
     }
 
     #[test]
@@ -1327,17 +1325,17 @@ mod tests {
             automatic_block_limit: false,
             backup: false,
             block_data_limit: block_data_limit.into(),
-            head_block: Some(tx),
+            head_block_sender: Some(tx),
             ..Default::default()
         };
 
-        assert!(!x.has_block_data(&0.into()));
-        assert!(!x.has_block_data(&1.into()));
-        assert!(!x.has_block_data(&(head_block.number() - block_data_limit - 1)));
-        assert!(x.has_block_data(&(head_block.number() - block_data_limit)));
+        assert!(!x.has_block_data(0.into()));
+        assert!(!x.has_block_data(1.into()));
+        assert!(!x.has_block_data(head_block.number() - block_data_limit - 1));
+        assert!(x.has_block_data(head_block.number() - block_data_limit));
         assert!(x.has_block_data(head_block.number()));
-        assert!(!x.has_block_data(&(head_block.number() + 1)));
-        assert!(!x.has_block_data(&(head_block.number() + 1000)));
+        assert!(!x.has_block_data(head_block.number() + 1));
+        assert!(!x.has_block_data(head_block.number() + 1000));
     }
 
     /*
@@ -1380,11 +1378,11 @@ mod tests {
             head_block: AsyncRwLock::new(Some(head_block.clone())),
         };
 
-        assert!(!x.has_block_data(&0.into()));
-        assert!(!x.has_block_data(&1.into()));
-        assert!(!x.has_block_data(&head_block.number()));
-        assert!(!x.has_block_data(&(head_block.number() + 1)));
-        assert!(!x.has_block_data(&(head_block.number() + 1000)));
+        assert!(!x.has_block_data(0.into()));
+        assert!(!x.has_block_data(1.into()));
+        assert!(!x.has_block_data(head_block.number());
+        assert!(!x.has_block_data(head_block.number() + 1));
+        assert!(!x.has_block_data(head_block.number() + 1000));
     }
     */
 }

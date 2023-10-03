@@ -1,5 +1,4 @@
 use tracing::{debug, info};
-use web3_proxy::frontend::authorization::RpcSecretKey;
 use web3_proxy::prelude::anyhow::{self, Context};
 use web3_proxy::prelude::argh::{self, FromArgs};
 use web3_proxy::prelude::entities::{rpc_key, user};
@@ -9,6 +8,7 @@ use web3_proxy::prelude::sea_orm::{
     QueryFilter,
 };
 use web3_proxy::prelude::uuid::Uuid;
+use web3_proxy::secrets::RpcSecretKey;
 
 /// change a key's owner.
 #[derive(FromArgs, PartialEq, Eq, Debug)]

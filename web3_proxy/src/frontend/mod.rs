@@ -27,7 +27,7 @@ use strum::{EnumCount, EnumIter};
 use tokio::sync::broadcast;
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 use tower_http::{cors::CorsLayer, normalize_path::NormalizePathLayer, trace::TraceLayer};
-use tracing::{error_span, info};
+use tracing::{error_span, info, trace_span};
 use ulid::Ulid;
 
 /// simple keys for caching responses
@@ -278,13 +278,22 @@ pub async fn serve(
 
                 // And then we put it along with other information into the `request` span
                 // TODO: what other info should we attach? how can we attach an error and a tracing span here?
-                error_span!(
+                // TODO: how can we do a tracing_span OR an error_span?
+                let s = trace_span!(
                     "request",
                     id = %request_id,
-                    // method = %request.method(),
-                    // // don't log the path. it often includes the RPC key!
-                    // path = %request.uri().path(),
-                )
+                    method = %request.method(),
+                    path = %request.uri().path(),
+                );
+
+                if s.is_disabled() {
+                    error_span!(
+                        "request",
+                        id = %request_id,
+                    )
+                } else {
+                    s
+                }
             }), // .on_failure(|| todo!("on failure that has the request and response body so we can debug more easily")),
         )
         // 404 for any unknown routes

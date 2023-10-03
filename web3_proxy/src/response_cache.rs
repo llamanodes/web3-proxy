@@ -1,6 +1,7 @@
 use crate::{
-    block_number::BlockNumAndHash,
+    block_number::{BlockNumAndHash, CacheMode},
     errors::{Web3ProxyError, Web3ProxyResult},
+    frontend::authorization::RequestOrMethod,
     jsonrpc::{self, JsonRpcErrorData},
 };
 use derive_more::From;
@@ -18,15 +19,15 @@ use std::{
 };
 
 #[derive(Clone, Debug, Eq, From)]
-pub struct JsonRpcQueryCacheKey {
-    /// hashed params
+pub struct JsonRpcQueryCacheKey<'a> {
+    /// hashed params so that
     hash: u64,
-    from_block: Option<BlockNumAndHash>,
-    to_block: Option<BlockNumAndHash>,
-    cache_errors: bool,
+    from_block: Option<&'a BlockNumAndHash>,
+    to_block: Option<&'a BlockNumAndHash>,
+    cache_jsonrpc_errors: bool,
 }
 
-impl JsonRpcQueryCacheKey {
+impl JsonRpcQueryCacheKey<'_> {
     pub fn hash(&self) -> u64 {
         self.hash
     }
@@ -37,46 +38,42 @@ impl JsonRpcQueryCacheKey {
         self.to_block.as_ref().map(|x| x.num())
     }
     pub fn cache_errors(&self) -> bool {
-        self.cache_errors
+        self.cache_jsonrpc_errors
     }
 }
 
-impl PartialEq for JsonRpcQueryCacheKey {
+impl PartialEq for JsonRpcQueryCacheKey<'_> {
     fn eq(&self, other: &Self) -> bool {
         self.hash.eq(&other.hash)
     }
 }
 
-impl Hash for JsonRpcQueryCacheKey {
+impl Hash for JsonRpcQueryCacheKey<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // TODO: i feel like this hashes twice. oh well
         self.hash.hash(state);
     }
 }
 
-impl JsonRpcQueryCacheKey {
-    pub fn new(
-        from_block: Option<BlockNumAndHash>,
-        to_block: Option<BlockNumAndHash>,
-        method: &str,
-        params: &serde_json::Value,
-        cache_errors: bool,
-    ) -> Self {
-        let from_block_hash = from_block.as_ref().map(|x| x.hash());
-        let to_block_hash = to_block.as_ref().map(|x| x.hash());
+impl<'a> JsonRpcQueryCacheKey<'a> {
+    pub fn new(cache_mode: &'a CacheMode, request: &'a RequestOrMethod) -> Self {
+        // TODO: do this without clone
+        let from_block = cache_mode.from_block();
+        let to_block = cache_mode.to_block();
+        let cache_jsonrpc_errors = cache_mode.cache_jsonrpc_errors();
 
         let mut hasher = DefaultHashBuilder::default().build_hasher();
 
-        from_block_hash.hash(&mut hasher);
-        to_block_hash.hash(&mut hasher);
+        from_block.hash(&mut hasher);
+        to_block.hash(&mut hasher);
 
-        method.hash(&mut hasher);
+        request.method().hash(&mut hasher);
 
         // TODO: make sure preserve_order feature is OFF
         // TODO: is there a faster way to do this?
-        params.to_string().hash(&mut hasher);
+        request.params().to_string().hash(&mut hasher);
 
-        cache_errors.hash(&mut hasher);
+        cache_jsonrpc_errors.hash(&mut hasher);
 
         let hash = hasher.finish();
 
@@ -84,7 +81,7 @@ impl JsonRpcQueryCacheKey {
             hash,
             from_block,
             to_block,
-            cache_errors,
+            cache_jsonrpc_errors,
         }
     }
 }

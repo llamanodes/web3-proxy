@@ -2,7 +2,7 @@ use super::{AppStat, FlushedStats, RpcQueryKey};
 use crate::app::Web3ProxyJoinHandle;
 use crate::caches::{RpcSecretKeyCache, UserBalanceCache};
 use crate::errors::Web3ProxyResult;
-use crate::frontend::authorization::RequestMetadata;
+use crate::frontend::authorization::{AuthorizationType, Web3Request};
 use crate::globals::global_db_conn;
 use crate::stats::RpcQueryStats;
 use derive_more::From;
@@ -136,9 +136,12 @@ impl StatBuffer {
         let mut db_save_interval =
             interval(Duration::from_secs(self.db_save_interval_seconds as u64));
 
+        // TODO: this should be a FlushedStats that we add to
         let mut total_frontend_requests = 0;
         let mut tsdb_frontend_requests = 0;
+        let mut tsdb_internal_requests = 0;
         let mut db_frontend_requests = 0;
+        let mut db_internal_requests = 0;
 
         loop {
             select! {
@@ -154,17 +157,19 @@ impl StatBuffer {
                 _ = db_save_interval.tick() => {
                     // TODO: tokio spawn this! (but with a semaphore on db_save_interval)
                     trace!("DB save internal tick");
-                    let (count, new_frontend_requests) = self.save_relational_stats().await;
+                    let (count, new_frontend_requests, new_internal_requests) = self.save_relational_stats().await;
                     if count > 0 {
                         db_frontend_requests += new_frontend_requests;
+                        db_internal_requests += new_internal_requests;
                         debug!("Saved {} stats for {} requests to the relational db", count, new_frontend_requests);
                     }
                 }
                 _ = tsdb_save_interval.tick() => {
                     trace!("TSDB save internal tick");
-                    let (count, new_frontend_requests) = self.save_tsdb_stats().await;
+                    let (count, new_frontend_requests, new_internal_requests) = self.save_tsdb_stats().await;
                     if count > 0 {
                         tsdb_frontend_requests += new_frontend_requests;
+                        tsdb_internal_requests += new_internal_requests;
                         debug!("Saved {} stats for {} requests to the tsdb @ {}/{}", count, new_frontend_requests, self.tsdb_window, self.num_tsdb_windows);
                     }
                 }
@@ -174,7 +179,10 @@ impl StatBuffer {
                             let flushed_stats = self._flush(&mut stat_receiver).await?;
 
                             tsdb_frontend_requests += flushed_stats.timeseries_frontend_requests;
+                            tsdb_internal_requests += flushed_stats.timeseries_internal_requests;
+
                             db_frontend_requests += flushed_stats.relational_frontend_requests;
+                            db_internal_requests += flushed_stats.relational_internal_requests;
 
                             if let Err(err) = x.send(flushed_stats) {
                                 error!(?flushed_stats, ?err, "unable to notify about flushed stats");
@@ -218,34 +226,32 @@ impl StatBuffer {
         let flushed_stats = self._flush(&mut stat_receiver).await?;
 
         tsdb_frontend_requests += flushed_stats.timeseries_frontend_requests;
-        db_frontend_requests += flushed_stats.relational_frontend_requests;
+        tsdb_internal_requests += flushed_stats.timeseries_internal_requests;
 
-        // TODO: if these totals don't match, something is wrong!
-        info!(%total_frontend_requests, %tsdb_frontend_requests, %db_frontend_requests, "accounting and stat save loop complete");
+        db_frontend_requests += flushed_stats.relational_frontend_requests;
+        db_internal_requests += flushed_stats.relational_internal_requests;
+
+        // TODO: if these totals don't match, something is wrong! log something or maybe even return an error
+        info!(%total_frontend_requests, %tsdb_frontend_requests, %tsdb_internal_requests, %db_frontend_requests, %db_internal_requests, "accounting and stat save loop complete");
 
         Ok(())
     }
 
     async fn _buffer_app_stat(&mut self, stat: AppStat) -> Web3ProxyResult<u64> {
         match stat {
-            AppStat::RpcQuery(request_metadata) => {
-                self._buffer_request_metadata(request_metadata).await
-            }
+            AppStat::RpcQuery(web3_request) => self._buffer_web3_request(web3_request).await,
         }
     }
 
-    async fn _buffer_request_metadata(
-        &mut self,
-        request_metadata: RequestMetadata,
-    ) -> Web3ProxyResult<u64> {
+    async fn _buffer_web3_request(&mut self, web3_request: Web3Request) -> Web3ProxyResult<u64> {
         // we convert on this side of the channel so that we don't slow down the request
-        let stat = RpcQueryStats::try_from_metadata(request_metadata)?;
+        let stat = RpcQueryStats::try_from_metadata(web3_request)?;
 
         // update the latest balance
         // do this BEFORE emitting any stats
         let mut approximate_balance_remaining = 0.into();
         let mut active_premium = false;
-        if let Ok(db_conn) = global_db_conn().await {
+        if let Ok(db_conn) = global_db_conn() {
             let user_id = stat.authorization.checks.user_id;
 
             // update the user's balance
@@ -359,15 +365,19 @@ impl StatBuffer {
 
         // flush the buffers
         // TODO: include frontend counts here
-        let (tsdb_count, tsdb_frontend_requests) = self.save_tsdb_stats().await;
-        let (relational_count, relational_frontend_requests) = self.save_relational_stats().await;
+        let (timeseries_count, timeseries_frontend_requests, timeseries_internal_requests) =
+            self.save_tsdb_stats().await;
+        let (relational_count, relational_frontend_requests, relational_internal_requests) =
+            self.save_relational_stats().await;
 
         // notify
         let flushed_stats = FlushedStats {
-            timeseries: tsdb_count,
-            timeseries_frontend_requests: tsdb_frontend_requests,
+            timeseries: timeseries_count,
+            timeseries_frontend_requests,
+            timeseries_internal_requests,
             relational: relational_count,
             relational_frontend_requests,
+            relational_internal_requests,
         };
 
         trace!(?flushed_stats);
@@ -375,14 +385,16 @@ impl StatBuffer {
         Ok(flushed_stats)
     }
 
-    async fn save_relational_stats(&mut self) -> (usize, u64) {
+    async fn save_relational_stats(&mut self) -> (usize, u64, u64) {
         let mut count = 0;
         let mut frontend_requests = 0;
+        let mut internal_requests = 0;
 
-        if let Ok(db_conn) = global_db_conn().await {
+        if let Ok(db_conn) = global_db_conn() {
             count = self.accounting_db_buffer.len();
             for (key, stat) in self.accounting_db_buffer.drain() {
                 let new_frontend_requests = stat.frontend_requests;
+                let is_internal = matches!(key.authorization_type, AuthorizationType::Internal);
 
                 // TODO: batch saves
                 // TODO: i don't like passing key (which came from the stat) to the function on the stat. but it works for now
@@ -397,20 +409,24 @@ impl StatBuffer {
                     .await
                 {
                     // TODO: save the stat and retry later!
-                    error!(?err, %count, %new_frontend_requests, "unable to save accounting entry!");
+                    error!(?err, %count, %new_frontend_requests, %is_internal, "unable to save accounting entry!");
+                } else if is_internal {
+                    internal_requests += new_frontend_requests;
                 } else {
                     frontend_requests += new_frontend_requests;
                 };
             }
         }
 
-        (count, frontend_requests)
+        (count, frontend_requests, internal_requests)
     }
 
     // TODO: bucket should be an enum so that we don't risk typos
-    async fn save_tsdb_stats(&mut self) -> (usize, u64) {
+    // TODO: return type should be a struct so we dont mix up the values
+    async fn save_tsdb_stats(&mut self) -> (usize, u64, u64) {
         let mut count = 0;
         let mut frontend_requests = 0;
+        let mut internal_requests = 0;
 
         if let Some(influxdb_client) = self.influxdb_client.as_ref() {
             // every time we save, we increment the tsdb_window. this is used to ensure that stats don't overwrite others because the keys match
@@ -434,6 +450,7 @@ impl StatBuffer {
             for (key, stat) in self.global_timeseries_buffer.drain() {
                 // TODO: i don't like passing key (which came from the stat) to the function on the stat. but it works for now
                 let new_frontend_requests = stat.frontend_requests;
+                let is_internal = matches!(key.authorization_type, AuthorizationType::Internal);
 
                 match stat
                     .build_timeseries_point("global_proxy", self.chain_id, key, uniq)
@@ -441,11 +458,16 @@ impl StatBuffer {
                 {
                     Ok(point) => {
                         points.push(point);
-                        frontend_requests += new_frontend_requests;
+
+                        if is_internal {
+                            internal_requests += new_frontend_requests;
+                        } else {
+                            frontend_requests += new_frontend_requests;
+                        };
                     }
                     Err(err) => {
                         // TODO: what can cause this?
-                        error!(?err, "unable to build global stat!");
+                        error!(?err, %new_frontend_requests, % is_internal, "unable to build global stat!");
                     }
                 };
             }
@@ -497,6 +519,6 @@ impl StatBuffer {
             }
         }
 
-        (count, frontend_requests)
+        (count, frontend_requests, internal_requests)
     }
 }

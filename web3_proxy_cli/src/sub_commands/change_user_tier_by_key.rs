@@ -1,4 +1,3 @@
-use web3_proxy::frontend::authorization::RpcSecretKey;
 use web3_proxy::prelude::anyhow::{self, Context};
 use web3_proxy::prelude::argh::{self, FromArgs};
 use web3_proxy::prelude::entities::{rpc_key, user, user_tier};
@@ -9,6 +8,7 @@ use web3_proxy::prelude::migration::sea_orm::{
 use web3_proxy::prelude::serde_json::json;
 use web3_proxy::prelude::tracing::{debug, info};
 use web3_proxy::prelude::uuid::Uuid;
+use web3_proxy::secrets::RpcSecretKey;
 
 /// change a user's tier.
 #[derive(FromArgs, PartialEq, Eq, Debug)]

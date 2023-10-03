@@ -26,7 +26,7 @@ struct ConsensusRpcData {
 
 impl ConsensusRpcData {
     fn new(rpc: &Web3Rpc, head: &Web3ProxyBlock) -> Self {
-        let head_block_num = *head.number();
+        let head_block_num = head.number();
 
         let block_data_limit = rpc.block_data_limit();
 
@@ -39,8 +39,8 @@ impl ConsensusRpcData {
     }
 
     // TODO: take an enum for the type of data (hrtc)
-    fn data_available(&self, block_num: &U64) -> bool {
-        *block_num >= self.oldest_block_num && *block_num <= self.head_block_num
+    fn data_available(&self, block_num: U64) -> bool {
+        block_num >= self.oldest_block_num && block_num <= self.head_block_num
     }
 }
 
@@ -119,7 +119,7 @@ impl RankedRpcs {
         let mut votes: Vec<_> = votes
             .into_iter()
             .filter_map(|(block, (rpcs, sum_soft_limit))| {
-                if *block.number() < max_lag_block
+                if block.number() < max_lag_block
                     || sum_soft_limit < min_sum_soft_limit
                     || rpcs.len() < min_synced_rpcs
                 {
@@ -133,7 +133,7 @@ impl RankedRpcs {
         // sort the votes
         votes.sort_by_key(|(block, sum_soft_limit, _)| {
             (
-                Reverse(*block.number()),
+                Reverse(block.number()),
                 // TODO: block total difficulty (if we have it)
                 Reverse(*sum_soft_limit),
                 // TODO: median/peak latency here?
@@ -158,7 +158,7 @@ impl RankedRpcs {
                     continue;
                 }
 
-                if *x_head.number() < max_lag_block {
+                if x_head.number() < max_lag_block {
                     // server is too far behind
                     continue;
                 }
@@ -167,7 +167,7 @@ impl RankedRpcs {
             }
 
             ranked_rpcs
-                .sort_by_cached_key(|x| x.sort_for_load_balancing_on(Some(*best_block.number())));
+                .sort_by_cached_key(|x| x.sort_for_load_balancing_on(Some(best_block.number())));
 
             // consensus found!
             trace!(?ranked_rpcs);
@@ -201,16 +201,17 @@ impl RankedRpcs {
     }
 
     /// will tell you if waiting will eventually  should wait for a block
-    /// TODO: return if backup will be needed to serve the request
-    /// TODO: serve now if a backup server has the data
+    /// TODO: error if backup will be needed to serve the request?
+    /// TODO: serve now if a backup server has the data?
     /// TODO: also include method (or maybe an enum representing the different prune types)
     pub fn should_wait_for_block(
         &self,
-        needed_block_num: Option<&U64>,
+        min_block_num: Option<U64>,
+        max_block_num: Option<U64>,
         skip_rpcs: &[Arc<Web3Rpc>],
     ) -> ShouldWaitForBlock {
         for rpc in self.inner.iter() {
-            match self.rpc_will_work_eventually(rpc, needed_block_num, skip_rpcs) {
+            match self.rpc_will_work_eventually(rpc, min_block_num, max_block_num, skip_rpcs) {
                 ShouldWaitForBlock::NeverReady => continue,
                 x => return x,
             }
@@ -220,7 +221,7 @@ impl RankedRpcs {
     }
 
     /// TODO: change this to take a min and a max
-    pub fn has_block_data(&self, rpc: &Web3Rpc, block_num: &U64) -> bool {
+    pub fn has_block_data(&self, rpc: &Web3Rpc, block_num: U64) -> bool {
         self.rpc_data
             .get(rpc)
             .map(|x| x.data_available(block_num))
@@ -233,7 +234,8 @@ impl RankedRpcs {
     pub fn rpc_will_work_eventually(
         &self,
         rpc: &Arc<Web3Rpc>,
-        needed_block_num: Option<&U64>,
+        min_block_num: Option<U64>,
+        max_block_num: Option<U64>,
         skip_rpcs: &[Arc<Web3Rpc>],
     ) -> ShouldWaitForBlock {
         if skip_rpcs.contains(rpc) {
@@ -241,9 +243,20 @@ impl RankedRpcs {
             return ShouldWaitForBlock::NeverReady;
         }
 
-        if let Some(needed_block_num) = needed_block_num {
+        if let Some(min_block_num) = min_block_num {
+            if !self.has_block_data(rpc, min_block_num) {
+                trace!(
+                    "{} is missing min_block_num ({}). will not work eventually",
+                    rpc,
+                    min_block_num,
+                );
+                return ShouldWaitForBlock::NeverReady;
+            }
+        }
+
+        if let Some(needed_block_num) = max_block_num {
             if let Some(rpc_data) = self.rpc_data.get(rpc) {
-                match rpc_data.head_block_num.cmp(needed_block_num) {
+                match rpc_data.head_block_num.cmp(&needed_block_num) {
                     Ordering::Less => {
                         trace!("{} is behind. let it catch up", rpc);
                         // TODO: what if this is a pruned rpc that is behind by a lot, and the block is old, too?
@@ -277,8 +290,8 @@ impl RankedRpcs {
     pub fn rpc_will_work_now(
         &self,
         skip: &[Arc<Web3Rpc>],
-        min_block_needed: Option<&U64>,
-        max_block_needed: Option<&U64>,
+        min_block_needed: Option<U64>,
+        max_block_needed: Option<U64>,
         rpc: &Arc<Web3Rpc>,
     ) -> bool {
         if skip.contains(rpc) {
@@ -344,7 +357,7 @@ impl Web3Rpcs {
     /// note: you probably want to use `head_block` instead
     /// TODO: return a ref?
     pub fn head_block_num(&self) -> Option<U64> {
-        self.head_block().map(|x| *x.number())
+        self.head_block().map(|x| x.number())
     }
 
     pub fn synced(&self) -> bool {
@@ -489,7 +502,7 @@ impl ConsensusFinder {
             Some(old_consensus_connections) => {
                 let old_head_block = &old_consensus_connections.head_block;
 
-                match consensus_head_block.number().cmp(old_head_block.number()) {
+                match consensus_head_block.number().cmp(&old_head_block.number()) {
                     Ordering::Equal => {
                         // multiple blocks with the same fork!
                         if consensus_head_block.hash() == old_head_block.hash() {
@@ -805,7 +818,7 @@ impl ConsensusFinder {
 
         trace!("max_lag_block_number: {}", max_lag_block_number);
 
-        let lowest_block_number = lowest_block.number().max(&max_lag_block_number);
+        let lowest_block_number = lowest_block.number().max(max_lag_block_number);
 
         // TODO: should lowest block number be set such that the rpc won't ever go backwards?
         trace!("safe lowest_block_number: {}", lowest_block_number);

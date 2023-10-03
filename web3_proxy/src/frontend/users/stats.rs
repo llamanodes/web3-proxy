@@ -48,7 +48,7 @@ pub async fn user_revert_logs_get(
     response.insert("chain_id", json!(chain_id));
     response.insert("query_start", json!(query_start.timestamp() as u64));
 
-    let db_replica = global_db_replica_conn().await?;
+    let db_replica = global_db_replica_conn()?;
 
     let uks = rpc_key::Entity::find()
         .filter(rpc_key::Column::UserId.eq(user.id))
@@ -141,7 +141,7 @@ pub async fn user_mysql_stats_get(
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
     let user = app.bearer_is_authorized(bearer).await?;
-    let db_replica = global_db_replica_conn().await?;
+    let db_replica = global_db_replica_conn()?;
 
     // Fetch everything from mysql, joined
     let stats = rpc_key::Entity::find()

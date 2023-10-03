@@ -48,8 +48,10 @@ pub struct CliConfig {
 pub struct TopConfig {
     pub app: AppConfig,
     pub balanced_rpcs: HashMap<String, Web3RpcConfig>,
-    pub private_rpcs: Option<HashMap<String, Web3RpcConfig>>,
-    pub bundler_4337_rpcs: Option<HashMap<String, Web3RpcConfig>>,
+    #[serde(default = "Default::default")]
+    pub private_rpcs: HashMap<String, Web3RpcConfig>,
+    #[serde(default = "Default::default")]
+    pub bundler_4337_rpcs: HashMap<String, Web3RpcConfig>,
     /// unknown config options get put here
     #[serde(flatten, default = "HashMap::default")]
     pub extra: HashMap<String, serde_json::Value>,
@@ -292,6 +294,8 @@ pub fn average_block_interval(chain_id: u64) -> Duration {
         8453 => Duration::from_secs(2),
         // arbitrum
         42161 => Duration::from_millis(500),
+        // web3-proxy tests
+        999_001_999 => Duration::from_secs(10),
         // anything else
         _ => {
             let default = 10;

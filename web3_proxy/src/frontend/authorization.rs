@@ -3,20 +3,22 @@
 use super::rpc_proxy_ws::ProxyMode;
 use crate::app::{Web3ProxyApp, APP_USER_AGENT};
 use crate::balance::Balance;
+use crate::block_number::CacheMode;
 use crate::caches::RegisteredUserRateLimitKey;
-use crate::compute_units::default_usd_per_cu;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
-use crate::globals::global_db_replica_conn;
-use crate::jsonrpc::{self, JsonRpcParams, JsonRpcRequest};
+use crate::globals::{global_db_replica_conn, APP};
+use crate::jsonrpc::{self, JsonRpcId, JsonRpcParams, JsonRpcRequest};
+use crate::kafka::KafkaDebugLogger;
+use crate::response_cache::JsonRpcQueryCacheKey;
 use crate::rpcs::blockchain::Web3ProxyBlock;
 use crate::rpcs::one::Web3Rpc;
+use crate::secrets::RpcSecretKey;
 use crate::stats::{AppStat, BackendRequests};
 use crate::user_token::UserBearerToken;
 use anyhow::Context;
 use axum::headers::authorization::Bearer;
 use axum::headers::{Header, Origin, Referer, UserAgent};
 use chrono::Utc;
-use core::fmt;
 use deferred_rate_limiter::{DeferredRateLimitResult, DeferredRateLimiter};
 use derivative::Derivative;
 use derive_more::From;
@@ -29,88 +31,26 @@ use http::HeaderValue;
 use ipnet::IpNet;
 use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-use rdkafka::message::{Header as KafkaHeader, OwnedHeaders as KafkaOwnedHeaders, OwnedMessage};
-use rdkafka::producer::{FutureProducer, FutureRecord};
-use rdkafka::util::Timeout as KafkaTimeout;
 use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::{RedisRateLimitResult, RedisRateLimiter};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::json;
+use serde_json::value::RawValue;
 use std::borrow::Cow;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::hash::{Hash, Hasher};
 use std::mem;
 use std::num::NonZeroU64;
-use std::sync::atomic::{self, AtomicBool, AtomicI64, AtomicU64, AtomicUsize};
+use std::sync::atomic::{self, AtomicBool, AtomicI64, AtomicU64};
 use std::time::Duration;
 use std::{net::IpAddr, str::FromStr, sync::Arc};
 use tokio::sync::RwLock as AsyncRwLock;
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
-use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tracing::{error, trace, warn};
 use ulid::Ulid;
 use uuid::Uuid;
-
-/// This lets us use UUID and ULID while we transition to only ULIDs
-/// TODO: custom deserialize that can also go from String to Ulid
-#[derive(Copy, Clone, Deserialize)]
-pub enum RpcSecretKey {
-    Ulid(Ulid),
-    Uuid(Uuid),
-}
-
-impl RpcSecretKey {
-    pub fn new() -> Self {
-        Ulid::new().into()
-    }
-
-    fn as_128(&self) -> u128 {
-        match self {
-            Self::Ulid(x) => x.0,
-            Self::Uuid(x) => x.as_u128(),
-        }
-    }
-}
-
-impl PartialEq for RpcSecretKey {
-    fn eq(&self, other: &Self) -> bool {
-        self.as_128() == other.as_128()
-    }
-}
-
-impl Eq for RpcSecretKey {}
-
-impl Debug for RpcSecretKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Ulid(x) => Debug::fmt(x, f),
-            Self::Uuid(x) => {
-                let x = Ulid::from(x.as_u128());
-
-                Debug::fmt(&x, f)
-            }
-        }
-    }
-}
-
-/// always serialize as a ULID.
-impl Serialize for RpcSecretKey {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match self {
-            Self::Ulid(x) => x.serialize(serializer),
-            Self::Uuid(x) => {
-                let x: Ulid = x.to_owned().into();
-
-                x.serialize(serializer)
-            }
-        }
-    }
-}
 
 /// TODO: should this have IpAddr and Origin or AuthorizationChecks?
 #[derive(Debug)]
@@ -125,7 +65,7 @@ pub enum RateLimitResult {
     UnknownKey,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 pub enum AuthorizationType {
     Internal,
     Frontend,
@@ -180,15 +120,6 @@ pub struct Authorization {
     pub authorization_type: AuthorizationType,
 }
 
-pub struct KafkaDebugLogger {
-    topic: String,
-    key: Vec<u8>,
-    headers: KafkaOwnedHeaders,
-    producer: FutureProducer,
-    num_requests: AtomicUsize,
-    num_responses: AtomicUsize,
-}
-
 /// Ulids and Uuids matching the same bits hash the same
 impl Hash for RpcSecretKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -198,167 +129,43 @@ impl Hash for RpcSecretKey {
     }
 }
 
-impl fmt::Debug for KafkaDebugLogger {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("KafkaDebugLogger")
-            .field("topic", &self.topic)
-            .finish_non_exhaustive()
-    }
-}
-
-type KafkaLogResult = Result<(i32, i64), (rdkafka::error::KafkaError, OwnedMessage)>;
-
-impl KafkaDebugLogger {
-    fn try_new(
-        app: &Web3ProxyApp,
-        authorization: Arc<Authorization>,
-        head_block_num: Option<&U64>,
-        kafka_topic: &str,
-        request_ulid: Ulid,
-    ) -> Option<Arc<Self>> {
-        let kafka_producer = app.kafka_producer.clone()?;
-
-        let kafka_topic = kafka_topic.to_string();
-
-        let rpc_secret_key_id = authorization
-            .checks
-            .rpc_secret_key_id
-            .map(|x| x.get())
-            .unwrap_or_default();
-
-        let kafka_key =
-            rmp_serde::to_vec(&rpc_secret_key_id).expect("ids should always serialize with rmp");
-
-        let chain_id = app.config.chain_id;
-
-        let head_block_num = head_block_num
-            .copied()
-            .or_else(|| app.balanced_rpcs.head_block_num());
-
-        // TODO: would be nice to have the block hash too
-
-        // another item is added with the response, so initial_capacity is +1 what is needed here
-        let kafka_headers = KafkaOwnedHeaders::new_with_capacity(6)
-            .insert(KafkaHeader {
-                key: "rpc_secret_key_id",
-                value: authorization
-                    .checks
-                    .rpc_secret_key_id
-                    .map(|x| x.to_string())
-                    .as_ref(),
-            })
-            .insert(KafkaHeader {
-                key: "ip",
-                value: Some(&authorization.ip.to_string()),
-            })
-            .insert(KafkaHeader {
-                key: "request_ulid",
-                value: Some(&request_ulid.to_string()),
-            })
-            .insert(KafkaHeader {
-                key: "head_block_num",
-                value: head_block_num.map(|x| x.to_string()).as_ref(),
-            })
-            .insert(KafkaHeader {
-                key: "chain_id",
-                value: Some(&chain_id.to_le_bytes()),
-            });
-
-        // save the key and headers for when we log the response
-        let x = Self {
-            topic: kafka_topic,
-            key: kafka_key,
-            headers: kafka_headers,
-            producer: kafka_producer,
-            num_requests: 0.into(),
-            num_responses: 0.into(),
-        };
-
-        let x = Arc::new(x);
-
-        Some(x)
-    }
-
-    fn background_log(&self, payload: Vec<u8>) -> JoinHandle<KafkaLogResult> {
-        let topic = self.topic.clone();
-        let key = self.key.clone();
-        let producer = self.producer.clone();
-        let headers = self.headers.clone();
-
-        let f = async move {
-            let record = FutureRecord::to(&topic)
-                .key(&key)
-                .payload(&payload)
-                .headers(headers);
-
-            let produce_future =
-                producer.send(record, KafkaTimeout::After(Duration::from_secs(5 * 60)));
-
-            let kafka_response = produce_future.await;
-
-            if let Err((err, msg)) = kafka_response.as_ref() {
-                error!("produce kafka request: {} - {:?}", err, msg);
-                // TODO: re-queue the msg? log somewhere else like a file on disk?
-                // TODO: this is bad and should probably trigger an alarm
-            };
-
-            kafka_response
-        };
-
-        tokio::spawn(f)
-    }
-
-    /// for opt-in debug usage, log the request to kafka
-    /// TODO: generic type for request
-    pub fn log_debug_request(&self, request: &JsonRpcRequest) -> JoinHandle<KafkaLogResult> {
-        // TODO: is rust message pack a good choice? try rkyv instead
-        let payload =
-            rmp_serde::to_vec(&request).expect("requests should always serialize with rmp");
-
-        self.num_requests.fetch_add(1, atomic::Ordering::Relaxed);
-
-        self.background_log(payload)
-    }
-
-    pub fn log_debug_response<R>(&self, response: &R) -> JoinHandle<KafkaLogResult>
-    where
-        R: serde::Serialize,
-    {
-        let payload =
-            rmp_serde::to_vec(&response).expect("requests should always serialize with rmp");
-
-        self.num_responses.fetch_add(1, atomic::Ordering::Relaxed);
-
-        self.background_log(payload)
-    }
+#[derive(Debug, Default, From, Serialize)]
+pub enum RequestOrMethod {
+    Request(JsonRpcRequest),
+    /// sometimes we don't have a full request. for example, when we are logging a websocket subscription
+    Method(Cow<'static, str>, usize),
+    #[default]
+    None,
 }
 
 /// TODO: instead of a bunch of atomics, this should probably use a RwLock
 #[derive(Debug, Derivative)]
 #[derivative(Default)]
-pub struct RequestMetadata {
+pub struct Web3Request {
     /// TODO: set archive_request during the new instead of after
     /// TODO: this is more complex than "requires a block older than X height". different types of data can be pruned differently
     pub archive_request: AtomicBool,
 
     pub authorization: Arc<Authorization>,
 
+    pub cache_mode: CacheMode,
+
+    /// TODO: this should probably be in a global config. although maybe if we run multiple chains in one process this will be useful
     pub chain_id: u64,
 
+    pub head_block: Option<Web3ProxyBlock>,
+
+    /// TODO: this should be in a global config. not copied to every single request
     pub usd_per_cu: Decimal,
 
-    pub request_ulid: Ulid,
-
-    /// Size of the JSON request. Does not include headers or things like that.
-    pub request_bytes: usize,
-
-    /// The JSON-RPC request method.
-    pub method: Cow<'static, str>,
+    pub request: RequestOrMethod,
 
     /// Instant that the request was received (or at least close to it)
     /// We use Instant and not timestamps to avoid problems with leap seconds and similar issues
     #[derivative(Default(value = "Instant::now()"))]
     pub start_instant: Instant,
+    #[derivative(Default(value = "Instant::now() + Duration::from_secs(295)"))]
+    pub expire_instant: Instant,
     /// if this is empty, there was a cache_hit
     /// otherwise, it is populated with any rpc servers that were used by this request
     pub backend_requests: BackendRequests,
@@ -394,47 +201,45 @@ impl Default for Authorization {
     }
 }
 
-impl RequestMetadata {
-    pub fn proxy_mode(&self) -> ProxyMode {
-        self.authorization.checks.proxy_mode
-    }
-}
-
-#[derive(From)]
-pub enum RequestOrMethod<'a> {
-    /// jsonrpc method (or similar label) and the size that the request should count as (sometimes 0)
-    Method(&'a str, usize),
-    Request(&'a JsonRpcRequest),
-}
-
-impl<'a> RequestOrMethod<'a> {
-    fn method(&self) -> Cow<'static, str> {
-        let x = match self {
-            Self::Request(x) => x.method.to_string(),
-            Self::Method(x, _) => x.to_string(),
-        };
-
-        x.into()
+impl RequestOrMethod {
+    pub fn id(&self) -> Box<RawValue> {
+        match self {
+            Self::Request(x) => x.id.clone(),
+            Self::Method(_, _) => Default::default(),
+            Self::None => Default::default(),
+        }
     }
 
-    fn jsonrpc_request(&self) -> Option<&JsonRpcRequest> {
+    pub fn method(&self) -> &str {
+        match self {
+            Self::Request(x) => x.method.as_str(),
+            Self::Method(x, _) => x,
+            Self::None => "unknown",
+        }
+    }
+
+    /// TODO: should this panic on Self::None|Self::Method?
+    pub fn params(&self) -> &serde_json::Value {
+        match self {
+            Self::Request(x) => &x.params,
+            Self::Method(..) => &serde_json::Value::Null,
+            Self::None => &serde_json::Value::Null,
+        }
+    }
+
+    pub fn jsonrpc_request(&self) -> Option<&JsonRpcRequest> {
         match self {
             Self::Request(x) => Some(x),
             _ => None,
         }
     }
 
-    fn num_bytes(&self) -> usize {
+    pub fn num_bytes(&self) -> usize {
         match self {
-            RequestOrMethod::Method(_, num_bytes) => *num_bytes,
-            RequestOrMethod::Request(x) => x.num_bytes(),
+            Self::Method(_, num_bytes) => *num_bytes,
+            Self::Request(x) => x.num_bytes(),
+            Self::None => 0,
         }
-    }
-}
-
-impl<'a> From<&'a str> for RequestOrMethod<'a> {
-    fn from(value: &'a str) -> Self {
-        Self::Method(value, 0)
     }
 }
 
@@ -470,110 +275,59 @@ impl ResponseOrBytes<'_> {
     }
 }
 
-impl RequestMetadata {
-    pub async fn new<'a, R: Into<RequestOrMethod<'a>>>(
-        app: &Web3ProxyApp,
+impl Web3Request {
+    #[allow(clippy::too_many_arguments)]
+    async fn new_with_options(
         authorization: Arc<Authorization>,
-        request: R,
-        head_block: Option<&Web3ProxyBlock>,
+        chain_id: u64,
+        head_block: Option<Web3ProxyBlock>,
+        kafka_debug_logger: Option<Arc<KafkaDebugLogger>>,
+        max_wait: Option<Duration>,
+        mut request: RequestOrMethod,
+        stat_sender: Option<mpsc::UnboundedSender<AppStat>>,
+        usd_per_cu: Decimal,
+        app: Option<&Web3ProxyApp>,
     ) -> Arc<Self> {
-        let request = request.into();
+        let start_instant = Instant::now();
 
-        let method = request.method();
+        // TODO: get this default from config, or from user settings
+        // 5 minutes with a buffer for other things being slow
+        let expire_instant = start_instant + max_wait.unwrap_or_else(|| Duration::from_secs(295));
 
-        let request_bytes = request.num_bytes();
+        // let request: RequestOrMethod = request.into();
 
-        // TODO: modify the request here? I don't really like that very much. but its a sure way to get archive_request set correctly
-
-        // TODO: add the Ulid at the haproxy or amazon load balancer level? investigate OpenTelemetry
-        let request_ulid = Ulid::new();
-
-        let kafka_debug_logger = if matches!(authorization.checks.proxy_mode, ProxyMode::Debug) {
-            KafkaDebugLogger::try_new(
-                app,
-                authorization.clone(),
-                head_block.map(|x| x.number()),
-                "web3_proxy:rpc",
-                request_ulid,
-            )
-        } else {
-            None
-        };
-
+        // we VERY INTENTIONALLY log to kafka BEFORE calculating the cache key
+        // this is because calculating the cache_key may modify the params!
+        // for example, if the request specifies "latest" as the block number, we replace it with the actual latest block number
         if let Some(ref kafka_debug_logger) = kafka_debug_logger {
-            if let Some(request) = request.jsonrpc_request() {
-                // TODO: channels might be more ergonomic than spawned futures
-                // spawned things run in parallel easier but generally need more Arcs
-                kafka_debug_logger.log_debug_request(request);
-            } else {
-                // there probably isn't a new request attached to this metadata.
-                // this happens with websocket subscriptions
-            }
+            // TODO: channels might be more ergonomic than spawned futures
+            // spawned things run in parallel easier but generally need more Arcs
+            kafka_debug_logger.log_debug_request(&request);
         }
 
-        let chain_id = app.config.chain_id;
-
-        let x = Self {
-            archive_request: false.into(),
-            authorization,
-            backend_requests: Default::default(),
-            chain_id,
-            error_response: false.into(),
-            kafka_debug_logger,
-            method,
-            no_servers: 0.into(),
-            request_bytes,
-            request_ulid,
-            response_bytes: 0.into(),
-            response_from_backup_rpc: false.into(),
-            response_millis: 0.into(),
-            response_timestamp: 0.into(),
-            start_instant: Instant::now(),
-            stat_sender: app.stat_sender.clone(),
-            usd_per_cu: app.config.usd_per_cu.unwrap_or_default(),
-            user_error_response: false.into(),
+        // now that kafka has logged the user's original params, we can calculate the cache key
+        let cache_mode = match &mut request {
+            RequestOrMethod::Request(x) => CacheMode::new(x, head_block.as_ref(), app).await,
+            _ => CacheMode::Never,
         };
 
-        Arc::new(x)
-    }
-
-    pub fn new_internal<P: JsonRpcParams>(chain_id: u64, method: &str, params: &P) -> Arc<Self> {
-        let authorization = Arc::new(Authorization::internal().unwrap());
-        let request_ulid = Ulid::new();
-        let method = method.to_string().into();
-
-        // TODO: how can we get this?
-        let stat_sender = None;
-
-        // TODO: how can we do this efficiently? having to serialize sucks
-        let request_bytes = json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": method,
-            "params": params,
-        })
-        .to_string()
-        .len();
-
-        // TODO: we should be getting this from config instead!
-        let usd_per_cu = default_usd_per_cu(chain_id);
-
         let x = Self {
             archive_request: false.into(),
             authorization,
             backend_requests: Default::default(),
+            cache_mode,
             chain_id,
             error_response: false.into(),
-            kafka_debug_logger: None,
-            method,
+            expire_instant,
+            head_block: head_block.clone(),
+            kafka_debug_logger,
             no_servers: 0.into(),
-            request_bytes,
-            request_ulid,
+            request,
             response_bytes: 0.into(),
             response_from_backup_rpc: false.into(),
             response_millis: 0.into(),
             response_timestamp: 0.into(),
-            start_instant: Instant::now(),
+            start_instant,
             stat_sender,
             usd_per_cu,
             user_error_response: false.into(),
@@ -582,8 +336,125 @@ impl RequestMetadata {
         Arc::new(x)
     }
 
+    pub async fn new_with_app(
+        app: &Web3ProxyApp,
+        authorization: Arc<Authorization>,
+        max_wait: Option<Duration>,
+        request: RequestOrMethod,
+        head_block: Option<Web3ProxyBlock>,
+    ) -> Arc<Self> {
+        // TODO: get this out of tracing instead (where we have a String from Amazon's LB)
+        let request_ulid = Ulid::new();
+
+        let kafka_debug_logger = if matches!(authorization.checks.proxy_mode, ProxyMode::Debug) {
+            KafkaDebugLogger::try_new(
+                app,
+                authorization.clone(),
+                head_block.as_ref().map(|x| x.number()),
+                "web3_proxy:rpc",
+                request_ulid,
+            )
+        } else {
+            None
+        };
+
+        let chain_id = app.config.chain_id;
+
+        let stat_sender = app.stat_sender.clone();
+
+        let usd_per_cu = app.config.usd_per_cu.unwrap_or_default();
+
+        Self::new_with_options(
+            authorization,
+            chain_id,
+            head_block,
+            kafka_debug_logger,
+            max_wait,
+            request,
+            stat_sender,
+            usd_per_cu,
+            Some(app),
+        )
+        .await
+    }
+
+    pub async fn new_internal<P: JsonRpcParams>(
+        method: String,
+        params: &P,
+        head_block: Option<Web3ProxyBlock>,
+        max_wait: Option<Duration>,
+    ) -> Arc<Self> {
+        let authorization = Arc::new(Authorization::internal().unwrap());
+
+        // TODO: we need a real id! increment a counter on the app
+        let id = JsonRpcId::Number(1);
+
+        // TODO: this seems inefficient
+        let request = JsonRpcRequest::new(id, method, json!(params)).unwrap();
+
+        if let Some(app) = APP.get() {
+            Self::new_with_app(app, authorization, max_wait, request.into(), head_block).await
+        } else {
+            Self::new_with_options(
+                authorization,
+                0,
+                head_block,
+                None,
+                max_wait,
+                request.into(),
+                None,
+                Default::default(),
+                None,
+            )
+            .await
+        }
+    }
+
+    #[inline]
     pub fn backend_rpcs_used(&self) -> Vec<Arc<Web3Rpc>> {
         self.backend_requests.lock().clone()
+    }
+
+    pub fn cache_key(&self) -> Option<u64> {
+        match &self.cache_mode {
+            CacheMode::Never => None,
+            x => {
+                let x = JsonRpcQueryCacheKey::new(x, &self.request).hash();
+
+                Some(x)
+            }
+        }
+    }
+
+    #[inline]
+    pub fn cache_jsonrpc_errors(&self) -> bool {
+        self.cache_mode.cache_jsonrpc_errors()
+    }
+
+    #[inline]
+    pub fn id(&self) -> Box<RawValue> {
+        self.request.id()
+    }
+
+    pub fn max_block_needed(&self) -> Option<U64> {
+        self.cache_mode.to_block().map(|x| *x.num())
+    }
+
+    pub fn min_block_needed(&self) -> Option<U64> {
+        if self.archive_request.load(atomic::Ordering::Relaxed) {
+            Some(U64::zero())
+        } else {
+            self.cache_mode.from_block().map(|x| *x.num())
+        }
+    }
+
+    pub fn ttl(&self) -> Duration {
+        self.expire_instant
+            .saturating_duration_since(Instant::now())
+    }
+
+    pub fn ttl_expired(&self) -> bool {
+        self.expire_instant < Instant::now()
     }
 
     pub fn try_send_stat(mut self) -> Web3ProxyResult<()> {
@@ -648,11 +519,16 @@ impl RequestMetadata {
         }
     }
 
+    #[inline]
+    pub fn proxy_mode(&self) -> ProxyMode {
+        self.authorization.checks.proxy_mode
+    }
+
     // TODO: helper function to duplicate? needs to clear request_bytes, and all the atomics tho...
 }
 
 // TODO: is this where the panic comes from?
-impl Drop for RequestMetadata {
+impl Drop for Web3Request {
     fn drop(&mut self) {
         if self.stat_sender.is_some() {
             // turn `&mut self` into `self`
@@ -1076,7 +952,7 @@ impl Web3ProxyApp {
         let user_bearer_token = UserBearerToken::try_from(bearer)?;
 
         // get the attached address from the database for the given auth_token.
-        let db_replica = global_db_replica_conn().await?;
+        let db_replica = global_db_replica_conn()?;
 
         let user_bearer_uuid: Uuid = user_bearer_token.into();
 
@@ -1193,7 +1069,7 @@ impl Web3ProxyApp {
         let x = self
             .rpc_secret_key_cache
             .try_get_with_by_ref(rpc_secret_key, async move {
-                let db_replica = global_db_replica_conn().await?;
+                let db_replica = global_db_replica_conn()?;
 
                 // TODO: join the user table to this to return the User? we don't always need it
                 // TODO: join on secondary users

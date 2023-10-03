@@ -1,9 +1,10 @@
 use std::num::NonZeroU64;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{error, info};
 use web3_proxy::app::BILLING_PERIOD_SECONDS;
 use web3_proxy::config::TopConfig;
-use web3_proxy::frontend::authorization::{Authorization, RequestMetadata, RpcSecretKey};
+use web3_proxy::frontend::authorization::{Authorization, RequestOrMethod, Web3Request};
 use web3_proxy::prelude::anyhow::{self, Context};
 use web3_proxy::prelude::argh::{self, FromArgs};
 use web3_proxy::prelude::chrono;
@@ -20,8 +21,8 @@ use web3_proxy::prelude::moka::future::Cache;
 use web3_proxy::prelude::parking_lot::Mutex;
 use web3_proxy::prelude::tokio::sync::{broadcast, mpsc};
 use web3_proxy::prelude::tokio::time::Instant;
-use web3_proxy::prelude::ulid::Ulid;
 use web3_proxy::rpcs::one::Web3Rpc;
+use web3_proxy::secrets::RpcSecretKey;
 use web3_proxy::stats::StatBuffer;
 
 #[derive(FromArgs, PartialEq, Eq, Debug)]
@@ -180,42 +181,43 @@ impl MigrateStatsToV2SubCommand {
                         .map(|_| Arc::new(Web3Rpc::default()))
                         .collect();
 
-                    let request_ulid = Ulid::new();
-
                     let chain_id = x.chain_id;
 
-                    // Create RequestMetadata
-                    let request_metadata = RequestMetadata {
+                    let method = x
+                        .method
+                        .clone()
+                        .unwrap_or_else(|| "unknown".to_string())
+                        .into();
+
+                    let request = RequestOrMethod::Method(method, int_request_bytes as usize);
+
+                    // Create Web3Request
+                    let web3_request = Web3Request {
                         archive_request: x.archive_request.into(),
                         authorization: authorization.clone(),
                         backend_requests: Mutex::new(backend_rpcs),
                         chain_id,
                         error_response: x.error_response.into(),
+                        head_block: None,
                         // debug data is in kafka, not mysql or influx
                         kafka_debug_logger: None,
-                        method: x
-                            .method
-                            .clone()
-                            .unwrap_or_else(|| "unknown".to_string())
-                            .into(),
+                        request,
                         // This is not relevant in the new version
                         no_servers: 0.into(),
-                        // Get the mean of all the request bytes
-                        request_bytes: int_request_bytes as usize,
                         response_bytes: int_response_bytes.into(),
                         // We did not initially record this data
                         response_from_backup_rpc: false.into(),
                         response_timestamp: x.period_datetime.timestamp().into(),
                         response_millis: int_response_millis.into(),
-                        // This is overwritten later on
-                        start_instant: Instant::now(),
                         stat_sender: Some(stat_sender.clone()),
-                        request_ulid,
                         user_error_response: false.into(),
                         usd_per_cu: top_config.app.usd_per_cu.unwrap_or_default(),
+                        cache_mode: Default::default(),
+                        start_instant: Instant::now(),
+                        expire_instant: Instant::now() + Duration::from_secs(1),
                     };
 
-                    request_metadata.try_send_stat()?;
+                    web3_request.try_send_stat()?;
                 }
             }
 

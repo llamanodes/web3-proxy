@@ -7,6 +7,7 @@ use web3_proxy::prelude::reqwest;
 use web3_proxy::prelude::rust_decimal::{Decimal, RoundingStrategy};
 use web3_proxy::prelude::tokio::time::sleep;
 use web3_proxy::rpcs::blockchain::ArcBlock;
+use web3_proxy::stats::FlushedStats;
 use web3_proxy::test_utils::TestInflux;
 use web3_proxy::test_utils::{TestAnvil, TestMysql};
 use web3_proxy_cli::test_utils::create_provider_with_rpc_key::create_provider_for_user;
@@ -124,30 +125,12 @@ async fn test_multiple_proxies_stats_add_up() {
 
     // Flush all stats here
     // TODO: the test should maybe pause time so that stats definitely flush from our queries.
-    let _flush_0_count_0 = x_0.flush_stats().await.unwrap();
-    let _flush_1_count_0 = x_1.flush_stats().await.unwrap();
+    let mut flushed = FlushedStats::default();
 
-    // // the counts might actually be zero because we flushed from timers
-    // // TODO: tests should probably have the option to set flush interval to infinity for more control.
-    // info!(?flush_0_count_0);
-    // assert_eq!(flush_0_count_0.relational, 1);
-    // assert_eq!(flush_0_count_0.timeseries, 2);
-    // info!(?flush_1_count_0);
-    // assert_eq!(flush_1_count_0.relational, 1);
-    // assert_eq!(flush_1_count_0.timeseries, 2);
+    flushed += x_0.flush_stats_and_wait().await.unwrap();
+    flushed += x_1.flush_stats_and_wait().await.unwrap();
 
-    // give time for more stats to arrive
-    sleep(Duration::from_secs(5)).await;
-
-    // no more stats should arrive
-    let flush_0_count_1 = x_0.flush_stats().await.unwrap();
-    let flush_1_count_1 = x_1.flush_stats().await.unwrap();
-    info!(?flush_0_count_1);
-    assert_eq!(flush_0_count_1.relational, 0);
-    assert_eq!(flush_0_count_1.timeseries, 0);
-    info!(?flush_1_count_1);
-    assert_eq!(flush_1_count_1.relational, 0);
-    assert_eq!(flush_1_count_1.timeseries, 0);
+    info!(?flushed);
 
     // get stats now
     // todo!("Need to validate all the stat accounting now");

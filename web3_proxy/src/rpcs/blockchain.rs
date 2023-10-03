@@ -4,7 +4,6 @@ use super::many::Web3Rpcs;
 use super::one::Web3Rpc;
 use crate::config::{average_block_interval, BlockAndRpc};
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
-use derive_more::From;
 use ethers::prelude::{Block, TxHash, H256, U64};
 use moka::future::Cache;
 use serde::ser::SerializeStruct;
@@ -23,14 +22,9 @@ pub type ArcBlock = Arc<Block<TxHash>>;
 pub type BlocksByHashCache = Cache<H256, Web3ProxyBlock>;
 pub type BlocksByNumberCache = Cache<U64, H256>;
 
-/// A block and its age.
-#[derive(Clone, Debug, Default, From)]
-pub struct Web3ProxyBlock {
-    pub block: ArcBlock,
-    /// number of seconds this block was behind the current time when received
-    /// this is only set if the block is from a subscription
-    pub received_age: Option<u64>,
-}
+/// A block and its age with a less verbose serialized format
+#[derive(Clone, Debug, Default)]
+pub struct Web3ProxyBlock(ArcBlock);
 
 impl Serialize for Web3ProxyBlock {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -43,10 +37,10 @@ impl Serialize for Web3ProxyBlock {
         state.serialize_field("age", &self.age())?;
 
         let block = json!({
-            "hash": self.block.hash,
-            "parent_hash": self.block.parent_hash,
-            "number": self.block.number,
-            "timestamp": self.block.timestamp,
+            "hash": self.0.hash,
+            "parent_hash": self.0.parent_hash,
+            "number": self.0.number,
+            "timestamp": self.0.timestamp,
         });
 
         state.serialize_field("block", &block)?;
@@ -57,7 +51,7 @@ impl Serialize for Web3ProxyBlock {
 
 impl PartialEq for Web3ProxyBlock {
     fn eq(&self, other: &Self) -> bool {
-        match (self.block.hash, other.block.hash) {
+        match (self.0.hash, other.0.hash) {
             (None, None) => true,
             (Some(_), None) => false,
             (None, Some(_)) => false,
@@ -70,34 +64,24 @@ impl Eq for Web3ProxyBlock {}
 
 impl Hash for Web3ProxyBlock {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.block.hash.hash(state);
+        self.0.hash.hash(state);
     }
 }
 
 impl Web3ProxyBlock {
-    /// A new block has arrived over a subscription
+    /// A new block has arrived over a subscription. skip it if its empty
     pub fn try_new(block: ArcBlock) -> Option<Self> {
         if block.number.is_none() || block.hash.is_none() {
             return None;
         }
 
-        let mut x = Self {
-            block,
-            received_age: None,
-        };
-
-        // no need to recalulate lag every time
-        // if the head block gets too old, a health check restarts this connection
-        // TODO: emit a stat for received_age
-        x.received_age = Some(x.age().as_secs());
-
-        Some(x)
+        Some(Self(block))
     }
 
     pub fn age(&self) -> Duration {
         let now = chrono::Utc::now().timestamp();
 
-        let block_timestamp = self.block.timestamp.as_u32() as i64;
+        let block_timestamp = self.0.timestamp.as_u32() as i64;
 
         let x = if block_timestamp < now {
             // this server is still syncing from too far away to serve requests
@@ -112,44 +96,27 @@ impl Web3ProxyBlock {
 
     #[inline(always)]
     pub fn parent_hash(&self) -> &H256 {
-        &self.block.parent_hash
+        &self.0.parent_hash
     }
 
     #[inline(always)]
     pub fn hash(&self) -> &H256 {
-        self.block
-            .hash
-            .as_ref()
-            .expect("saved blocks must have a hash")
+        self.0.hash.as_ref().expect("saved blocks must have a hash")
     }
 
     #[inline(always)]
-    pub fn number(&self) -> &U64 {
-        self.block
-            .number
-            .as_ref()
-            .expect("saved blocks must have a number")
+    pub fn number(&self) -> U64 {
+        self.0.number.expect("saved blocks must have a number")
     }
 
+    #[inline(always)]
+    pub fn transactions(&self) -> &[TxHash] {
+        &self.0.transactions
+    }
+
+    #[inline(always)]
     pub fn uncles(&self) -> &[H256] {
-        &self.block.uncles
-    }
-}
-
-impl TryFrom<ArcBlock> for Web3ProxyBlock {
-    type Error = Web3ProxyError;
-
-    fn try_from(x: ArcBlock) -> Result<Self, Self::Error> {
-        if x.number.is_none() || x.hash.is_none() {
-            return Err(Web3ProxyError::NoBlockNumberOrHash);
-        }
-
-        let b = Web3ProxyBlock {
-            block: x,
-            received_age: None,
-        };
-
-        Ok(b)
+        &self.0.uncles
     }
 }
 
@@ -162,6 +129,14 @@ impl Display for Web3ProxyBlock {
             self.hash(),
             self.age().as_secs()
         )
+    }
+}
+
+impl TryFrom<ArcBlock> for Web3ProxyBlock {
+    type Error = Web3ProxyError;
+
+    fn try_from(block: ArcBlock) -> Result<Self, Self::Error> {
+        Self::try_new(block).ok_or(Web3ProxyError::NoBlocksKnown)
     }
 }
 
@@ -187,7 +162,7 @@ impl Web3Rpcs {
 
             // TODO: if there is an existing entry with a different block_hash,
             // TODO: use entry api to handle changing existing entries
-            self.blocks_by_number.insert(*block_num, block_hash).await;
+            self.blocks_by_number.insert(block_num, block_hash).await;
 
             for uncle in block.uncles() {
                 self.blocks_by_hash.invalidate(uncle).await;
@@ -277,7 +252,7 @@ impl Web3Rpcs {
             // double check that it matches the blocks_by_number cache
             let cached_hash = self
                 .blocks_by_number
-                .get_with_by_ref(block.number(), async { *hash })
+                .get_with(block.number(), async { *hash })
                 .await;
 
             if cached_hash == *hash {
@@ -327,7 +302,13 @@ impl Web3Rpcs {
 
         match block {
             Some(block) => {
-                let block = self.try_cache_block(block.try_into()?, false).await?;
+                let block = self
+                    .try_cache_block(
+                        Web3ProxyBlock::try_new(block)
+                            .ok_or(Web3ProxyError::UnknownBlockHash(*hash))?,
+                        false,
+                    )
+                    .await?;
                 Ok(block)
             }
             None => Err(Web3ProxyError::UnknownBlockHash(*hash)),
@@ -365,7 +346,7 @@ impl Web3Rpcs {
 
         // be sure the requested block num exists
         // TODO: is this okay? what if we aren't synced?!
-        let mut head_block_num = *consensus_head_receiver
+        let mut head_block_num = consensus_head_receiver
             .borrow_and_update()
             .as_ref()
             .web3_context("no consensus head block")?
@@ -386,7 +367,7 @@ impl Web3Rpcs {
                 consensus_head_receiver.changed().await?;
 
                 if let Some(head) = consensus_head_receiver.borrow_and_update().as_ref() {
-                    head_block_num = *head.number();
+                    head_block_num = head.number();
                 }
             }
         }
@@ -398,7 +379,11 @@ impl Web3Rpcs {
             .await?
             .ok_or(Web3ProxyError::NoBlocksKnown)?;
 
-        let block = Web3ProxyBlock::try_from(response)?;
+        let block =
+            Web3ProxyBlock::try_new(response).ok_or(Web3ProxyError::UnknownBlockNumber {
+                known: head_block_num,
+                unknown: *num,
+            })?;
 
         // the block was fetched using eth_getBlockByNumber, so it should have all fields and be on the heaviest chain
         let block = self.try_cache_block(block, true).await?;

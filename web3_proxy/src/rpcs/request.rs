@@ -1,8 +1,8 @@
 use super::one::Web3Rpc;
 use crate::errors::{Web3ProxyErrorContext, Web3ProxyResult};
-use crate::frontend::authorization::{Authorization, AuthorizationType, RequestMetadata};
+use crate::frontend::authorization::{Authorization, AuthorizationType, Web3Request};
 use crate::globals::{global_db_conn, DB_CONN};
-use crate::jsonrpc::{self, JsonRpcParams, JsonRpcResultData};
+use crate::jsonrpc::{self, JsonRpcResultData};
 use chrono::Utc;
 use derive_more::From;
 use entities::revert_log;
@@ -28,9 +28,8 @@ pub enum OpenRequestResult {
 
 /// Make RPC requests through this handle and drop it when you are done.
 /// Opening this handle checks rate limits. Developers, try to keep opening a handle and using it as close together as possible
-#[derive(Debug)]
 pub struct OpenRequestHandle {
-    request_metadata: Arc<RequestMetadata>,
+    web3_request: Arc<Web3Request>,
     error_handler: RequestErrorHandler,
     rpc: Arc<Web3Rpc>,
 }
@@ -63,6 +62,15 @@ struct EthCallFirstParams {
     data: Option<Bytes>,
 }
 
+impl std::fmt::Debug for OpenRequestHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenRequestHandle")
+            .field("method", &self.web3_request.request.method())
+            .field("rpc", &self.rpc.name)
+            .finish_non_exhaustive()
+    }
+}
+
 impl From<Level> for RequestErrorHandler {
     fn from(level: Level) -> Self {
         match level {
@@ -90,7 +98,7 @@ impl Authorization {
             }
         };
 
-        let db_conn = global_db_conn().await?;
+        let db_conn = global_db_conn()?;
 
         // TODO: should the database set the timestamp?
         // we intentionally use "now" and not the time the request started
@@ -133,7 +141,7 @@ impl Drop for OpenRequestHandle {
 
 impl OpenRequestHandle {
     pub async fn new(
-        request_metadata: Arc<RequestMetadata>,
+        web3_request: Arc<Web3Request>,
         rpc: Arc<Web3Rpc>,
         error_handler: Option<RequestErrorHandler>,
     ) -> Self {
@@ -146,7 +154,7 @@ impl OpenRequestHandle {
         let error_handler = error_handler.unwrap_or_default();
 
         Self {
-            request_metadata,
+            web3_request,
             error_handler,
             rpc,
         }
@@ -165,17 +173,18 @@ impl OpenRequestHandle {
     /// By having the request method here, we ensure that the rate limiter was called and connection counts were properly incremented
     /// depending on how things are locked, you might need to pass the provider in
     /// we take self to ensure this function only runs once
-    pub async fn request<P: JsonRpcParams, R: JsonRpcResultData + serde::Serialize>(
+    pub async fn request<R: JsonRpcResultData + serde::Serialize>(
         self,
-        method: &str,
-        params: &P,
     ) -> Result<jsonrpc::SingleResponse<R>, ProviderError> {
         // TODO: use tracing spans
         // TODO: including params in this log is way too verbose
         // trace!(rpc=%self.rpc, %method, "request");
         trace!("requesting from {}", self.rpc);
 
-        let authorization = &self.request_metadata.authorization;
+        let method = self.web3_request.request.method();
+        let params = self.web3_request.request.params();
+
+        let authorization = &self.web3_request.authorization;
 
         match &authorization.authorization_type {
             AuthorizationType::Frontend => {
@@ -204,8 +213,7 @@ impl OpenRequestHandle {
         {
             let params: serde_json::Value = serde_json::to_value(params)?;
             let request = jsonrpc::JsonRpcRequest::new(
-                // TODO: proper id
-                jsonrpc::JsonRpcId::Number(1),
+                self.web3_request.id().into(),
                 method.to_string(),
                 params,
             )
@@ -216,7 +224,7 @@ impl OpenRequestHandle {
                     jsonrpc::SingleResponse::read_if_short(
                         response,
                         1024,
-                        self.request_metadata.clone(),
+                        self.web3_request.clone(),
                     )
                     .await
                 }
@@ -226,7 +234,9 @@ impl OpenRequestHandle {
             p.request(method, params)
                 .await
                 // TODO: Id here
-                .map(|result| jsonrpc::ParsedResponse::from_result(result, None).into())
+                .map(|result| {
+                    jsonrpc::ParsedResponse::from_result(result, Default::default()).into()
+                })
         } else {
             return Err(ProviderError::CustomError(
                 "no provider configured!".to_string(),
@@ -255,9 +265,9 @@ impl OpenRequestHandle {
                 if !["eth_call", "eth_estimateGas"].contains(&method) {
                     // trace!(%method, "skipping save on revert");
                     RequestErrorHandler::TraceLevel
-                } else if DB_CONN.read().await.is_ok() {
+                } else if DB_CONN.read().is_ok() {
                     let log_revert_chance =
-                        self.request_metadata.authorization.checks.log_revert_chance;
+                        self.web3_request.authorization.checks.log_revert_chance;
 
                     if log_revert_chance == 0 {
                         // trace!(%method, "no chance. skipping save on revert");
@@ -435,6 +445,8 @@ impl OpenRequestHandle {
         tokio::spawn(async move {
             self.rpc.peak_latency.as_ref().unwrap().report(latency);
             self.rpc.median_latency.as_ref().unwrap().record(latency);
+
+            // TODO: app median latency
         });
 
         response
