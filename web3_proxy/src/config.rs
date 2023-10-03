@@ -294,6 +294,8 @@ pub fn average_block_interval(chain_id: u64) -> Duration {
         8453 => Duration::from_secs(2),
         // arbitrum
         42161 => Duration::from_millis(500),
+        // web3-proxy tests
+        999_001_999 => Duration::from_secs(10),
         // anything else
         _ => {
             let default = 10;
