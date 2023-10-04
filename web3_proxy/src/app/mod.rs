@@ -1365,15 +1365,15 @@ impl Web3ProxyApp {
                 // TODO: timeout
                 // TODO: change this to send serially until we get a success
 
-                let result = self
+                let mut result = self
                     .balanced_rpcs
-                    .try_proxy_connection::<serde_json::Value>(
+                    .try_send_all_synced_connections::<serde_json::Value>(
                         web3_request,
+                        Some(Duration::from_secs(30)),
+                        Some(crate::rpcs::request::RequestErrorHandler::DebugLevel),
+                        None,
                     )
-                    .await?
-                    .parsed()
-                    .await?
-                    .into_result();
+                    .await;
 
                 // if we got "null" or "", it is probably because the tx is old. retry on nodes with old block data
                 // TODO: this feels fragile. how should we do this better/
@@ -1391,22 +1391,21 @@ impl Web3ProxyApp {
                         .archive_request
                         .store(true, atomic::Ordering::Relaxed);
 
-                    self
+                    // TODO: we don't actually want try_send_all. we want the first non-null, non-error response
+                    result = self
                         .balanced_rpcs
-                        .try_proxy_connection::<Arc<RawValue>>(
+                        .try_send_all_synced_connections::<serde_json::Value>(
                             web3_request,
-                            // Some(Duration::from_secs(30)),
-                            // // TODO: should this be block 0 instead?
-                            // Some(&U64::one()),
-                            // // TODO: is this a good way to allow lagged archive nodes a try
-                            // Some(&head_block_num.saturating_sub(5.into()).clamp(U64::one(), U64::MAX)),
+                            Some(Duration::from_secs(30)),
+                            Some(crate::rpcs::request::RequestErrorHandler::DebugLevel),
+                            None,
                         )
-                        .await?
-                } else {
-                    jsonrpc::ParsedResponse::from_value(result?, web3_request.id()).into()
+                        .await;
                 }
 
                 // TODO: if parsed is an error, return a null instead
+
+                jsonrpc::ParsedResponse::from_value(result?, web3_request.id()).into()
             }
             // TODO: eth_gasPrice that does awesome magic to predict the future
             "eth_hashrate" => jsonrpc::ParsedResponse::from_value(json!(U64::zero()), web3_request.id()).into(),

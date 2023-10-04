@@ -22,7 +22,6 @@ use moka::future::CacheBuilder;
 use parking_lot::RwLock;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
-use serde_json::value::RawValue;
 use std::borrow::Cow;
 use std::cmp::min_by_key;
 use std::fmt::{self, Display};
@@ -370,12 +369,12 @@ impl Web3Rpcs {
     }
 
     /// Send the same request to all the handles. Returning the most common success or most common error.
-    /// TODO: option to return the fastest response and handles for all the others instead?
-    pub async fn try_send_parallel_requests(
+    /// TODO: option to return the fastest (non-null, non-error) response and handles for all the others instead?
+    pub async fn try_send_parallel_requests<R: JsonRpcResultData>(
         &self,
         active_request_handles: Vec<OpenRequestHandle>,
         max_wait: Option<Duration>,
-    ) -> Result<Arc<RawValue>, Web3ProxyError> {
+    ) -> Result<R, Web3ProxyError> {
         // TODO: if only 1 active_request_handles, do self.try_send_request?
 
         let max_wait = max_wait.unwrap_or_else(|| Duration::from_secs(300));
@@ -384,7 +383,7 @@ impl Web3Rpcs {
         let responses = active_request_handles
             .into_iter()
             .map(|active_request_handle| async move {
-                let result: Result<Result<Arc<RawValue>, Web3ProxyError>, Web3ProxyError> =
+                let result: Result<Result<R, Web3ProxyError>, Web3ProxyError> =
                     timeout(max_wait, async {
                         match active_request_handle.request().await {
                             Ok(response) => match response.parsed().await {
@@ -400,7 +399,7 @@ impl Web3Rpcs {
                 result.flatten()
             })
             .collect::<FuturesUnordered<_>>()
-            .collect::<Vec<Result<Arc<RawValue>, Web3ProxyError>>>()
+            .collect::<Vec<Result<R, Web3ProxyError>>>()
             .await;
 
         // TODO: Strings are not great keys, but we can't use RawValue or ProviderError as keys because they don't implement Hash or Eq
@@ -1049,13 +1048,13 @@ impl Web3Rpcs {
 
     /// be sure there is a timeout on this or it might loop forever
     #[allow(clippy::too_many_arguments)]
-    pub async fn try_send_all_synced_connections(
+    pub async fn try_send_all_synced_connections<R: JsonRpcResultData>(
         self: &Arc<Self>,
         web3_request: &Arc<Web3Request>,
         max_wait: Option<Duration>,
         error_level: Option<RequestErrorHandler>,
         max_sends: Option<usize>,
-    ) -> Web3ProxyResult<Arc<RawValue>> {
+    ) -> Web3ProxyResult<R> {
         let mut watch_consensus_rpcs = self.watch_ranked_rpcs.subscribe();
 
         // todo!() we are inconsistent with max_wait and web3_request.expires_at
