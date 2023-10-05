@@ -1708,7 +1708,9 @@ impl Web3ProxyApp {
                                             if let Some(x) = x.lock().take() {
                                                 Ok(jsonrpc::SingleResponse::Stream(x))
                                             } else {
-                                                let err: Web3ProxyError = anyhow::anyhow!("stream was already taken. please report this in Discord").into();
+                                                let method = web3_request.request.method();
+                                                let params = web3_request.request.params();
+                                                let err: Web3ProxyError = anyhow::anyhow!("stream was already taken. please report this in Discord. method={:?} params={:?}", method, params).into();
 
                                                 Err(Arc::new(err))
                                             }
