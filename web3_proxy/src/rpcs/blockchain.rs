@@ -24,7 +24,7 @@ pub type BlocksByNumberCache = Cache<U64, H256>;
 
 /// A block and its age with a less verbose serialized format
 #[derive(Clone, Debug, Default)]
-pub struct Web3ProxyBlock(ArcBlock);
+pub struct Web3ProxyBlock(pub ArcBlock);
 
 impl Serialize for Web3ProxyBlock {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
