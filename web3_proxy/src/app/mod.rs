@@ -1369,22 +1369,32 @@ impl Web3ProxyApp {
 
                 let mut result = self
                     .balanced_rpcs
-                    .try_send_all_synced_connections::<serde_json::Value>(
+                    .try_proxy_connection::<Arc<RawValue>>(
                         web3_request,
-                        Some(Duration::from_secs(30)),
-                        Some(crate::rpcs::request::RequestErrorHandler::DebugLevel),
-                        Some(3),
                     )
                     .await;
+
+                // TODO: helper for doing parsed() inside a result?
+                if let Ok(SingleResponse::Stream(x)) = result {
+                    result = x.read().await.map(SingleResponse::Parsed).map_err(Into::into);
+                }
 
                 // if we got "null" or "", it is probably because the tx is old. retry on nodes with old block data
                 // TODO: this feels fragile. how should we do this better/
                 let try_archive = match &result {
-                    Ok(serde_json::Value::Null) => true,
-                    Ok(serde_json::Value::Array(x)) => x.is_empty(),
-                    Ok(serde_json::Value::String(x)) => x.is_empty(),
+                    Ok(SingleResponse::Parsed(x)) => {
+                        let x = x.result().map(|x| json!(x));
+
+                        match x {
+                            Some(serde_json::Value::Null) => true,
+                            Some(serde_json::Value::Array(x)) => x.is_empty(),
+                            Some(serde_json::Value::String(x)) => x.is_empty(),
+                            None => true,
+                            _ => false,
+                        }
+                    },
+                    Ok(SingleResponse::Stream(..)) => unimplemented!(),
                     Err(..) => true,
-                    _ => false,
                 };
 
                 if try_archive {
@@ -1394,20 +1404,18 @@ impl Web3ProxyApp {
                         .store(true, atomic::Ordering::Relaxed);
 
                     // TODO: we don't actually want try_send_all. we want the first non-null, non-error response
-                    result = self
+                    self
                         .balanced_rpcs
-                        .try_send_all_synced_connections::<serde_json::Value>(
+                        .try_proxy_connection::<Arc<RawValue>>(
                             web3_request,
-                            Some(Duration::from_secs(30)),
-                            Some(crate::rpcs::request::RequestErrorHandler::DebugLevel),
-                            Some(3),
                         )
-                        .await;
+                        .await?
+                } else {
+
+                    // TODO: if result is an error, return a null instead?
+
+                    result?
                 }
-
-                // TODO: if parsed is an error, return a null instead
-
-                jsonrpc::ParsedResponse::from_value(result?, web3_request.id()).into()
             }
             // TODO: eth_gasPrice that does awesome magic to predict the future
             "eth_hashrate" => jsonrpc::ParsedResponse::from_value(json!(U64::zero()), web3_request.id()).into(),
