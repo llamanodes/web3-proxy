@@ -231,10 +231,14 @@ impl Web3Rpc {
         Ok((new_connection, handle))
     }
 
-    pub fn next_available(&self) -> Instant {
-        let hard_limit_until = *self.hard_limit_until.as_ref().unwrap().borrow();
+    pub fn next_available(&self, now: Instant) -> Instant {
+        if let Some(hard_limit_until) = self.hard_limit_until.as_ref() {
+            let hard_limit_until = *hard_limit_until.borrow();
 
-        hard_limit_until.max(Instant::now())
+            hard_limit_until.max(now)
+        } else {
+            now
+        }
     }
 
     /// sort by...
@@ -246,7 +250,11 @@ impl Web3Rpc {
     /// TODO: should tier or block number take priority?
     /// TODO: should this return a struct that implements sorting traits?
     /// TODO: move this to consensus.rs
-    fn sort_on(&self, max_block: Option<U64>) -> (Reverse<Instant>, bool, Reverse<U64>, u32) {
+    fn sort_on(
+        &self,
+        max_block: Option<U64>,
+        start_instant: Instant,
+    ) -> (Reverse<Instant>, bool, Reverse<U64>, u32) {
         let mut head_block = self
             .head_block_sender
             .as_ref()
@@ -261,26 +269,18 @@ impl Web3Rpc {
 
         let backup = self.backup;
 
-        let rate_limit_until = if let Some(hard_limit_until) = self.hard_limit_until.as_ref() {
-            (*hard_limit_until.borrow()).max(Instant::now())
-        } else {
-            Instant::now()
-        };
+        let next_available = self.next_available(start_instant);
 
-        (
-            Reverse(rate_limit_until),
-            !backup,
-            Reverse(head_block),
-            tier,
-        )
+        (Reverse(next_available), !backup, Reverse(head_block), tier)
     }
 
     /// TODO: move this to consensus.rs
     pub fn sort_for_load_balancing_on(
         &self,
         max_block: Option<U64>,
+        start_instant: Instant,
     ) -> ((Reverse<Instant>, bool, Reverse<U64>, u32), Duration) {
-        let sort_on = self.sort_on(max_block);
+        let sort_on = self.sort_on(max_block, start_instant);
 
         let weighted_peak_latency = self.weighted_peak_latency();
 
@@ -296,10 +296,11 @@ impl Web3Rpc {
     /// TODO: this return type is too complex
     pub fn shuffle_for_load_balancing_on(
         &self,
-        rng: &mut TlsWyRand,
         max_block: Option<U64>,
+        rng: &mut TlsWyRand,
+        start_instant: Instant,
     ) -> ((Reverse<Instant>, bool, Reverse<U64>, u32), u8) {
-        let sort_on = self.sort_on(max_block);
+        let sort_on = self.sort_on(max_block, start_instant);
 
         let r = rng.generate::<u8>();
 
@@ -1041,12 +1042,11 @@ impl Web3Rpc {
         // TODO: if websocket is reconnecting, return an error?
 
         // check cached rate limits
-        if let Some(hard_limit_until) = self.hard_limit_until.as_ref() {
-            let hard_limit_ready = *hard_limit_until.borrow();
-            let now = Instant::now();
-            if now < hard_limit_ready {
-                return Ok(OpenRequestResult::RetryAt(hard_limit_ready));
-            }
+        let now = Instant::now();
+        let hard_limit_until = self.next_available(now);
+
+        if now >= hard_limit_until {
+            return Ok(OpenRequestResult::RetryAt(hard_limit_until));
         }
 
         // check shared rate limits

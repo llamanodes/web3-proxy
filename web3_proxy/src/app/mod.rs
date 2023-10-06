@@ -1410,6 +1410,7 @@ impl Web3ProxyApp {
             // TODO: eth_sendBundle (flashbots/eden command)
             // broadcast transactions to all private rpcs at once
             "eth_sendRawTransaction" => {
+                // TODO: eth_sendPrivateTransaction
                 // TODO: decode the transaction
 
                 // TODO: error if the chain_id is incorrect
@@ -1423,7 +1424,7 @@ impl Web3ProxyApp {
 
                 // sometimes we get an error that the transaction is already known by our nodes,
                 // that's not really an error. Return the hash like a successful response would.
-                // TODO: move this to a helper function
+                // TODO: move this to a helper function. probably part of try_send_protected
                 if let JsonRpcResponseEnum::RpcError{ error_data, ..} = &response {
                     if error_data.code == -32000
                         && (error_data.message == "ALREADY_EXISTS: already known"

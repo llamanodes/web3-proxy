@@ -212,9 +212,6 @@ impl RankedRpcs {
                 ranked_rpcs.push(x.clone());
             }
 
-            ranked_rpcs
-                .sort_by_cached_key(|x| x.sort_for_load_balancing_on(Some(best_block.number())));
-
             // consensus found!
             trace!(?ranked_rpcs);
 
@@ -260,10 +257,25 @@ impl RankedRpcs {
 
         let mut rng = nanorand::tls_rng();
 
-        // we use shuffle instead of sort. we will compare weights when iterating RankedRpcsForRequest
-        inner.sort_by_cached_key(|x| x.shuffle_for_load_balancing_on(&mut rng, max_block_needed));
-        outer.sort_by_cached_key(|x| x.shuffle_for_load_balancing_on(&mut rng, max_block_needed));
+        // TODO: use web3_request.start_instant? I think we want it to be now
+        let now = Instant::now();
 
+        match self.sort_mode {
+            SortMethod::Shuffle => {
+                // we use shuffle instead of sort. we will compare weights when iterating RankedRpcsForRequest
+                inner.sort_by_cached_key(|x| {
+                    x.shuffle_for_load_balancing_on(max_block_needed, &mut rng, now)
+                });
+                outer.sort_by_cached_key(|x| {
+                    x.shuffle_for_load_balancing_on(max_block_needed, &mut rng, now)
+                });
+            }
+            SortMethod::Sort => {
+                // we use shuffle instead of sort. we will compare weights when iterating RankedRpcsForRequest
+                inner.sort_by_cached_key(|x| x.sort_for_load_balancing_on(max_block_needed, now));
+                outer.sort_by_cached_key(|x| x.sort_for_load_balancing_on(max_block_needed, now));
+            }
+        }
         Some(RpcsForRequest {
             inner,
             outer,
@@ -376,14 +388,7 @@ impl RankedRpcs {
             }
         }
 
-        // TODO: i think its better to do rate limits later anyways. think more about it though
-        // // TODO: this might be a big perf hit. benchmark
-        // if let Some(x) = rpc.hard_limit_until.as_ref() {
-        //     if *x.borrow() > Instant::now() {
-        //         trace!("{} is rate limited. will not work now", rpc,);
-        //         return false;
-        //     }
-        // }
+        // rate limit are handled by sort order
 
         true
     }
@@ -976,11 +981,15 @@ impl RpcsForRequest {
             loop {
                 let mut earliest_retry_at = None;
 
+                let now = Instant::now();
+
+                // TODO: need an iter of self.inner, then self.outer
+
                 for (rpc_a, rpc_b) in self.inner.iter().circular_tuple_windows() {
                     trace!("{} vs {}", rpc_a, rpc_b);
                     // TODO: ties within X% to the server with the smallest block_data_limit?
                     // find rpc with the lowest weighted peak latency. backups always lose. rate limits always lose
-                    let faster_rpc = min_by_key(rpc_a, rpc_b, |x| (Reverse(x.next_available()), x.backup, x.weighted_peak_latency()));
+                    let faster_rpc = min_by_key(rpc_a, rpc_b, |x| (Reverse(x.next_available(now)), x.backup, x.weighted_peak_latency()));
                     trace!("winner: {}", faster_rpc);
 
                     match faster_rpc

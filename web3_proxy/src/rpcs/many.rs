@@ -916,7 +916,10 @@ mod tests {
         .map(Arc::new)
         .collect();
 
-        rpcs.sort_by_cached_key(|x| x.sort_for_load_balancing_on(None));
+        let now = Instant::now();
+
+        // TODO: also test with max_block = 0 and 1
+        rpcs.sort_by_cached_key(|x| x.sort_for_load_balancing_on(Some(2.into()), now));
 
         let names_in_sort_order: Vec<_> = rpcs.iter().map(|x| x.name.as_str()).collect();
 
