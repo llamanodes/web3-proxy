@@ -124,7 +124,6 @@ pub struct RankedRpcs {
 // TODO: could these be refs? The owning RankedRpcs lifetime might work. `stream!` might make it complicated
 pub struct RpcsForRequest {
     inner: Vec<Arc<Web3Rpc>>,
-    outer: Vec<Arc<Web3Rpc>>,
     request: Arc<Web3Request>,
 }
 
@@ -276,9 +275,11 @@ impl RankedRpcs {
                 outer.sort_by_cached_key(|x| x.sort_for_load_balancing_on(max_block_needed, now));
             }
         }
+
+        inner.extend(outer);
+
         Some(RpcsForRequest {
             inner,
-            outer,
             request: web3_request.clone(),
         })
     }
@@ -985,6 +986,7 @@ impl RpcsForRequest {
 
                 // TODO: need an iter of self.inner, then self.outer
 
+                // we have to collect cuz apparently a Chain isn't sized
                 for (rpc_a, rpc_b) in self.inner.iter().circular_tuple_windows() {
                     trace!("{} vs {}", rpc_a, rpc_b);
                     // TODO: ties within X% to the server with the smallest block_data_limit?
