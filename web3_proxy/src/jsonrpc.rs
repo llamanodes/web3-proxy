@@ -261,6 +261,8 @@ where
         nbytes: u64,
         web3_request: Arc<Web3Request>,
     ) -> Result<SingleResponse<T>, ProviderError> {
+        Ok(Self::from_bytes(response.bytes().await?)?)
+        /*
         match response.content_length() {
             // short
             Some(len) if len <= nbytes => Ok(Self::from_bytes(response.bytes().await?)?),
@@ -288,6 +290,7 @@ where
                 }))
             }
         }
+        */
     }
 
     fn from_bytes(buf: Bytes) -> Result<Self, serde_json::Error> {
