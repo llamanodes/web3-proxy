@@ -40,11 +40,13 @@ use tracing::trace;
 /// How to select backend servers for a request
 #[derive(Copy, Clone, Debug, Default)]
 pub enum ProxyMode {
-    /// send to the "best" synced server
+    /// send to the "best" synced server. on error, try the next
     #[default]
     Best,
     /// send to all synced servers and return the fastest non-error response (reverts do not count as errors here)
     Fastest(usize),
+    /// send to k servers and return the best response common between at least n servers
+    Quorum(usize, usize),
     /// send to all servers for benchmarking. return the fastest non-error response
     Versus,
     /// send all requests and responses to kafka

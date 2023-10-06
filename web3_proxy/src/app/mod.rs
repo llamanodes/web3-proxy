@@ -42,14 +42,14 @@ use std::fmt;
 use std::net::IpAddr;
 use std::num::NonZeroU64;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicU16, Ordering};
-use std::sync::{atomic, Arc};
+use std::sync::atomic::{self, AtomicU16, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc, oneshot, watch, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, timeout, Instant};
-use tracing::{error, info, trace, warn, Level};
+use tracing::{error, info, trace, warn};
 
 // TODO: make this customizable?
 // TODO: include GIT_REF in here. i had trouble getting https://docs.rs/vergen/latest/vergen/ to work with a workspace. also .git is in .dockerignore
@@ -1106,28 +1106,31 @@ impl Web3ProxyApp {
                 // TODO: what if we do 2 per tier? we want to blast the third party rpcs
                 // TODO: maybe having the third party rpcs in their own Web3Rpcs would be good for this
                 ProxyMode::Fastest(x) => Some(x * 4),
+                ProxyMode::Quorum(x, ..) => Some(x),
                 ProxyMode::Versus => None,
             };
 
-            // no private rpcs to send to. send to a few public rpcs
-            // try_send_all_upstream_servers puts the request id into the response. no need to do that ourselves here.
-            self.balanced_rpcs
-                .try_send_all_synced_connections(
-                    web3_request,
-                    Some(Duration::from_secs(10)),
-                    Some(Level::TRACE.into()),
-                    num_public_rpcs,
-                )
-                .await
+            // // no private rpcs to send to. send to a few public rpcs
+            // // try_send_all_upstream_servers puts the request id into the response. no need to do that ourselves here.
+            // self.balanced_rpcs
+            //     .try_send_all_synced_connections(
+            //         web3_request,
+            //         Some(Duration::from_secs(10)),
+            //         Some(Level::TRACE.into()),
+            //         num_public_rpcs,
+            //     )
+            //     .await
+            todo!();
         } else {
-            self.protected_rpcs
-                .try_send_all_synced_connections(
-                    web3_request,
-                    Some(Duration::from_secs(10)),
-                    Some(Level::TRACE.into()),
-                    Some(3),
-                )
-                .await
+            // self.protected_rpcs
+            //     .try_send_all_synced_connections(
+            //         web3_request,
+            //         Some(Duration::from_secs(10)),
+            //         Some(Level::TRACE.into()),
+            //         Some(3),
+            //     )
+            //     .await
+            todo!();
         }
     }
 
@@ -1154,51 +1157,52 @@ impl Web3ProxyApp {
 
             tries += 1;
 
-            let (code, response) = match self._proxy_request_with_caching(&web3_request).await {
-                Ok(response_data) => {
-                    web3_request.error_response.store(false, Ordering::Relaxed);
-                    web3_request
-                        .user_error_response
-                        .store(false, Ordering::Relaxed);
+            let (code, response) =
+                match self._proxy_request_with_caching(web3_request.clone()).await {
+                    Ok(response_data) => {
+                        web3_request.error_response.store(false, Ordering::Relaxed);
+                        web3_request
+                            .user_error_response
+                            .store(false, Ordering::Relaxed);
 
-                    (StatusCode::OK, response_data)
-                }
-                Err(err @ Web3ProxyError::NullJsonRpcResult) => {
-                    web3_request.error_response.store(false, Ordering::Relaxed);
-                    web3_request
-                        .user_error_response
-                        .store(false, Ordering::Relaxed);
-
-                    err.as_json_response_parts(web3_request.id())
-                }
-                Err(Web3ProxyError::JsonRpcResponse(response_data)) => {
-                    web3_request.error_response.store(false, Ordering::Relaxed);
-                    web3_request
-                        .user_error_response
-                        .store(response_data.is_error(), Ordering::Relaxed);
-
-                    let response = jsonrpc::ParsedResponse::from_response_data(
-                        response_data,
-                        web3_request.id(),
-                    );
-                    (StatusCode::OK, response.into())
-                }
-                Err(err) => {
-                    if tries <= max_tries {
-                        // TODO: log the error before retrying
-                        continue;
+                        (StatusCode::OK, response_data)
                     }
+                    Err(err @ Web3ProxyError::NullJsonRpcResult) => {
+                        web3_request.error_response.store(false, Ordering::Relaxed);
+                        web3_request
+                            .user_error_response
+                            .store(false, Ordering::Relaxed);
 
-                    // max tries exceeded. return the error
+                        err.as_json_response_parts(web3_request.id())
+                    }
+                    Err(Web3ProxyError::JsonRpcResponse(response_data)) => {
+                        web3_request.error_response.store(false, Ordering::Relaxed);
+                        web3_request
+                            .user_error_response
+                            .store(response_data.is_error(), Ordering::Relaxed);
 
-                    web3_request.error_response.store(true, Ordering::Relaxed);
-                    web3_request
-                        .user_error_response
-                        .store(false, Ordering::Relaxed);
+                        let response = jsonrpc::ParsedResponse::from_response_data(
+                            response_data,
+                            web3_request.id(),
+                        );
+                        (StatusCode::OK, response.into())
+                    }
+                    Err(err) => {
+                        if tries <= max_tries {
+                            // TODO: log the error before retrying
+                            continue;
+                        }
 
-                    err.as_json_response_parts(web3_request.id())
-                }
-            };
+                        // max tries exceeded. return the error
+
+                        web3_request.error_response.store(true, Ordering::Relaxed);
+                        web3_request
+                            .user_error_response
+                            .store(false, Ordering::Relaxed);
+
+                        err.as_json_response_parts(web3_request.id())
+                    }
+                };
 
             web3_request.add_response(&response);
 
@@ -1215,7 +1219,7 @@ impl Web3ProxyApp {
     /// TODO: how can we make this generic?
     async fn _proxy_request_with_caching(
         self: &Arc<Self>,
-        web3_request: &Arc<Web3Request>,
+        web3_request: Arc<Web3Request>,
     ) -> Web3ProxyResult<jsonrpc::SingleResponse> {
         // TODO: serve net_version without querying the backend
         // TODO: don't force RawValue
@@ -1334,7 +1338,7 @@ impl Web3ProxyApp {
                 let mut gas_estimate = self
                     .balanced_rpcs
                     .try_proxy_connection::<U256>(
-                        web3_request,
+                        web3_request.clone(),
                     )
                     .await?
                     .parsed()
@@ -1370,7 +1374,7 @@ impl Web3ProxyApp {
                 let mut result = self
                     .balanced_rpcs
                     .try_proxy_connection::<Arc<RawValue>>(
-                        web3_request,
+                        web3_request.clone(),
                     )
                     .await;
 
@@ -1429,7 +1433,7 @@ impl Web3ProxyApp {
 
                 let response = self
                     .try_send_protected(
-                        web3_request,
+                        &web3_request,
                     ).await;
 
                 let mut response = response.try_into()?;
@@ -1633,7 +1637,7 @@ impl Web3ProxyApp {
                             web3_request.ttl(),
                             self.balanced_rpcs
                             .try_proxy_connection::<Arc<RawValue>>(
-                                &web3_request,
+                                web3_request,
                             )
                         ).await??
                     } else {
@@ -1654,7 +1658,7 @@ impl Web3ProxyApp {
                                     web3_request.ttl(),
                                     self.balanced_rpcs
                                     .try_proxy_connection::<Arc<RawValue>>(
-                                        &web3_request,
+                                        web3_request.clone(),
                                     )
                                 ).await??
                             }
@@ -1674,7 +1678,7 @@ impl Web3ProxyApp {
                                                 // TODO: dynamic timeout based on whats left on web3_request
                                                 let response_data = timeout(duration, app.balanced_rpcs
                                                     .try_proxy_connection::<Arc<RawValue>>(
-                                                        &web3_request,
+                                                        web3_request.clone(),
                                                 )).await;
 
                                                 match response_data {
@@ -1750,7 +1754,7 @@ impl Web3ProxyApp {
                         web3_request.ttl(),
                         self.balanced_rpcs
                         .try_proxy_connection::<Arc<RawValue>>(
-                            &web3_request,
+                            web3_request.clone(),
                         )
                     ).await??;
 

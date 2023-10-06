@@ -1,20 +1,25 @@
 use super::blockchain::Web3ProxyBlock;
 use super::many::Web3Rpcs;
 use super::one::Web3Rpc;
+use super::request::OpenRequestHandle;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
+use crate::frontend::authorization::Web3Request;
+use crate::rpcs::request::OpenRequestResult;
+use async_stream::stream;
 use base64::engine::general_purpose;
 use derive_more::Constructor;
 use ethers::prelude::{H256, U64};
+use futures_util::Stream;
 use hashbrown::{HashMap, HashSet};
 use hdrhistogram::serialization::{Serializer, V2DeflateSerializer};
 use hdrhistogram::Histogram;
 use itertools::{Itertools, MinMaxResult};
 use moka::future::Cache;
 use serde::Serialize;
-use std::cmp::{Ordering, Reverse};
+use std::cmp::{min_by_key, Ordering, Reverse};
 use std::sync::{atomic, Arc};
 use std::time::Duration;
-use tokio::time::Instant;
+use tokio::time::{sleep_until, Instant};
 use tracing::{debug, enabled, info, trace, warn, Level};
 
 #[derive(Clone, Debug, Serialize)]
@@ -81,6 +86,7 @@ impl PartialOrd for RpcRanking {
     }
 }
 
+/// TODO: i think we can get rid of this in favor of
 pub enum ShouldWaitForBlock {
     Ready,
     // BackupReady,
@@ -107,7 +113,34 @@ pub struct RankedRpcs {
     rpc_data: HashMap<Arc<Web3Rpc>, ConsensusRpcData>,
 }
 
+pub struct RpcsForRequest {
+    inner: Vec<Arc<Web3Rpc>>,
+    outer: Vec<Arc<Web3Rpc>>,
+    request: Arc<Web3Request>,
+}
+
 impl RankedRpcs {
+    pub fn from_rpcs(rpcs: Vec<Arc<Web3Rpc>>, head_block: Web3ProxyBlock) -> Option<Self> {
+        // we don't need to sort the rpcs now. we will sort them when a request neds them
+        // TODO: the shame about this is that we lose just being able to compare 2 random servers
+
+        let backups_needed = rpcs.iter().any(|x| x.backup);
+
+        let num_synced = rpcs.len();
+
+        let rpc_data = Default::default();
+
+        let ranked_rpcs = RankedRpcs {
+            backups_needed,
+            head_block,
+            inner: rpcs,
+            num_synced,
+            rpc_data,
+        };
+
+        Some(ranked_rpcs)
+    }
+
     pub fn from_votes(
         min_synced_rpcs: usize,
         min_sum_soft_limit: u32,
@@ -186,6 +219,42 @@ impl RankedRpcs {
         None
     }
 
+    pub fn for_request(&self, web3_request: Arc<Web3Request>) -> Option<RpcsForRequest> {
+        if self.num_active_rpcs() == 0 {
+            return None;
+        }
+
+        // these are bigger than we need, but how much does that matter?
+        let mut inner = Vec::with_capacity(self.num_active_rpcs());
+        let mut outer = Vec::with_capacity(self.num_active_rpcs());
+
+        // TODO: what if min is set to some future block?
+        let max_block_needed = web3_request
+            .max_block_needed()
+            .or_else(|| web3_request.head_block.as_ref().map(|x| x.number()));
+        let min_block_needed = web3_request.min_block_needed();
+
+        for rpc in &self.inner {
+            match self.rpc_will_work_eventually(rpc, min_block_needed, max_block_needed) {
+                ShouldWaitForBlock::NeverReady => continue,
+                ShouldWaitForBlock::Ready => inner.push(rpc.clone()),
+                ShouldWaitForBlock::Wait { .. } => outer.push(rpc.clone()),
+            }
+        }
+
+        let mut rng = nanorand::tls_rng();
+
+        // we use shuffle instead of sort. we will compare weights when iterating RankedRpcsForRequest
+        inner.sort_by_cached_key(|x| x.shuffle_for_load_balancing_on(&mut rng, max_block_needed));
+        outer.sort_by_cached_key(|x| x.shuffle_for_load_balancing_on(&mut rng, max_block_needed));
+
+        Some(RpcsForRequest {
+            inner,
+            outer,
+            request: web3_request,
+        })
+    }
+
     pub fn all(&self) -> &[Arc<Web3Rpc>] {
         &self.inner
     }
@@ -200,27 +269,6 @@ impl RankedRpcs {
         self.inner.len()
     }
 
-    /// will tell you if waiting will eventually  should wait for a block
-    /// TODO: error if backup will be needed to serve the request?
-    /// TODO: serve now if a backup server has the data?
-    /// TODO: also include method (or maybe an enum representing the different prune types)
-    pub fn should_wait_for_block(
-        &self,
-        min_block_num: Option<U64>,
-        max_block_num: Option<U64>,
-        skip_rpcs: &[Arc<Web3Rpc>],
-    ) -> ShouldWaitForBlock {
-        for rpc in self.inner.iter() {
-            match self.rpc_will_work_eventually(rpc, min_block_num, max_block_num, skip_rpcs) {
-                ShouldWaitForBlock::NeverReady => continue,
-                x => return x,
-            }
-        }
-
-        ShouldWaitForBlock::NeverReady
-    }
-
-    /// TODO: change this to take a min and a max
     pub fn has_block_data(&self, rpc: &Web3Rpc, block_num: U64) -> bool {
         self.rpc_data
             .get(rpc)
@@ -228,21 +276,13 @@ impl RankedRpcs {
             .unwrap_or(false)
     }
 
-    // TODO: take method as a param, too. mark nodes with supported methods (maybe do it optimistically? on)
-    // TODO: move this onto Web3Rpc?
-    // TODO: this needs min and max block on it
+    // TODO: take method as a param, too. mark nodes with supported methods (maybe do it optimistically? on error mark them as not supporting it)
     pub fn rpc_will_work_eventually(
         &self,
         rpc: &Arc<Web3Rpc>,
         min_block_num: Option<U64>,
         max_block_num: Option<U64>,
-        skip_rpcs: &[Arc<Web3Rpc>],
     ) -> ShouldWaitForBlock {
-        if skip_rpcs.contains(rpc) {
-            // if rpc is skipped, it must have already been determined it is unable to serve the request
-            return ShouldWaitForBlock::NeverReady;
-        }
-
         if let Some(min_block_num) = min_block_num {
             if !self.has_block_data(rpc, min_block_num) {
                 trace!(
@@ -289,16 +329,10 @@ impl RankedRpcs {
     // TODO: this should probably take the method, too
     pub fn rpc_will_work_now(
         &self,
-        skip: &[Arc<Web3Rpc>],
         min_block_needed: Option<U64>,
         max_block_needed: Option<U64>,
         rpc: &Arc<Web3Rpc>,
     ) -> bool {
-        if skip.contains(rpc) {
-            trace!("skipping {}", rpc);
-            return false;
-        }
-
         if rpc.backup && !self.backups_needed {
             // skip backups unless backups are needed for ranked_rpcs to exist
             return false;
@@ -326,13 +360,14 @@ impl RankedRpcs {
             }
         }
 
-        // TODO: this might be a big perf hit. benchmark
-        if let Some(x) = rpc.hard_limit_until.as_ref() {
-            if *x.borrow() > Instant::now() {
-                trace!("{} is rate limited. will not work now", rpc,);
-                return false;
-            }
-        }
+        // TODO: i think its better to do rate limits later anyways. think more about it though
+        // // TODO: this might be a big perf hit. benchmark
+        // if let Some(x) = rpc.hard_limit_until.as_ref() {
+        //     if *x.borrow() > Instant::now() {
+        //         trace!("{} is rate limited. will not work now", rpc,);
+        //         return false;
+        //     }
+        // }
 
         true
     }
@@ -912,5 +947,67 @@ impl ConsensusFinder {
             .iter()
             .map(|(x, _)| x.tier.load(atomic::Ordering::Relaxed))
             .max()
+    }
+}
+
+impl RpcsForRequest {
+    pub fn to_stream(self) -> impl Stream<Item = OpenRequestHandle> {
+        // TODO: get error_handler out of the web3_request, probably the authorization
+        // let error_handler = web3_request.authorization.error_handler;
+        let error_handler = None;
+
+        stream! {
+            loop {
+                let mut earliest_retry_at = None;
+
+                for (rpc_a, rpc_b) in self.inner.iter().circular_tuple_windows() {
+                    trace!("{} vs {}", rpc_a, rpc_b);
+                    // TODO: ties within X% to the server with the smallest block_data_limit?
+                    // find rpc with the lowest weighted peak latency. backups always lose. rate limits always lose
+                    let faster_rpc = min_by_key(rpc_a, rpc_b, |x| (Reverse(x.next_available()), x.backup, x.weighted_peak_latency()));
+                    trace!("winner: {}", faster_rpc);
+
+                    match faster_rpc
+                        .try_request_handle(&self.request, error_handler)
+                        .await
+                    {
+                        Ok(OpenRequestResult::Handle(handle)) => {
+                            trace!("opened handle: {}", faster_rpc);
+                            yield handle;
+                        }
+                        Ok(OpenRequestResult::RetryAt(retry_at)) => {
+                            trace!(
+                                "retry on {} @ {}",
+                                faster_rpc,
+                                retry_at.duration_since(Instant::now()).as_secs_f32()
+                            );
+
+                            earliest_retry_at = earliest_retry_at.min(Some(retry_at));
+                            continue;
+                        }
+                        Ok(OpenRequestResult::NotReady) => {
+                            // TODO: log a warning? emit a stat?
+                            trace!("best_rpc not ready: {}", faster_rpc);
+                            continue;
+                        }
+                        Err(err) => {
+                            trace!("No request handle for {}. err={:?}", faster_rpc, err);
+                            continue;
+                        }
+                    }
+                }
+
+                // TODO: check self.outer
+
+                if let Some(retry_at) = earliest_retry_at {
+                    if self.request.expire_instant <= retry_at {
+                        break;
+                    }
+                    sleep_until(retry_at).await;
+                } else {
+                    break;
+                }
+            }
+        }
     }
 }

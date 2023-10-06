@@ -15,6 +15,7 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use latency::{EwmaLatency, PeakEwmaLatency, RollingQuantileLatency};
 use migration::sea_orm::DatabaseConnection;
+use nanorand::tls::TlsWyRand;
 use nanorand::Rng;
 use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
 use serde::ser::{SerializeStruct, Serializer};
@@ -31,6 +32,7 @@ use tracing::{debug, error, info, trace, warn, Level};
 use url::Url;
 
 /// An active connection to a Web3 RPC server like geth or erigon.
+/// TODO: smarter Default derive or move the channels around so they aren't part of this at all
 #[derive(Default)]
 pub struct Web3Rpc {
     pub name: String,
@@ -229,7 +231,14 @@ impl Web3Rpc {
         Ok((new_connection, handle))
     }
 
+    pub fn next_available(&self) -> Instant {
+        let hard_limit_until = *self.hard_limit_until.as_ref().unwrap().borrow();
+
+        hard_limit_until.max(Instant::now())
+    }
+
     /// sort by...
+    /// - rate limit (ascending)
     /// - backups last
     /// - tier (ascending)
     /// - block number (descending)
@@ -237,7 +246,7 @@ impl Web3Rpc {
     /// TODO: should tier or block number take priority?
     /// TODO: should this return a struct that implements sorting traits?
     /// TODO: move this to consensus.rs
-    fn sort_on(&self, max_block: Option<U64>) -> (bool, Reverse<U64>, u32) {
+    fn sort_on(&self, max_block: Option<U64>) -> (Reverse<Instant>, bool, Reverse<U64>, u32) {
         let mut head_block = self
             .head_block_sender
             .as_ref()
@@ -252,14 +261,22 @@ impl Web3Rpc {
 
         let backup = self.backup;
 
-        (!backup, Reverse(head_block), tier)
+        let rate_limit_until =
+            (*self.hard_limit_until.as_ref().unwrap().borrow()).max(Instant::now());
+
+        (
+            Reverse(rate_limit_until),
+            !backup,
+            Reverse(head_block),
+            tier,
+        )
     }
 
     /// TODO: move this to consensus.rs
     pub fn sort_for_load_balancing_on(
         &self,
         max_block: Option<U64>,
-    ) -> ((bool, Reverse<U64>, u32), Duration) {
+    ) -> ((Reverse<Instant>, bool, Reverse<U64>, u32), Duration) {
         let sort_on = self.sort_on(max_block);
 
         let weighted_peak_latency = self.weighted_peak_latency();
@@ -273,13 +290,13 @@ impl Web3Rpc {
 
     /// like sort_for_load_balancing, but shuffles tiers randomly instead of sorting by weighted_peak_latency
     /// TODO: move this to consensus.rs
+    /// TODO: this return type is too complex
     pub fn shuffle_for_load_balancing_on(
         &self,
+        rng: &mut TlsWyRand,
         max_block: Option<U64>,
-    ) -> ((bool, Reverse<U64>, u32), u8) {
+    ) -> ((Reverse<Instant>, bool, Reverse<U64>, u32), u8) {
         let sort_on = self.sort_on(max_block);
-
-        let mut rng = nanorand::tls_rng();
 
         let r = rng.generate::<u8>();
 

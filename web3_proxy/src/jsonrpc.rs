@@ -209,6 +209,7 @@ pub enum Payload<T> {
 
 #[derive(Debug)]
 pub struct StreamResponse {
+    // TODO: phantom T on here?
     buffer: Bytes,
     response: reqwest::Response,
     web3_request: Arc<Web3Request>,
@@ -246,6 +247,7 @@ impl IntoResponse for StreamResponse {
 
 #[derive(Debug)]
 pub enum SingleResponse<T = Arc<RawValue>> {
+    /// TODO: save the size here so we don't have to serialize again
     Parsed(ParsedResponse<T>),
     Stream(StreamResponse),
 }

@@ -102,6 +102,7 @@ test-log = { version = "0.2.12", default-features = false, features = ["trace"] 
 bytes = "1.5.0"
 futures-util = "0.3.28"
 async-recursion = "1.0.5"
+async-stream = "0.3.5"
 
 # # TODO: bring this back
 # check-if-email-exists = "0.9.0"

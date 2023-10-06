@@ -173,6 +173,7 @@ impl OpenRequestHandle {
     /// By having the request method here, we ensure that the rate limiter was called and connection counts were properly incremented
     /// depending on how things are locked, you might need to pass the provider in
     /// we take self to ensure this function only runs once
+    /// TODO: abandon ProviderError
     pub async fn request<R: JsonRpcResultData + serde::Serialize>(
         self,
     ) -> Result<jsonrpc::SingleResponse<R>, ProviderError> {
@@ -212,12 +213,15 @@ impl OpenRequestHandle {
             (&self.rpc.http_url, &self.rpc.http_client)
         {
             let params: serde_json::Value = serde_json::to_value(params)?;
+
+            // TODO: why recreate this? we should be able to just use the one from the user
             let request = jsonrpc::JsonRpcRequest::new(
                 self.web3_request.id().into(),
                 method.to_string(),
                 params,
             )
             .expect("request creation cannot fail");
+
             match client.post(url.clone()).json(&request).send().await {
                 // TODO: threshold from configs
                 Ok(response) => {
