@@ -1365,13 +1365,15 @@ impl Web3ProxyApp {
                 // TODO: timeout
                 // TODO: change this to send serially until we get a success
 
+                // TODO: validate params. we seem to get a lot of spam here of "0x"
+
                 let mut result = self
                     .balanced_rpcs
                     .try_send_all_synced_connections::<serde_json::Value>(
                         web3_request,
                         Some(Duration::from_secs(30)),
                         Some(crate::rpcs::request::RequestErrorHandler::DebugLevel),
-                        None,
+                        Some(3),
                     )
                     .await;
 
@@ -1398,7 +1400,7 @@ impl Web3ProxyApp {
                             web3_request,
                             Some(Duration::from_secs(30)),
                             Some(crate::rpcs::request::RequestErrorHandler::DebugLevel),
-                            None,
+                            Some(3),
                         )
                         .await;
                 }
