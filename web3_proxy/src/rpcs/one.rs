@@ -261,8 +261,11 @@ impl Web3Rpc {
 
         let backup = self.backup;
 
-        let rate_limit_until =
-            (*self.hard_limit_until.as_ref().unwrap().borrow()).max(Instant::now());
+        let rate_limit_until = if let Some(hard_limit_until) = self.hard_limit_until.as_ref() {
+            (*hard_limit_until.borrow()).max(Instant::now())
+        } else {
+            Instant::now()
+        };
 
         (
             Reverse(rate_limit_until),

@@ -1,5 +1,9 @@
 # Todo
 
+This is stale. Now that there is more than one dev, important things are tracked in GitHub Issues and Pull Requests.
+
+One day I'll go through this and make sure everything is done, moved to an issue, or otherwise handled.
+
 ## MVP
 
 These are roughly in order of completition

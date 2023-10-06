@@ -329,17 +329,26 @@ impl OpenRequestHandle {
             response,
         );
 
-        // TODO: move this to another helper
+        // TODO: move this to a helper function?
+        // true if we got a jsonrpc result. a jsonrpc error or other error is false.
+        // TODO: counters for errors vs jsonrpc vs success?
         let response_is_success = match &response {
-            Ok(jsonrpc::SingleResponse::Parsed(x)) => match &x.payload {
-                Payload::Success { .. } => true,
-                _ => true,
-            },
-            Ok(jsonrpc::SingleResponse::Stream(..)) => true,
+            Ok(jsonrpc::SingleResponse::Parsed(x)) => {
+                matches!(&x.payload, Payload::Success { .. })
+            }
+            Ok(jsonrpc::SingleResponse::Stream(..)) => false,
             Err(_) => false,
         };
 
         if response_is_success {
+            // only track latency for successful requests
+            tokio::spawn(async move {
+                self.rpc.peak_latency.as_ref().unwrap().report(latency);
+                self.rpc.median_latency.as_ref().unwrap().record(latency);
+
+                // TODO: app-wide median and peak latency?
+            });
+        } else {
             // only save reverts for some types of calls
             // TODO: do something special for eth_sendRawTransaction too
             // we do **NOT** use self.error_handler here because it might have been modified
@@ -353,7 +362,7 @@ impl OpenRequestHandle {
 
             let response_type: ResponseType = match &response {
                 Ok(jsonrpc::SingleResponse::Parsed(x)) => match &x.payload {
-                    Payload::Success { .. } => unimplemented!(),
+                    Payload::Success { .. } => unreachable!(),
                     Payload::Error { error } => {
                         trace!(?error, "jsonrpc error data");
 
@@ -409,9 +418,14 @@ impl OpenRequestHandle {
                         }
                     }
                 },
-                Ok(_) => unreachable!(),
+                Ok(jsonrpc::SingleResponse::Stream(..)) => unreachable!(),
                 Err(_) => ResponseType::Error,
             };
+
+            if matches!(response_type, ResponseType::RateLimited) {
+                // TODO: how long?
+                self.rate_limit_for(Duration::from_secs(1));
+            }
 
             match error_handler {
                 RequestErrorHandler::DebugLevel => {
@@ -498,6 +512,7 @@ impl OpenRequestHandle {
                             warn!(
                                 %self.web3_request,
                                 ?response,
+                                ?err,
                                 "failed parsing eth_call params. unable to save revert",
                             );
                         }
@@ -505,13 +520,6 @@ impl OpenRequestHandle {
                 }
             }
         }
-
-        tokio::spawn(async move {
-            self.rpc.peak_latency.as_ref().unwrap().report(latency);
-            self.rpc.median_latency.as_ref().unwrap().record(latency);
-
-            // TODO: app median latency
-        });
 
         response
     }
