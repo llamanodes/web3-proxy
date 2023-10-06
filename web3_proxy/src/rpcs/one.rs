@@ -1045,7 +1045,7 @@ impl Web3Rpc {
         let now = Instant::now();
         let hard_limit_until = self.next_available(now);
 
-        if now >= hard_limit_until {
+        if now < hard_limit_until {
             return Ok(OpenRequestResult::RetryAt(hard_limit_until));
         }
 
