@@ -1097,7 +1097,7 @@ impl Web3ProxyApp {
         self: &Arc<Self>,
         web3_request: &Arc<Web3Request>,
     ) -> Web3ProxyResult<Arc<RawValue>> {
-        if self.protected_rpcs.is_empty() {
+        let rpcs = if self.protected_rpcs.is_empty() {
             let num_public_rpcs = match web3_request.proxy_mode() {
                 // TODO: how many balanced rpcs should we send to? configurable? percentage of total?
                 ProxyMode::Best | ProxyMode::Debug => Some(4),
@@ -1110,6 +1110,8 @@ impl Web3ProxyApp {
                 ProxyMode::Versus => None,
             };
 
+            self.balanced_rpcs.try_rpcs_for_request(web3_request).await
+
             // // no private rpcs to send to. send to a few public rpcs
             // // try_send_all_upstream_servers puts the request id into the response. no need to do that ourselves here.
             // self.balanced_rpcs
@@ -1120,18 +1122,11 @@ impl Web3ProxyApp {
             //         num_public_rpcs,
             //     )
             //     .await
-            todo!();
         } else {
-            // self.protected_rpcs
-            //     .try_send_all_synced_connections(
-            //         web3_request,
-            //         Some(Duration::from_secs(10)),
-            //         Some(Level::TRACE.into()),
-            //         Some(3),
-            //     )
-            //     .await
-            todo!();
-        }
+            self.protected_rpcs.try_rpcs_for_request(web3_request).await
+        };
+
+        todo!();
     }
 
     /// proxy request with up to 3 tries.
@@ -1157,52 +1152,51 @@ impl Web3ProxyApp {
 
             tries += 1;
 
-            let (code, response) =
-                match self._proxy_request_with_caching(web3_request.clone()).await {
-                    Ok(response_data) => {
-                        web3_request.error_response.store(false, Ordering::Relaxed);
-                        web3_request
-                            .user_error_response
-                            .store(false, Ordering::Relaxed);
+            let (code, response) = match self._proxy_request_with_caching(&web3_request).await {
+                Ok(response_data) => {
+                    web3_request.error_response.store(false, Ordering::Relaxed);
+                    web3_request
+                        .user_error_response
+                        .store(false, Ordering::Relaxed);
 
-                        (StatusCode::OK, response_data)
+                    (StatusCode::OK, response_data)
+                }
+                Err(err @ Web3ProxyError::NullJsonRpcResult) => {
+                    web3_request.error_response.store(false, Ordering::Relaxed);
+                    web3_request
+                        .user_error_response
+                        .store(false, Ordering::Relaxed);
+
+                    err.as_json_response_parts(web3_request.id())
+                }
+                Err(Web3ProxyError::JsonRpcResponse(response_data)) => {
+                    web3_request.error_response.store(false, Ordering::Relaxed);
+                    web3_request
+                        .user_error_response
+                        .store(response_data.is_error(), Ordering::Relaxed);
+
+                    let response = jsonrpc::ParsedResponse::from_response_data(
+                        response_data,
+                        web3_request.id(),
+                    );
+                    (StatusCode::OK, response.into())
+                }
+                Err(err) => {
+                    if tries <= max_tries {
+                        // TODO: log the error before retrying
+                        continue;
                     }
-                    Err(err @ Web3ProxyError::NullJsonRpcResult) => {
-                        web3_request.error_response.store(false, Ordering::Relaxed);
-                        web3_request
-                            .user_error_response
-                            .store(false, Ordering::Relaxed);
 
-                        err.as_json_response_parts(web3_request.id())
-                    }
-                    Err(Web3ProxyError::JsonRpcResponse(response_data)) => {
-                        web3_request.error_response.store(false, Ordering::Relaxed);
-                        web3_request
-                            .user_error_response
-                            .store(response_data.is_error(), Ordering::Relaxed);
+                    // max tries exceeded. return the error
 
-                        let response = jsonrpc::ParsedResponse::from_response_data(
-                            response_data,
-                            web3_request.id(),
-                        );
-                        (StatusCode::OK, response.into())
-                    }
-                    Err(err) => {
-                        if tries <= max_tries {
-                            // TODO: log the error before retrying
-                            continue;
-                        }
+                    web3_request.error_response.store(true, Ordering::Relaxed);
+                    web3_request
+                        .user_error_response
+                        .store(false, Ordering::Relaxed);
 
-                        // max tries exceeded. return the error
-
-                        web3_request.error_response.store(true, Ordering::Relaxed);
-                        web3_request
-                            .user_error_response
-                            .store(false, Ordering::Relaxed);
-
-                        err.as_json_response_parts(web3_request.id())
-                    }
-                };
+                    err.as_json_response_parts(web3_request.id())
+                }
+            };
 
             web3_request.add_response(&response);
 
@@ -1219,7 +1213,7 @@ impl Web3ProxyApp {
     /// TODO: how can we make this generic?
     async fn _proxy_request_with_caching(
         self: &Arc<Self>,
-        web3_request: Arc<Web3Request>,
+        web3_request: &Arc<Web3Request>,
     ) -> Web3ProxyResult<jsonrpc::SingleResponse> {
         // TODO: serve net_version without querying the backend
         // TODO: don't force RawValue
@@ -1338,7 +1332,7 @@ impl Web3ProxyApp {
                 let mut gas_estimate = self
                     .balanced_rpcs
                     .try_proxy_connection::<U256>(
-                        web3_request.clone(),
+                        web3_request,
                     )
                     .await?
                     .parsed()
@@ -1374,7 +1368,7 @@ impl Web3ProxyApp {
                 let mut result = self
                     .balanced_rpcs
                     .try_proxy_connection::<Arc<RawValue>>(
-                        web3_request.clone(),
+                        web3_request,
                     )
                     .await;
 
@@ -1433,7 +1427,7 @@ impl Web3ProxyApp {
 
                 let response = self
                     .try_send_protected(
-                        &web3_request,
+                        web3_request,
                     ).await;
 
                 let mut response = response.try_into()?;
@@ -1637,7 +1631,7 @@ impl Web3ProxyApp {
                             web3_request.ttl(),
                             self.balanced_rpcs
                             .try_proxy_connection::<Arc<RawValue>>(
-                                web3_request,
+                                &web3_request,
                             )
                         ).await??
                     } else {
@@ -1658,7 +1652,7 @@ impl Web3ProxyApp {
                                     web3_request.ttl(),
                                     self.balanced_rpcs
                                     .try_proxy_connection::<Arc<RawValue>>(
-                                        web3_request.clone(),
+                                        &web3_request,
                                     )
                                 ).await??
                             }
@@ -1678,7 +1672,7 @@ impl Web3ProxyApp {
                                                 // TODO: dynamic timeout based on whats left on web3_request
                                                 let response_data = timeout(duration, app.balanced_rpcs
                                                     .try_proxy_connection::<Arc<RawValue>>(
-                                                        web3_request.clone(),
+                                                        &web3_request,
                                                 )).await;
 
                                                 match response_data {
@@ -1754,7 +1748,7 @@ impl Web3ProxyApp {
                         web3_request.ttl(),
                         self.balanced_rpcs
                         .try_proxy_connection::<Arc<RawValue>>(
-                            web3_request.clone(),
+                            &web3_request,
                         )
                     ).await??;
 

@@ -1,6 +1,6 @@
 //! Load balanced communication with a group of web3 rpc providers
 use super::blockchain::{BlocksByHashCache, BlocksByNumberCache, Web3ProxyBlock};
-use super::consensus::{RankedRpcs, RpcsForRequest, ShouldWaitForBlock};
+use super::consensus::{RankedRpcs, RpcsForRequest};
 use super::one::Web3Rpc;
 use super::request::{OpenRequestHandle, OpenRequestResult, RequestErrorHandler};
 use crate::app::{flatten_handle, Web3ProxyApp, Web3ProxyJoinHandle};
@@ -10,7 +10,6 @@ use crate::frontend::authorization::Web3Request;
 use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::frontend::status::MokaCacheSerializer;
 use crate::jsonrpc::{self, JsonRpcErrorData, JsonRpcParams, JsonRpcResultData, ParsedResponse};
-use counter::Counter;
 use derive_more::From;
 use ethers::prelude::{TxHash, U64};
 use futures::future::try_join_all;
@@ -23,13 +22,11 @@ use parking_lot::RwLock;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use std::borrow::Cow;
-use std::cmp::min_by_key;
 use std::fmt::{self, Display};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
-use tokio::task::yield_now;
-use tokio::time::{sleep, sleep_until, timeout, Duration, Instant};
+use tokio::time::{Duration, Instant};
 use tokio::{pin, select};
 use tracing::{debug, error, info, instrument, trace, warn};
 
@@ -400,7 +397,7 @@ impl Web3Rpcs {
     /// this prefers synced servers, but it will return servers even if they aren't fully in sync.
     /// this does not gaurentee you won't be rate limited. we don't increment our counters until you try to send. so you might have to wait to be able to send
     /// TODO: should this wait for ranked rpcs? maybe only a fraction of web3_request's time?
-    pub async fn try_rpcs_for_request(&self, web3_request: Arc<Web3Request>) -> TryRpcsForRequest {
+    pub async fn try_rpcs_for_request(&self, web3_request: &Arc<Web3Request>) -> TryRpcsForRequest {
         // TODO: by_name might include things that are on a forked
         let ranked_rpcs: Arc<RankedRpcs> =
             if let Some(ranked_rpcs) = self.watch_ranked_rpcs.borrow().clone() {
@@ -435,7 +432,7 @@ impl Web3Rpcs {
         let web3_request =
             Web3Request::new_internal(method.into(), params, head_block, max_wait).await;
 
-        let response = self.request_with_metadata(web3_request).await?;
+        let response = self.request_with_metadata(&web3_request).await?;
 
         let parsed = response.parsed().await?;
 
@@ -452,7 +449,7 @@ impl Web3Rpcs {
     /// TODO: take an arg for max_tries. take an arg for quorum(size) or serial
     pub async fn request_with_metadata<R: JsonRpcResultData>(
         &self,
-        web3_request: Arc<Web3Request>,
+        web3_request: &Arc<Web3Request>,
     ) -> Web3ProxyResult<jsonrpc::SingleResponse<R>> {
         let mut method_not_available_response = None;
 
@@ -467,7 +464,7 @@ impl Web3Rpcs {
         let mut last_provider_error = None;
 
         // TODO: limit number of tries
-        match self.try_rpcs_for_request(web3_request.clone()).await {
+        match self.try_rpcs_for_request(web3_request).await {
             TryRpcsForRequest::None => return Err(Web3ProxyError::NoServersSynced),
             TryRpcsForRequest::RetryAt(retry_at) => {
                 if retry_at > web3_request.expire_instant {
@@ -839,7 +836,7 @@ impl Web3Rpcs {
     #[allow(clippy::too_many_arguments)]
     pub async fn try_proxy_connection<R: JsonRpcResultData>(
         &self,
-        web3_request: Arc<Web3Request>,
+        web3_request: &Arc<Web3Request>,
     ) -> Web3ProxyResult<jsonrpc::SingleResponse<R>> {
         let proxy_mode = web3_request.proxy_mode();
 

@@ -49,6 +49,7 @@ impl ParsedResponse<Arc<RawValue>> {
         match data {
             JsonRpcResponseEnum::NullResult => {
                 let x: Box<RawValue> = Default::default();
+                // TODO: how can we make this generic if this always wants to be a Box<RawValue>?. Do we even want to keep NullResult?
                 Self::from_result(Arc::from(x), id)
             }
             JsonRpcResponseEnum::RpcError { error_data, .. } => Self::from_error(error_data, id),

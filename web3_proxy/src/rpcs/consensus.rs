@@ -95,6 +95,12 @@ pub enum ShouldWaitForBlock {
     NeverReady,
 }
 
+#[derive(Clone, Debug, Serialize)]
+enum SortMethod {
+    Shuffle,
+    Sort,
+}
+
 /// A collection of Web3Rpcs that are on the same block.
 /// Serialize is so we can print it on our /status endpoint
 /// TODO: remove head_block/head_rpcs/tier and replace with one RankedRpcMap
@@ -111,6 +117,8 @@ pub struct RankedRpcs {
     // TODO: make serializing work. the key needs to be a string. I think we need `serialize_with`
     #[serde(skip_serializing)]
     rpc_data: HashMap<Arc<Web3Rpc>, ConsensusRpcData>,
+
+    sort_mode: SortMethod,
 }
 
 pub struct RpcsForRequest {
@@ -128,7 +136,10 @@ impl RankedRpcs {
 
         let num_synced = rpcs.len();
 
+        // TODO: do we need real data in  here? if we are calling from_rpcs, we probably don't even track their block
         let rpc_data = Default::default();
+
+        let sort_mode = SortMethod::Shuffle;
 
         let ranked_rpcs = RankedRpcs {
             backups_needed,
@@ -136,6 +147,7 @@ impl RankedRpcs {
             inner: rpcs,
             num_synced,
             rpc_data,
+            sort_mode,
         };
 
         Some(ranked_rpcs)
@@ -205,10 +217,13 @@ impl RankedRpcs {
             // consensus found!
             trace!(?ranked_rpcs);
 
+            let sort_mode = SortMethod::Sort;
+
             let consensus = RankedRpcs {
                 backups_needed,
                 head_block: best_block,
                 rpc_data,
+                sort_mode,
                 inner: ranked_rpcs,
                 num_synced,
             };
@@ -219,7 +234,7 @@ impl RankedRpcs {
         None
     }
 
-    pub fn for_request(&self, web3_request: Arc<Web3Request>) -> Option<RpcsForRequest> {
+    pub fn for_request(&self, web3_request: &Arc<Web3Request>) -> Option<RpcsForRequest> {
         if self.num_active_rpcs() == 0 {
             return None;
         }
@@ -251,7 +266,7 @@ impl RankedRpcs {
         Some(RpcsForRequest {
             inner,
             outer,
-            request: web3_request,
+            request: web3_request.clone(),
         })
     }
 
