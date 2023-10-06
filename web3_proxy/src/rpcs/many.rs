@@ -12,21 +12,24 @@ use crate::frontend::status::MokaCacheSerializer;
 use crate::jsonrpc::{self, JsonRpcErrorData, JsonRpcParams, JsonRpcResultData, ParsedResponse};
 use derive_more::From;
 use ethers::prelude::{TxHash, U64};
+use ethers::providers::ProviderError;
 use futures::future::try_join_all;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use hashbrown::HashMap;
+use http::StatusCode;
 use itertools::Itertools;
 use moka::future::CacheBuilder;
 use parking_lot::RwLock;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
+use serde_json::json;
 use std::borrow::Cow;
 use std::fmt::{self, Display};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
-use tokio::time::{Duration, Instant};
+use tokio::time::{sleep_until, Duration, Instant};
 use tokio::{pin, select};
 use tracing::{debug, error, info, instrument, trace, warn};
 
@@ -393,11 +396,54 @@ impl Web3Rpcs {
         Ok(())
     }
 
+    /// TODO: i think this RpcsForRequest should be stored on the Web3Request when its made. that way any waiting for sync happens early and we don't need waiting anywhere else in the app
+    pub async fn wait_for_rpcs_for_request(
+        &self,
+        web3_request: &Arc<Web3Request>,
+    ) -> Web3ProxyResult<RpcsForRequest> {
+        let mut watch_consensus_rpcs = self.watch_ranked_rpcs.subscribe();
+
+        loop {
+            // other places check web3_request ttl. i don't think we need a check here too
+            let next_try = match self.try_rpcs_for_request(web3_request).await {
+                Ok(x) => return Ok(x),
+                Err(Web3ProxyError::RateLimited(_, Some(retry_at))) => retry_at,
+                Err(x) => return Err(x),
+            };
+
+            if next_try > web3_request.expire_instant {
+                let next_try = Instant::now().duration_since(next_try).as_secs();
+
+                // we don't use Web3ProxyError::RateLimited because that is for the user being rate limited
+                return Err(Web3ProxyError::StatusCode(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "backend rpcs are all rate limited!".into(),
+                    Some(json!({"retry_at": next_try})),
+                ));
+            }
+
+            select! {
+                _ = sleep_until(next_try) => {
+                    // rpcs didn't change and we have waited too long. break to return an error
+                    warn!(?self, "timeout during wait_for_rpcs_for_request!");
+                },
+                _ = watch_consensus_rpcs.changed() => {
+                    // consensus rpcs changed!
+                    // TODO: i don't love that we throw it away
+                    watch_consensus_rpcs.borrow_and_update();
+                }
+            }
+        }
+    }
+
     /// get all rpc servers that are not rate limited
     /// this prefers synced servers, but it will return servers even if they aren't fully in sync.
     /// this does not gaurentee you won't be rate limited. we don't increment our counters until you try to send. so you might have to wait to be able to send
     /// TODO: should this wait for ranked rpcs? maybe only a fraction of web3_request's time?
-    pub async fn try_rpcs_for_request(&self, web3_request: &Arc<Web3Request>) -> TryRpcsForRequest {
+    pub async fn try_rpcs_for_request(
+        &self,
+        web3_request: &Arc<Web3Request>,
+    ) -> Web3ProxyResult<RpcsForRequest> {
         // TODO: by_name might include things that are on a forked
         let ranked_rpcs: Arc<RankedRpcs> =
             if let Some(ranked_rpcs) = self.watch_ranked_rpcs.borrow().clone() {
@@ -411,14 +457,17 @@ impl Web3Rpcs {
                 } else {
                     // i doubt we will ever get here
                     // TODO: return a future that resolves once we do have something?
-                    return TryRpcsForRequest::None;
+                    return Err(Web3ProxyError::NoServersSynced);
                 }
             } else {
                 // TODO: return a future that resolves once we do have something?
-                return TryRpcsForRequest::None;
+                return Err(Web3ProxyError::NoServersSynced);
             };
 
-        ranked_rpcs.for_request(web3_request).into()
+        match ranked_rpcs.for_request(web3_request) {
+            None => return Err(Web3ProxyError::NoServersSynced),
+            Some(x) => Ok(x),
+        }
     }
 
     pub async fn internal_request<P: JsonRpcParams, R: JsonRpcResultData>(
@@ -430,10 +479,11 @@ impl Web3Rpcs {
         let head_block = self.head_block();
 
         let web3_request =
-            Web3Request::new_internal(method.into(), params, head_block, max_wait).await;
+            Web3Request::new_internal(method.into(), params, head_block, max_wait).await?;
 
         let response = self.request_with_metadata(&web3_request).await?;
 
+        // the response might support streaming. we need to parse it
         let parsed = response.parsed().await?;
 
         match parsed.payload {
@@ -445,198 +495,46 @@ impl Web3Rpcs {
 
     /// Make a request with stat tracking.
     /// The first jsonrpc response will be returned.
-    /// TODO: move this to RankedRpcsForRequest along with a bunch of other similar functions
-    /// TODO: take an arg for max_tries. take an arg for quorum(size) or serial
+    /// TODO? move this to RankedRpcsForRequest along with a bunch of other similar functions? but it needs watch_ranked_rpcs and other things on Web3Rpcs...
+    /// TODO: have a similar function for quorum(size, max_tries)
+    /// TODO: should max_tries be on web3_request. maybe as tries_left?
     pub async fn request_with_metadata<R: JsonRpcResultData>(
         &self,
         web3_request: &Arc<Web3Request>,
     ) -> Web3ProxyResult<jsonrpc::SingleResponse<R>> {
-        let mut method_not_available_response = None;
-
-        let watch_consensus_rpcs = self.watch_ranked_rpcs.subscribe();
-
-        // set error_handler to Save. this might be overridden depending on the web3_request.authorization
-        // TODO: rename this to make it clear it might be overriden
-        let error_handler = Some(RequestErrorHandler::Save);
-
-        // TODO: collect the most common error
-        let mut last_jsonrpc_error = None;
-        let mut last_provider_error = None;
+        // TODO: collect the most common error. Web3ProxyError isn't Hash + Eq though. And making it so would be a pain
+        let mut errors = vec![];
 
         // TODO: limit number of tries
-        match self.try_rpcs_for_request(web3_request).await {
-            TryRpcsForRequest::None => return Err(Web3ProxyError::NoServersSynced),
-            TryRpcsForRequest::RetryAt(retry_at) => {
-                if retry_at > web3_request.expire_instant {
-                    return Err(Web3ProxyError::RateLimited(
-                        Default::default(),
-                        Some(retry_at),
-                    ));
+        let rpcs = self.try_rpcs_for_request(web3_request).await?;
+
+        let stream = rpcs.to_stream();
+
+        pin!(stream);
+
+        while let Some(active_request_handle) = stream.next().await {
+            // TODO: i'd like to get rid of this clone
+            let rpc = active_request_handle.clone_connection();
+
+            let is_backup_response = rpc.backup;
+
+            // TODO: i'd like to get rid of this clone
+            web3_request.backend_requests.lock().push(rpc.clone());
+
+            match active_request_handle.request::<R>().await {
+                Ok(response) => {
+                    return Ok(response);
                 }
-            }
-            TryRpcsForRequest::Some(rpcs) => {
-                let stream = rpcs.to_stream();
+                Err(error) => {
+                    // TODO: if this is an error, do NOT return. continue to try on another server
 
-                pin!(stream);
-
-                while let Some(active_request_handle) = stream.next().await {
-                    let rpc = active_request_handle.clone_connection();
-
-                    web3_request.backend_requests.lock().push(rpc.clone());
-
-                    let is_backup_response = rpc.backup;
-
-                    match active_request_handle.request::<R>().await {
-                        Ok(response) => {
-                            // TODO: if there are multiple responses being aggregated, this will only use the last server's backup type
-                            web3_request
-                                .response_from_backup_rpc
-                                .store(is_backup_response, Ordering::Relaxed);
-
-                            web3_request
-                                .user_error_response
-                                .store(false, Ordering::Relaxed);
-
-                            web3_request.error_response.store(false, Ordering::Relaxed);
-
-                            return Ok(response);
-                        }
-                        Err(error) => {
-                            // TODO: if this is an error, do NOT return. continue to try on another server
-                            let error = match JsonRpcErrorData::try_from(&error) {
-                                Ok(x) => {
-                                    web3_request
-                                        .user_error_response
-                                        .store(true, Ordering::Relaxed);
-                                    x
-                                }
-                                Err(err) => {
-                                    warn!(?err, "error from {}", rpc);
-
-                                    web3_request.error_response.store(true, Ordering::Relaxed);
-
-                                    web3_request
-                                        .user_error_response
-                                        .store(false, Ordering::Relaxed);
-
-                                    last_provider_error = Some(error);
-
-                                    continue;
-                                }
-                            };
-
-                            // some errors should be retried on other nodes
-                            let error_msg = error.message.as_ref();
-
-                            // different providers do different codes. check all of them
-                            // TODO: there's probably more strings to add here
-                            let rate_limit_substrings = ["limit", "exceeded", "quota usage"];
-                            for rate_limit_substr in rate_limit_substrings {
-                                if error_msg.contains(rate_limit_substr) {
-                                    if error_msg.contains("block size") {
-                                        // TODO: this message is likely wrong, but i can't find the actual one in my terminal now
-                                        // they hit an expected limit. return the error now
-                                        return Err(error.into());
-                                    } else if error_msg.contains("result on length") {
-                                        // this error contains "limit" but is not a rate limit error
-                                        // TODO: make the expected limit configurable
-                                        // TODO: parse the rate_limit_substr and only continue if it is < expected limit
-                                        if error_msg.contains("exceeding limit 16000000")
-                                            || error_msg.ends_with(
-                                                "exceeding --rpc.returndata.limit 16000000",
-                                            )
-                                        {
-                                            // they hit our expected limit. return the error now
-                                            return Err(error.into());
-                                        } else {
-                                            // they hit a limit lower than what we expect. the server is misconfigured
-                                            error!(
-                                                %error_msg,
-                                                "unexpected result limit by {}",
-                                                "???"
-                                            );
-                                            continue;
-                                        }
-                                    } else {
-                                        warn!(
-                                            %error_msg,
-                                            "rate limited by {}",
-                                            "???"
-                                        );
-                                        continue;
-                                    }
-                                }
-                            }
-
-                            match error.code {
-                                -32000 => {
-                                    // TODO: regex?
-                                    let retry_prefixes = [
-                                        "header not found",
-                                        "header for hash not found",
-                                        "missing trie node",
-                                        "node not started",
-                                        "RPC timeout",
-                                    ];
-                                    for retry_prefix in retry_prefixes {
-                                        if error_msg.starts_with(retry_prefix) {
-                                            // TODO: too verbose
-                                            debug!("retrying on another server");
-                                            continue;
-                                        }
-                                    }
-                                }
-                                -32601 => {
-                                    let error_msg = error.message.as_ref();
-
-                                    // sometimes a provider does not support all rpc methods
-                                    // we check other connections rather than returning the error
-                                    // but sometimes the method is something that is actually unsupported,
-                                    // so we save the response here to return it later
-
-                                    // some providers look like this
-                                    if error_msg.starts_with("the method")
-                                        && error_msg.ends_with("is not available")
-                                    {
-                                        method_not_available_response = Some(error);
-                                        continue;
-                                    }
-
-                                    // others look like this (this is the example in the official spec)
-                                    if error_msg == "Method not found" {
-                                        method_not_available_response = Some(error);
-                                        continue;
-                                    }
-                                }
-                                _ => {}
-                            }
-
-                            last_jsonrpc_error = Some(error);
-                        }
-                    }
+                    // TODO: track the most common errors
+                    errors.push(error);
                 }
             }
         }
 
-        if let Some(err) = last_jsonrpc_error {
-            // TODO: set user_error here instead of above
-            return Err(err.into());
-        }
-
-        if let Some(err) = last_provider_error {
-            // TODO: set server_error instead of above
-            return Err(Web3ProxyError::from(err));
-        }
-
-        if let Some(err) = method_not_available_response {
-            web3_request.error_response.store(false, Ordering::Relaxed);
-
-            web3_request
-                .user_error_response
-                .store(true, Ordering::Relaxed);
-
-            // this error response is likely the user's fault
-            // TODO: emit a stat for unsupported methods. then we can know what there is demand for or if we are missing a feature
+        if let Some(err) = errors.into_iter().next() {
             return Err(err.into());
         }
 
@@ -695,7 +593,9 @@ impl Web3Rpcs {
         Err(JsonRpcErrorData {
             message: "Requested data is not available".into(),
             code: -32043,
-            data: None,
+            data: Some(json!({
+                "request": web3_request
+            })),
         }
         .into())
     }
@@ -1146,7 +1046,8 @@ mod tests {
             Some(Web3ProxyBlock::try_from(head_block.clone()).unwrap()),
             Some(Duration::from_millis(100)),
         )
-        .await;
+        .await
+        .unwrap();
         let x = rpcs
             .wait_for_best_rpc(&r, &mut vec![], Some(RequestErrorHandler::DebugLevel))
             .await
@@ -1241,7 +1142,8 @@ mod tests {
             Some(Web3ProxyBlock::try_from(head_block.clone()).unwrap()),
             Some(Duration::from_millis(100)),
         )
-        .await;
+        .await
+        .unwrap();
         assert!(matches!(
             rpcs.wait_for_best_rpc(&r, &mut vec![], None).await,
             Ok(OpenRequestResult::Handle(_))
@@ -1255,7 +1157,8 @@ mod tests {
             Some(Web3ProxyBlock::try_from(head_block.clone()).unwrap()),
             Some(Duration::from_millis(100)),
         )
-        .await;
+        .await
+        .unwrap();
         assert!(matches!(
             rpcs.wait_for_best_rpc(&r, &mut vec![], None,).await,
             Ok(OpenRequestResult::Handle(_))
@@ -1271,7 +1174,7 @@ mod tests {
             Some(Web3ProxyBlock::try_from(head_block.clone()).unwrap()),
             Some(Duration::from_millis(100)),
         )
-        .await;
+        .await.unwrap();
         let future_rpc = rpcs.wait_for_best_rpc(&r, &mut vec![], None).await;
 
         info!(?future_rpc);
@@ -1353,7 +1256,8 @@ mod tests {
             Some(head_block.clone()),
             Some(Duration::from_millis(100)),
         )
-        .await;
+        .await
+        .unwrap();
         let best_available_server = rpcs.wait_for_best_rpc(&r, &mut vec![], None).await.unwrap();
 
         debug!("best_available_server: {:#?}", best_available_server);
@@ -1463,7 +1367,8 @@ mod tests {
             Some(head_block.clone()),
             Some(Duration::from_millis(100)),
         )
-        .await;
+        .await
+        .unwrap();
         let best_available_server = rpcs.wait_for_best_rpc(&r, &mut vec![], None).await.unwrap();
 
         debug!("best_available_server: {:#?}", best_available_server);
@@ -1479,7 +1384,8 @@ mod tests {
             Some(head_block.clone()),
             Some(Duration::from_millis(100)),
         )
-        .await;
+        .await
+        .unwrap();
         let _best_available_server_from_none =
             rpcs.wait_for_best_rpc(&r, &mut vec![], None).await.unwrap();
 
@@ -1492,7 +1398,8 @@ mod tests {
             Some(head_block.clone()),
             Some(Duration::from_millis(100)),
         )
-        .await;
+        .await
+        .unwrap();
         let best_archive_server = rpcs.wait_for_best_rpc(&r, &mut vec![], None).await;
 
         match best_archive_server {
@@ -1661,7 +1568,8 @@ mod tests {
             Some(block_2.clone()),
             Some(Duration::from_millis(100)),
         )
-        .await;
+        .await
+        .unwrap();
 
         match &r.cache_mode {
             CacheMode::Standard {
@@ -1695,7 +1603,8 @@ mod tests {
             Some(block_2.clone()),
             Some(Duration::from_millis(100)),
         )
-        .await;
+        .await
+        .unwrap();
 
         match &r.cache_mode {
             CacheMode::Standard {

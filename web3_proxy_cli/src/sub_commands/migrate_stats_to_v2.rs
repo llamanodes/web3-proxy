@@ -201,7 +201,7 @@ impl MigrateStatsToV2SubCommand {
                         head_block: None,
                         // debug data is in kafka, not mysql or influx
                         kafka_debug_logger: None,
-                        request,
+                        inner: request,
                         // This is not relevant in the new version
                         no_servers: 0.into(),
                         response_bytes: int_response_bytes.into(),

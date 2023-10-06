@@ -329,7 +329,7 @@ async fn websocket_proxy_web3_rpc(
         "eth_subscribe" => {
             let web3_request =
                 Web3Request::new_with_app(app, authorization, None, json_request.into(), None)
-                    .await;
+                    .await?;
 
             // TODO: how can we subscribe with proxy_mode?
             match app
@@ -356,15 +356,15 @@ async fn websocket_proxy_web3_rpc(
         "eth_unsubscribe" => {
             let web3_request =
                 Web3Request::new_with_app(app, authorization, None, json_request.into(), None)
-                    .await;
+                    .await?;
 
             // sometimes we get a list, sometimes we get the id directly
             // check for the list first, then just use the whole thing
             let maybe_id = web3_request
-                .request
+                .inner
                 .params()
                 .get(0)
-                .unwrap_or_else(|| web3_request.request.params())
+                .unwrap_or_else(|| web3_request.inner.params())
                 .clone();
 
             let subscription_id: U64 = match serde_json::from_value::<U64>(maybe_id) {

@@ -1,14 +1,16 @@
 use super::one::Web3Rpc;
-use crate::errors::{Web3ProxyErrorContext, Web3ProxyResult};
+use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, AuthorizationType, Web3Request};
 use crate::globals::{global_db_conn, DB_CONN};
-use crate::jsonrpc::{self, JsonRpcResultData};
+use crate::jsonrpc::{self, JsonRpcErrorData, JsonRpcResultData, Payload};
+use anyhow::Context;
 use chrono::Utc;
 use derive_more::From;
 use entities::revert_log;
 use entities::sea_orm_active_enums::Method;
 use ethers::providers::ProviderError;
 use ethers::types::{Address, Bytes};
+use http::StatusCode;
 use migration::sea_orm::{self, ActiveEnum, ActiveModelTrait};
 use nanorand::Rng;
 use serde_json::json;
@@ -65,7 +67,7 @@ struct EthCallFirstParams {
 impl std::fmt::Debug for OpenRequestHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OpenRequestHandle")
-            .field("method", &self.web3_request.request.method())
+            .field("method", &self.web3_request.inner.method())
             .field("rpc", &self.rpc.name)
             .finish_non_exhaustive()
     }
@@ -169,21 +171,128 @@ impl OpenRequestHandle {
         self.rpc.clone()
     }
 
+    pub fn rate_limit_for(&self, x: Duration) {
+        // TODO: we actually only want to send if our value is greater
+
+        if self.rpc.backup {
+            debug!(?x, "rate limited on {}!", self.rpc);
+        } else {
+            warn!(?x, "rate limited on {}!", self.rpc);
+        }
+
+        self.rpc
+            .hard_limit_until
+            .as_ref()
+            .unwrap()
+            .send_replace(Instant::now() + x);
+    }
+
+    /// Just get the response from the provider without any extra handling.
+    /// This lets us use the try operator which makes it much easier to read
+    async fn _request<R: JsonRpcResultData + serde::Serialize>(
+        &self,
+    ) -> Web3ProxyResult<jsonrpc::SingleResponse<R>> {
+        // TODO: replace ethers-rs providers with our own that supports streaming the responses
+        // TODO: replace ethers-rs providers with our own that handles "id" being null
+        if let (Some(url), Some(ref client)) = (self.rpc.http_url.clone(), &self.rpc.http_client) {
+            // prefer the http provider
+            let request = self
+                .web3_request
+                .inner
+                .jsonrpc_request()
+                .context("there should always be a request here")?;
+
+            let response = client.post(url).json(request).send().await?;
+
+            if response.status() == StatusCode::TOO_MANY_REQUESTS {
+                // TODO: how much should we actually rate limit?
+                self.rate_limit_for(Duration::from_secs(1));
+            }
+
+            let response = response.error_for_status()?;
+
+            jsonrpc::SingleResponse::read_if_short(response, 1024, &self.web3_request).await
+        } else if let Some(p) = self.rpc.ws_provider.load().as_ref() {
+            // use the websocket provider if no http provider is available
+            let method = self.web3_request.inner.method();
+            let params = self.web3_request.inner.params();
+
+            // some ethers::ProviderError need to be converted to JsonRpcErrorData. the rest to Web3ProxyError
+            let response = match p.request::<_, R>(method, params).await {
+                Ok(x) => jsonrpc::ParsedResponse::from_result(x, self.web3_request.id()),
+                Err(provider_error) => match JsonRpcErrorData::try_from(&provider_error) {
+                    Ok(x) => jsonrpc::ParsedResponse::from_error(x, self.web3_request.id()),
+                    Err(ProviderError::HTTPError(error)) => {
+                        if let Some(status_code) = error.status() {
+                            if status_code == StatusCode::TOO_MANY_REQUESTS {
+                                // TODO: how much should we actually rate limit?
+                                self.rate_limit_for(Duration::from_secs(1));
+                            }
+                        }
+                        return Err(provider_error.into());
+                    }
+                    Err(err) => {
+                        warn!(?err, "error from {}", self.rpc);
+
+                        return Err(provider_error.into());
+                    }
+                },
+            };
+
+            Ok(response.into())
+        } else {
+            // this must be a test
+            Err(anyhow::anyhow!("no provider configured!").into())
+        }
+    }
+
+    pub fn error_handler(&self) -> RequestErrorHandler {
+        if let RequestErrorHandler::Save = self.error_handler {
+            let method = self.web3_request.inner.method();
+
+            // TODO: should all these be Trace or Debug or a mix?
+            // TODO: this list should come from config. other methods might be desired
+            if !["eth_call", "eth_estimateGas"].contains(&method) {
+                // trace!(%method, "skipping save on revert");
+                RequestErrorHandler::TraceLevel
+            } else if DB_CONN.read().is_ok() {
+                let log_revert_chance = self.web3_request.authorization.checks.log_revert_chance;
+
+                if log_revert_chance == 0 {
+                    // trace!(%method, "no chance. skipping save on revert");
+                    RequestErrorHandler::TraceLevel
+                } else if log_revert_chance == u16::MAX {
+                    // trace!(%method, "gaurenteed chance. SAVING on revert");
+                    self.error_handler
+                } else if nanorand::tls_rng().generate_range(0u16..u16::MAX) < log_revert_chance {
+                    // trace!(%method, "missed chance. skipping save on revert");
+                    RequestErrorHandler::TraceLevel
+                } else {
+                    // trace!("Saving on revert");
+                    // TODO: is always logging at debug level fine?
+                    self.error_handler
+                }
+            } else {
+                // trace!(%method, "no database. skipping save on revert");
+                RequestErrorHandler::TraceLevel
+            }
+        } else {
+            self.error_handler
+        }
+    }
+
     /// Send a web3 request
     /// By having the request method here, we ensure that the rate limiter was called and connection counts were properly incremented
     /// depending on how things are locked, you might need to pass the provider in
     /// we take self to ensure this function only runs once
-    /// TODO: abandon ProviderError
+    /// This does some inspection of the response to check for non-standard errors and rate limiting to try to give a Web3ProxyError instead of an Ok
     pub async fn request<R: JsonRpcResultData + serde::Serialize>(
         self,
-    ) -> Result<jsonrpc::SingleResponse<R>, ProviderError> {
+    ) -> Web3ProxyResult<jsonrpc::SingleResponse<R>> {
         // TODO: use tracing spans
         // TODO: including params in this log is way too verbose
         // trace!(rpc=%self.rpc, %method, "request");
         trace!("requesting from {}", self.rpc);
-
-        let method = self.web3_request.request.method();
-        let params = self.web3_request.request.params();
 
         let authorization = &self.web3_request.authorization;
 
@@ -202,50 +311,10 @@ impl OpenRequestHandle {
 
         // we used to fetch_add the active_request count here, but sometimes a request is made without going through this function (like with subscriptions)
 
+        // we generally don't want to use the try operator. we might need to log errors
         let start = Instant::now();
 
-        // TODO: replace ethers-rs providers with our own that supports streaming the responses
-        // TODO: replace ethers-rs providers with our own that handles "id" being null
-        let response: Result<jsonrpc::SingleResponse<R>, _> = if let (
-            Some(ref url),
-            Some(ref client),
-        ) =
-            (&self.rpc.http_url, &self.rpc.http_client)
-        {
-            let params: serde_json::Value = serde_json::to_value(params)?;
-
-            // TODO: why recreate this? we should be able to just use the one from the user
-            let request = jsonrpc::JsonRpcRequest::new(
-                self.web3_request.id().into(),
-                method.to_string(),
-                params,
-            )
-            .expect("request creation cannot fail");
-
-            match client.post(url.clone()).json(&request).send().await {
-                // TODO: threshold from configs
-                Ok(response) => {
-                    jsonrpc::SingleResponse::read_if_short(
-                        response,
-                        1024,
-                        self.web3_request.clone(),
-                    )
-                    .await
-                }
-                Err(err) => Err(err.into()),
-            }
-        } else if let Some(p) = self.rpc.ws_provider.load().as_ref() {
-            p.request(method, params)
-                .await
-                // TODO: Id here
-                .map(|result| {
-                    jsonrpc::ParsedResponse::from_result(result, Default::default()).into()
-                })
-        } else {
-            return Err(ProviderError::CustomError(
-                "no provider configured!".to_string(),
-            ));
-        };
+        let mut response = self._request().await;
 
         // measure successes and errors
         // originally i thought we wouldn't want errors, but I think it's a more accurate number including all requests
@@ -254,122 +323,111 @@ impl OpenRequestHandle {
         // we used to fetch_sub the active_request count here, but sometimes the handle is dropped without request being called!
 
         trace!(
-            "response from {} for {} {:?}: {:?}",
+            "response from {} for {}: {:?}",
             self.rpc,
-            method,
-            params,
+            self.web3_request,
             response,
         );
 
-        if let Err(err) = &response {
+        // TODO: move this to another helper
+        let response_is_success = match &response {
+            Ok(jsonrpc::SingleResponse::Parsed(x)) => match &x.payload {
+                Payload::Success { .. } => true,
+                _ => true,
+            },
+            Ok(jsonrpc::SingleResponse::Stream(..)) => true,
+            Err(_) => false,
+        };
+
+        if response_is_success {
             // only save reverts for some types of calls
             // TODO: do something special for eth_sendRawTransaction too
-            let error_handler = if let RequestErrorHandler::Save = self.error_handler {
-                // TODO: should all these be Trace or Debug or a mix?
-                if !["eth_call", "eth_estimateGas"].contains(&method) {
-                    // trace!(%method, "skipping save on revert");
-                    RequestErrorHandler::TraceLevel
-                } else if DB_CONN.read().is_ok() {
-                    let log_revert_chance =
-                        self.web3_request.authorization.checks.log_revert_chance;
-
-                    if log_revert_chance == 0 {
-                        // trace!(%method, "no chance. skipping save on revert");
-                        RequestErrorHandler::TraceLevel
-                    } else if log_revert_chance == u16::MAX {
-                        // trace!(%method, "gaurenteed chance. SAVING on revert");
-                        self.error_handler
-                    } else if nanorand::tls_rng().generate_range(0u16..u16::MAX) < log_revert_chance
-                    {
-                        // trace!(%method, "missed chance. skipping save on revert");
-                        RequestErrorHandler::TraceLevel
-                    } else {
-                        // trace!("Saving on revert");
-                        // TODO: is always logging at debug level fine?
-                        self.error_handler
-                    }
-                } else {
-                    // trace!(%method, "no database. skipping save on revert");
-                    RequestErrorHandler::TraceLevel
-                }
-            } else {
-                self.error_handler
-            };
-
-            // TODO: simple enum -> string derive?
-            // TODO: if ProviderError::UnsupportedRpc, we should retry on another server
-            #[derive(Debug)]
-            enum ResponseTypes {
-                Revert,
-                RateLimit,
-                Error,
-            }
-
-            // check for "execution reverted" here
-            // TODO: move this info a function on ResponseErrorType
-            let response_type = if let ProviderError::JsonRpcClientError(err) = err {
-                if let Some(_err) = err.as_serde_error() {
-                    // this seems to pretty much always be a rate limit error
-                    ResponseTypes::RateLimit
-                } else if let Some(err) = err.as_error_response() {
-                    // JsonRpc and Application errors get rolled into the JsonRpcClientError
-                    let msg = err.message.as_str();
-
-                    trace!(%msg, "jsonrpc error message");
-
-                    if msg.starts_with("execution reverted") {
-                        ResponseTypes::Revert
-                    } else if msg.contains("limit") || msg.contains("request") {
-                        // TODO! THIS HAS TOO MANY FALSE POSITIVES! Theres another spot in the code that checks for things.
-                        ResponseTypes::RateLimit
-                    } else {
-                        ResponseTypes::Error
-                    }
-                } else {
-                    // i don't think this is possible
-                    warn!(?err, "unexpected error");
-                    ResponseTypes::Error
-                }
-            } else {
-                ResponseTypes::Error
-            };
-
-            if matches!(response_type, ResponseTypes::RateLimit) {
-                if let Some(hard_limit_until) = self.rpc.hard_limit_until.as_ref() {
-                    // TODO: how long should we actually wait? different providers have different times
-                    // TODO: if rate_limit_period_seconds is set, use that
-                    // TODO: check response headers for rate limits too
-                    let retry_at = Instant::now() + Duration::from_secs(1);
-
-                    if self.rpc.backup {
-                        debug!(?retry_at, ?err, "rate limited on {}!", self.rpc);
-                    } else {
-                        warn!(?retry_at, ?err, "rate limited on {}!", self.rpc);
-                    }
-
-                    hard_limit_until.send_replace(retry_at);
-                }
-            }
-
-            // TODO: think more about the method and param logs. those can be sensitive information
             // we do **NOT** use self.error_handler here because it might have been modified
+            let error_handler = self.error_handler();
+
+            enum ResponseType {
+                Error,
+                Revert,
+                RateLimited,
+            }
+
+            let response_type: ResponseType = match &response {
+                Ok(jsonrpc::SingleResponse::Parsed(x)) => match &x.payload {
+                    Payload::Success { .. } => unimplemented!(),
+                    Payload::Error { error } => {
+                        trace!(?error, "jsonrpc error data");
+
+                        if error.message.starts_with("execution reverted") {
+                            ResponseType::Revert
+                        } else if error.code == StatusCode::TOO_MANY_REQUESTS.as_u16() as i64 {
+                            ResponseType::RateLimited
+                        } else {
+                            // TODO! THIS HAS TOO MANY FALSE POSITIVES! Theres another spot in the code that checks for things.
+                            // if error.message.contains("limit") || error.message.contains("request") {
+                            //     self.rate_limit_for(Duration::from_secs(1));
+                            // }
+
+                            match error.code {
+                                -32000 => {
+                                    // TODO: regex?
+                                    let archive_prefixes = [
+                                        "header not found",
+                                        "header for hash not found",
+                                        "missing trie node",
+                                    ];
+                                    for prefix in archive_prefixes {
+                                        if error.message.starts_with(prefix) {
+                                            // TODO: what error?
+                                            response = Err(Web3ProxyError::NoBlockNumberOrHash);
+                                            break;
+                                        }
+                                    }
+                                }
+                                -32601 => {
+                                    let error_msg = error.message.as_ref();
+
+                                    // sometimes a provider does not support all rpc methods
+                                    // we check other connections rather than returning the error
+                                    // but sometimes the method is something that is actually unsupported,
+                                    // so we save the response here to return it later
+
+                                    // some providers look like this
+                                    if (error_msg.starts_with("the method")
+                                        && error_msg.ends_with("is not available"))
+                                        || error_msg == "Method not found"
+                                    {
+                                        let method = self.web3_request.inner.method().to_string();
+
+                                        response =
+                                            Err(Web3ProxyError::MethodNotFound(method.into()))
+                                    }
+                                }
+                                _ => {}
+                            }
+
+                            ResponseType::Error
+                        }
+                    }
+                },
+                Ok(_) => unreachable!(),
+                Err(_) => ResponseType::Error,
+            };
+
             match error_handler {
                 RequestErrorHandler::DebugLevel => {
                     // TODO: think about this revert check more. sometimes we might want reverts logged so this needs a flag
-                    if matches!(response_type, ResponseTypes::Revert) {
+                    if matches!(response_type, ResponseType::Revert) {
                         trace!(
                             rpc=%self.rpc,
-                            %method,
-                            ?params,
-                            ?err,
+                            %self.web3_request,
+                            ?response,
                             "revert",
                         );
                     } else {
                         debug!(
                             rpc=%self.rpc,
-                            %method,
-                            ?params,
-                            ?err,
+                            %self.web3_request,
+                            ?response,
                             "bad response",
                         );
                     }
@@ -377,18 +435,16 @@ impl OpenRequestHandle {
                 RequestErrorHandler::InfoLevel => {
                     info!(
                         rpc=%self.rpc,
-                        %method,
-                        ?params,
-                        ?err,
+                        %self.web3_request,
+                        ?response,
                         "bad response",
                     );
                 }
                 RequestErrorHandler::TraceLevel => {
                     trace!(
                         rpc=%self.rpc,
-                        %method,
-                        ?params,
-                        ?err,
+                        %self.web3_request,
+                        ?response,
                         "bad response",
                     );
                 }
@@ -396,9 +452,8 @@ impl OpenRequestHandle {
                     // TODO: only include params if not running in release mode
                     error!(
                         rpc=%self.rpc,
-                        %method,
-                        ?params,
-                        ?err,
+                        %self.web3_request,
+                        ?response,
                         "bad response",
                     );
                 }
@@ -406,38 +461,43 @@ impl OpenRequestHandle {
                     // TODO: only include params if not running in release mode
                     warn!(
                         rpc=%self.rpc,
-                        %method,
-                        ?params,
-                        ?err,
+                        %self.web3_request,
+                        ?response,
                         "bad response",
                     );
                 }
                 RequestErrorHandler::Save => {
                     trace!(
                         rpc=%self.rpc,
-                        %method,
-                        ?params,
-                        ?err,
+                        %self.web3_request,
+                        ?response,
                         "bad response",
                     );
 
                     // TODO: do not unwrap! (doesn't matter much since we check method as a string above)
-                    let method: Method = Method::try_from_value(&method.to_string()).unwrap();
+                    // TODO: open this up for even more methods
+                    let method: Method =
+                        Method::try_from_value(&self.web3_request.inner.method().to_string())
+                            .unwrap();
 
                     // TODO: i don't think this prsing is correct
-                    match serde_json::from_value::<EthCallParams>(json!(params)) {
+                    match serde_json::from_value::<EthCallParams>(json!(self
+                        .web3_request
+                        .inner
+                        .params()))
+                    {
                         Ok(params) => {
                             // spawn saving to the database so we don't slow down the request
                             // TODO: log if this errors
+                            // TODO: aren't the method and params already saved? this should just need the response
                             let f = authorization.clone().save_revert(method, params.0 .0);
 
                             tokio::spawn(f);
                         }
                         Err(err) => {
                             warn!(
-                                ?method,
-                                ?params,
-                                ?err,
+                                %self.web3_request,
+                                ?response,
                                 "failed parsing eth_call params. unable to save revert",
                             );
                         }

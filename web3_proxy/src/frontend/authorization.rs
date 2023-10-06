@@ -33,12 +33,12 @@ use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::{RedisRateLimitResult, RedisRateLimiter};
+use serde::ser::SerializeStruct;
 use serde::Serialize;
 use serde_json::json;
 use serde_json::value::RawValue;
 use std::borrow::Cow;
-use std::fmt::Debug;
-use std::fmt::Display;
+use std::fmt::{self, Debug, Display};
 use std::hash::{Hash, Hasher};
 use std::mem;
 use std::num::NonZeroU64;
@@ -158,7 +158,7 @@ pub struct Web3Request {
     /// TODO: this should be in a global config. not copied to every single request
     pub usd_per_cu: Decimal,
 
-    pub request: RequestOrMethod,
+    pub inner: RequestOrMethod,
 
     /// Instant that the request was received (or at least close to it)
     /// We use Instant and not timestamps to avoid problems with leap seconds and similar issues
@@ -193,6 +193,56 @@ pub struct Web3Request {
 
     /// Cancel-safe channel for sending stats to the buffer
     pub stat_sender: Option<mpsc::UnboundedSender<AppStat>>,
+}
+
+impl Display for Web3Request {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}({})",
+            self.inner.method(),
+            serde_json::to_string(self.inner.params()).expect("this should always serialize")
+        )
+    }
+}
+
+impl Serialize for Web3Request {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("request", 7)?;
+
+        state.serialize_field(
+            "archive_request",
+            &self.archive_request.load(atomic::Ordering::Relaxed),
+        )?;
+
+        state.serialize_field("chain_id", &self.chain_id)?;
+
+        state.serialize_field("head_block", &self.head_block)?;
+        state.serialize_field("request", &self.inner)?;
+
+        state.serialize_field("elapsed", &self.start_instant.elapsed().as_secs_f32())?;
+
+        {
+            let backend_names = self.backend_requests.lock();
+
+            let backend_names = backend_names
+                .iter()
+                .map(|x| x.name.as_str())
+                .collect::<Vec<_>>();
+
+            state.serialize_field("backend_requests", &backend_names)?;
+        }
+
+        state.serialize_field(
+            "response_bytes",
+            &self.response_bytes.load(atomic::Ordering::Relaxed),
+        )?;
+
+        state.end()
+    }
 }
 
 impl Default for Authorization {
@@ -278,6 +328,7 @@ impl ResponseOrBytes<'_> {
 impl Web3Request {
     #[allow(clippy::too_many_arguments)]
     async fn new_with_options(
+        app: Option<&Web3ProxyApp>,
         authorization: Arc<Authorization>,
         chain_id: u64,
         head_block: Option<Web3ProxyBlock>,
@@ -286,8 +337,7 @@ impl Web3Request {
         mut request: RequestOrMethod,
         stat_sender: Option<mpsc::UnboundedSender<AppStat>>,
         usd_per_cu: Decimal,
-        app: Option<&Web3ProxyApp>,
-    ) -> Arc<Self> {
+    ) -> Web3ProxyResult<Arc<Self>> {
         let start_instant = Instant::now();
 
         // TODO: get this default from config, or from user settings
@@ -306,6 +356,8 @@ impl Web3Request {
         }
 
         // now that kafka has logged the user's original params, we can calculate the cache key
+
+        // TODO: modify CacheMode::new to wait for a future block if one is requested! be sure to update head_block too!
         let cache_mode = match &mut request {
             RequestOrMethod::Request(x) => CacheMode::new(x, head_block.as_ref(), app).await,
             _ => CacheMode::Never,
@@ -322,7 +374,7 @@ impl Web3Request {
             head_block: head_block.clone(),
             kafka_debug_logger,
             no_servers: 0.into(),
-            request,
+            inner: request,
             response_bytes: 0.into(),
             response_from_backup_rpc: false.into(),
             response_millis: 0.into(),
@@ -333,7 +385,7 @@ impl Web3Request {
             user_error_response: false.into(),
         };
 
-        Arc::new(x)
+        Ok(Arc::new(x))
     }
 
     pub async fn new_with_app(
@@ -342,7 +394,7 @@ impl Web3Request {
         max_wait: Option<Duration>,
         request: RequestOrMethod,
         head_block: Option<Web3ProxyBlock>,
-    ) -> Arc<Self> {
+    ) -> Web3ProxyResult<Arc<Self>> {
         // TODO: get this out of tracing instead (where we have a String from Amazon's LB)
         let request_ulid = Ulid::new();
 
@@ -365,6 +417,7 @@ impl Web3Request {
         let usd_per_cu = app.config.usd_per_cu.unwrap_or_default();
 
         Self::new_with_options(
+            Some(app),
             authorization,
             chain_id,
             head_block,
@@ -373,7 +426,6 @@ impl Web3Request {
             request,
             stat_sender,
             usd_per_cu,
-            Some(app),
         )
         .await
     }
@@ -383,7 +435,7 @@ impl Web3Request {
         params: &P,
         head_block: Option<Web3ProxyBlock>,
         max_wait: Option<Duration>,
-    ) -> Arc<Self> {
+    ) -> Web3ProxyResult<Arc<Self>> {
         let authorization = Arc::new(Authorization::internal().unwrap());
 
         // TODO: we need a real id! increment a counter on the app
@@ -396,6 +448,7 @@ impl Web3Request {
             Self::new_with_app(app, authorization, max_wait, request.into(), head_block).await
         } else {
             Self::new_with_options(
+                None,
                 authorization,
                 0,
                 head_block,
@@ -404,7 +457,6 @@ impl Web3Request {
                 request.into(),
                 None,
                 Default::default(),
-                None,
             )
             .await
         }
@@ -419,7 +471,7 @@ impl Web3Request {
         match &self.cache_mode {
             CacheMode::Never => None,
             x => {
-                let x = JsonRpcQueryCacheKey::new(x, &self.request).hash();
+                let x = JsonRpcQueryCacheKey::new(x, &self.inner).hash();
 
                 Some(x)
             }
@@ -433,7 +485,7 @@ impl Web3Request {
 
     #[inline]
     pub fn id(&self) -> Box<RawValue> {
-        self.request.id()
+        self.inner.id()
     }
 
     pub fn max_block_needed(&self) -> Option<U64> {

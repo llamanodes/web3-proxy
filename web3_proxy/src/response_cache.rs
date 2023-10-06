@@ -86,6 +86,7 @@ impl<'a> JsonRpcQueryCacheKey<'a> {
     }
 }
 
+// TODO: i think if we change this to Arc<JsonRpcResponseEnum<Box<RawValue>>>, we can speed things up
 pub type JsonRpcResponseCache = Cache<u64, JsonRpcResponseEnum<Arc<RawValue>>>;
 
 /// TODO: we might need one that holds RawValue and one that holds serde_json::Value
@@ -201,15 +202,10 @@ impl TryFrom<Web3ProxyError> for JsonRpcResponseEnum<Arc<RawValue>> {
 
     fn try_from(value: Web3ProxyError) -> Result<Self, Self::Error> {
         match value {
-            Web3ProxyError::EthersProvider(err) => {
-                if let Ok(x) = JsonRpcErrorData::try_from(&err) {
-                    let x = x.into();
-
-                    Ok(x)
-                } else {
-                    Err(err.into())
-                }
-            }
+            Web3ProxyError::EthersProvider(err) => match JsonRpcErrorData::try_from(&err) {
+                Ok(x) => Ok(x.into()),
+                Err(..) => Err(err.into()),
+            },
             Web3ProxyError::NullJsonRpcResult => Ok(JsonRpcResponseEnum::NullResult),
             Web3ProxyError::JsonRpcResponse(x) => Ok(x),
             Web3ProxyError::JsonRpcErrorData(err) => Ok(err.into()),
@@ -277,10 +273,16 @@ impl<'a> TryFrom<&'a ProviderError> for JsonRpcErrorData {
     fn try_from(e: &'a ProviderError) -> Result<Self, Self::Error> {
         match e {
             ProviderError::JsonRpcClientError(err) => {
-                if let Some(err) = err.as_error_response() {
-                    Ok(err.into())
-                } else {
-                    Err(e)
+                match err.as_error_response() {
+                    Some(err) => {
+                        // this isn't safe to do because we don't have the id of the request
+                        Ok(JsonRpcErrorData {
+                            code: err.code,
+                            message: err.message.clone().into(),
+                            data: err.data.clone(),
+                        })
+                    }
+                    None => Err(e),
                 }
             }
             e => Err(e),

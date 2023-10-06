@@ -259,11 +259,12 @@ where
 {
     // TODO: threshold from configs
     // TODO: error handling
+    // TODO: if a large stream's response's initial chunk "error" then we should buffer it
     pub async fn read_if_short(
         mut response: reqwest::Response,
         nbytes: u64,
-        web3_request: Arc<Web3Request>,
-    ) -> Result<SingleResponse<T>, ProviderError> {
+        web3_request: &Arc<Web3Request>,
+    ) -> Web3ProxyResult<SingleResponse<T>> {
         Ok(Self::from_bytes(response.bytes().await?)?)
         /*
         match response.content_length() {
@@ -510,29 +511,30 @@ impl JsonRpcRequestEnum {
 
         // TODO: create a stat so we can penalize
         // TODO: what request size
-        let metadata = Web3Request::new_with_app(
+        let request = Web3Request::new_with_app(
             app,
             authorization.clone(),
             None,
             RequestOrMethod::Method("invalid_method".into(), size),
             None,
         )
-        .await;
+        .await
+        .unwrap();
 
-        metadata
+        request
             .user_error_response
             .store(true, atomic::Ordering::Release);
 
         let response = Web3ProxyError::BadRequest("request failed validation".into());
 
-        metadata.add_response(&response);
+        request.add_response(&response);
 
         let response = response.into_response_with_id(Some(err_id));
 
         // TODO: variable duration depending on the IP
         sleep(duration).await;
 
-        let _ = metadata.try_send_arc_stat();
+        let _ = request.try_send_arc_stat();
 
         Err(response)
     }

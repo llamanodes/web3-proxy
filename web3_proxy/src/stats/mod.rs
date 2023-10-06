@@ -555,7 +555,7 @@ impl RpcQueryStats {
         // TODO: do this without cloning. we can take their vec
         let backend_rpcs_used = metadata.backend_rpcs_used();
 
-        let request_bytes = metadata.request.num_bytes() as u64;
+        let request_bytes = metadata.inner.num_bytes() as u64;
         let response_bytes = metadata.response_bytes.load(Ordering::Relaxed);
 
         let mut error_response = metadata.error_response.load(Ordering::Relaxed);
@@ -587,7 +587,7 @@ impl RpcQueryStats {
             x => x,
         };
 
-        let cu = ComputeUnit::new(metadata.request.method(), metadata.chain_id, response_bytes);
+        let cu = ComputeUnit::new(metadata.inner.method(), metadata.chain_id, response_bytes);
 
         let cache_hit = backend_rpcs_used.is_empty();
 
@@ -598,7 +598,7 @@ impl RpcQueryStats {
             &metadata.usd_per_cu,
         );
 
-        let method = metadata.request.method().to_string().into();
+        let method = metadata.inner.method().to_string().into();
 
         let x = Self {
             archive_request,

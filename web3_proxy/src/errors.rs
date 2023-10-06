@@ -152,12 +152,13 @@ pub enum Web3ProxyError {
     #[error(ignore)]
     #[from(ignore)]
     RefererNotAllowed(headers::Referer),
+    Reqwest(reqwest::Error),
     SemaphoreAcquireError(AcquireError),
     SerdeJson(serde_json::Error),
     SiweVerification(VerificationError),
     /// simple way to return an error message to the user and an anyhow to our logs
     #[display(fmt = "{}, {}, {:?}", _0, _1, _2)]
-    StatusCode(StatusCode, Cow<'static, str>, Option<anyhow::Error>),
+    StatusCode(StatusCode, Cow<'static, str>, Option<serde_json::Value>),
     StripeWebhookError(stripe::WebhookError),
     /// TODO: what should be attached to the timout?
     #[display(fmt = "{:?}", _0)]
@@ -239,8 +240,16 @@ impl Web3ProxyError {
                 )
             }
             Self::Arc(err) => {
-                // recurse
-                return err.as_response_parts();
+                // recurse somehow. Web3ProxyError isn't clone and we can't moe out of it
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcErrorData {
+                        // TODO: is it safe to expose all of our anyhow strings?
+                        message: "INTERNAL SERVER ERROR".into(),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: Some(serde_json::Value::String(err.to_string())),
+                    },
+                )
             }
             Self::BadRequest(err) => {
                 trace!(?err, "BAD_REQUEST");
@@ -320,11 +329,12 @@ impl Web3ProxyError {
                     },
                 )
             }
-            Self::EthersHttpClient(err) => {
-                if let Ok(err) = JsonRpcErrorData::try_from(err) {
+            Self::EthersHttpClient(err) => match JsonRpcErrorData::try_from(err) {
+                Ok(err) => {
                     trace!(?err, "EthersHttpClient jsonrpc error");
                     (StatusCode::OK, err)
-                } else {
+                }
+                Err(err) => {
                     warn!(?err, "EthersHttpClient");
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
@@ -335,12 +345,13 @@ impl Web3ProxyError {
                         },
                     )
                 }
-            }
-            Self::EthersProvider(err) => {
-                if let Ok(err) = JsonRpcErrorData::try_from(err) {
+            },
+            Self::EthersProvider(err) => match JsonRpcErrorData::try_from(err) {
+                Ok(err) => {
                     trace!(?err, "EthersProvider jsonrpc error");
                     (StatusCode::OK, err)
-                } else {
+                }
+                Err(err) => {
                     warn!(?err, "EthersProvider");
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
@@ -351,12 +362,13 @@ impl Web3ProxyError {
                         },
                     )
                 }
-            }
-            Self::EthersWsClient(err) => {
-                if let Ok(err) = JsonRpcErrorData::try_from(err) {
+            },
+            Self::EthersWsClient(err) => match JsonRpcErrorData::try_from(err) {
+                Ok(err) => {
                     trace!(?err, "EthersWsClient jsonrpc error");
                     (StatusCode::OK, err)
-                } else {
+                }
+                Err(err) => {
                     warn!(?err, "EthersWsClient");
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
@@ -367,7 +379,7 @@ impl Web3ProxyError {
                         },
                     )
                 }
-            }
+            },
             // Self::JsonRpcForwardedError(x) => (StatusCode::OK, x),
             Self::GasEstimateNotU256 => {
                 trace!("GasEstimateNotU256");
@@ -606,7 +618,7 @@ impl Web3ProxyError {
             Self::JsonRejection(err) => {
                 trace!(?err, "JsonRejection");
 
-                let (message, code): (&str, _) = match err {
+                let (message, code): (&str, _) = match &err {
                     JsonRejection::JsonDataError(_) => ("Invalid Request", -32600),
                     JsonRejection::JsonSyntaxError(_) => ("Parse error", -32700),
                     JsonRejection::MissingJsonContentType(_) => ("Invalid Request", -32600),
@@ -933,6 +945,17 @@ impl Web3ProxyError {
                     },
                 )
             }
+            Self::Reqwest(err) => {
+                warn!(?err, "reqwest");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcErrorData {
+                        message: "reqwest error!".into(),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: Some(serde_json::Value::String(err.to_string())),
+                    },
+                )
+            }
             Self::SemaphoreAcquireError(err) => {
                 error!(?err, "semaphore acquire");
                 (
@@ -967,21 +990,22 @@ impl Web3ProxyError {
                     },
                 )
             }
-            Self::StatusCode(status_code, err_msg, err) => {
+            Self::StatusCode(status_code, err_msg, data) => {
                 // different status codes should get different error levels. 500s should warn. 400s should stat
                 let code = status_code.as_u16();
                 if (500..600).contains(&code) {
-                    warn!(%err_msg, ?err, "server error {}", code);
+                    warn!(?data, "server error {}: {}", code, err_msg);
                 } else {
-                    trace!(%err_msg, ?err, "user error {}", code);
+                    trace!(?data, "user error {}: {}", code, err_msg);
                 }
 
+                // TODO: would be great to do this without the cloning! Something blocked that and I didn't write a comment about it though
                 (
                     *status_code,
                     JsonRpcErrorData {
                         message: err_msg.clone(),
                         code: code.into(),
-                        data: None,
+                        data: data.clone(),
                     },
                 )
             }

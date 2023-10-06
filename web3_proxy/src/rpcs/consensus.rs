@@ -121,6 +121,7 @@ pub struct RankedRpcs {
     sort_mode: SortMethod,
 }
 
+// TODO: could these be refs? The owning RankedRpcs lifetime might work. `stream!` might make it complicated
 pub struct RpcsForRequest {
     inner: Vec<Arc<Web3Rpc>>,
     outer: Vec<Arc<Web3Rpc>>,

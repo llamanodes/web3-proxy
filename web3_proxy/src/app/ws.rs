@@ -30,7 +30,7 @@ impl Web3ProxyApp {
         response_sender: mpsc::Sender<Message>,
     ) -> Web3ProxyResult<(AbortHandle, jsonrpc::ParsedResponse)> {
         let subscribe_to = web3_request
-            .request
+            .inner
             .params()
             .get(0)
             .and_then(|x| x.as_str())
@@ -89,43 +89,55 @@ impl Web3ProxyApp {
                         )
                         .await;
 
-                        if let Some(close_message) = app
-                            .rate_limit_close_websocket(&subscription_web3_request)
-                            .await
-                        {
-                            let _ = response_sender.send(close_message).await;
-                            break;
+                        match subscription_web3_request {
+                            Err(err) => {
+                                error!(?err, "error creating subscription_web3_request");
+                                // TODO: send them an error message before closing
+                                break;
+                            }
+                            Ok(subscription_web3_request) => {
+                                if let Some(close_message) = app
+                                    .rate_limit_close_websocket(&subscription_web3_request)
+                                    .await
+                                {
+                                    // TODO: send them a message so they know they were rate limited
+                                    let _ = response_sender.send(close_message).await;
+                                    break;
+                                }
+
+                                // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
+                                let response_json = json!({
+                                    "jsonrpc": "2.0",
+                                    "method":"eth_subscription",
+                                    "params": {
+                                        "subscription": subscription_id,
+                                        // TODO: option to include full transaction objects instead of just the hashes?
+                                        "result": subscription_web3_request.head_block.as_ref().map(|x| &x.0),
+                                    },
+                                });
+
+                                let response_str = serde_json::to_string(&response_json)
+                                    .expect("this should always be valid json");
+
+                                // we could use JsonRpcForwardedResponseEnum::num_bytes() here, but since we already have the string, this is easier
+                                let response_bytes = response_str.len();
+
+                                // TODO: do clients support binary messages?
+                                // TODO: can we check a content type header?
+                                let response_msg = Message::Text(response_str);
+
+                                if response_sender.send(response_msg).await.is_err() {
+                                    // TODO: increment error_response? i don't think so. i think this will happen once every time a client disconnects.
+                                    // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
+                                    break;
+                                };
+
+                                subscription_web3_request.add_response(response_bytes);
+                            }
                         }
-
-                        // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
-                        let response_json = json!({
-                            "jsonrpc": "2.0",
-                            "method":"eth_subscription",
-                            "params": {
-                                "subscription": subscription_id,
-                                // TODO: option to include full transaction objects instead of just the hashes?
-                                "result": subscription_web3_request.head_block.as_ref().map(|x| &x.0),
-                            },
-                        });
-
-                        let response_str = serde_json::to_string(&response_json)
-                            .expect("this should always be valid json");
-
-                        // we could use JsonRpcForwardedResponseEnum::num_bytes() here, but since we already have the string, this is easier
-                        let response_bytes = response_str.len();
-
-                        // TODO: do clients support binary messages?
-                        // TODO: can we check a content type header?
-                        let response_msg = Message::Text(response_str);
-
-                        if response_sender.send(response_msg).await.is_err() {
-                            // TODO: increment error_response? i don't think so. i think this will happen once every time a client disconnects.
-                            // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
-                            break;
-                        };
-
-                        subscription_web3_request.add_response(response_bytes);
                     }
+
+                    let _ = response_sender.send(Message::Close(None)).await;
 
                     trace!("closed newHeads subscription {:?}", subscription_id);
                 });
@@ -144,7 +156,7 @@ impl Web3ProxyApp {
 
                     while let Some(Ok(new_txid)) = pending_txid_firehose.next().await {
                         // TODO: include the head_block here?
-                        let subscription_web3_request = Web3Request::new_with_app(
+                        match Web3Request::new_with_app(
                             &app,
                             authorization.clone(),
                             None,
@@ -154,45 +166,55 @@ impl Web3ProxyApp {
                             ),
                             None,
                         )
-                        .await;
-
-                        // check if we should close the websocket connection
-                        if let Some(close_message) = app
-                            .rate_limit_close_websocket(&subscription_web3_request)
-                            .await
+                        .await
                         {
-                            let _ = response_sender.send(close_message).await;
-                            break;
+                            Err(err) => {
+                                error!(?err, "error creating subscription_web3_request");
+                                // what should we do to turn this error into a message for them?
+                                break;
+                            }
+                            Ok(subscription_web3_request) => {
+                                // check if we should close the websocket connection
+                                if let Some(close_message) = app
+                                    .rate_limit_close_websocket(&subscription_web3_request)
+                                    .await
+                                {
+                                    let _ = response_sender.send(close_message).await;
+                                    break;
+                                }
+
+                                // TODO: make a struct/helper function for this
+                                let response_json = json!({
+                                    "jsonrpc": "2.0",
+                                    "method":"eth_subscription",
+                                    "params": {
+                                        "subscription": subscription_id,
+                                        "result": new_txid,
+                                    },
+                                });
+
+                                let response_str = serde_json::to_string(&response_json)
+                                    .expect("this should always be valid json");
+
+                                // we could use JsonRpcForwardedResponseEnum::num_bytes() here, but since we already have the string, this is easier
+                                let response_bytes = response_str.len();
+
+                                subscription_web3_request.add_response(response_bytes);
+
+                                // TODO: do clients support binary messages?
+                                // TODO: can we check a content type header?
+                                let response_msg = Message::Text(response_str);
+
+                                if response_sender.send(response_msg).await.is_err() {
+                                    // TODO: increment error_response? i don't think so. i think this will happen once every time a client disconnects.
+                                    // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
+                                    break;
+                                }
+                            }
                         }
-
-                        // TODO: make a struct/helper function for this
-                        let response_json = json!({
-                            "jsonrpc": "2.0",
-                            "method":"eth_subscription",
-                            "params": {
-                                "subscription": subscription_id,
-                                "result": new_txid,
-                            },
-                        });
-
-                        let response_str = serde_json::to_string(&response_json)
-                            .expect("this should always be valid json");
-
-                        // we could use JsonRpcForwardedResponseEnum::num_bytes() here, but since we already have the string, this is easier
-                        let response_bytes = response_str.len();
-
-                        subscription_web3_request.add_response(response_bytes);
-
-                        // TODO: do clients support binary messages?
-                        // TODO: can we check a content type header?
-                        let response_msg = Message::Text(response_str);
-
-                        if response_sender.send(response_msg).await.is_err() {
-                            // TODO: increment error_response? i don't think so. i think this will happen once every time a client disconnects.
-                            // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
-                            break;
-                        };
                     }
+
+                    let _ = response_sender.send(Message::Close(None)).await;
 
                     trace!(
                         "closed newPendingTransactions subscription {:?}",
