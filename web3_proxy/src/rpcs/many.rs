@@ -9,7 +9,7 @@ use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::Web3Request;
 use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::frontend::status::MokaCacheSerializer;
-use crate::jsonrpc::{self, JsonRpcErrorData, JsonRpcParams, JsonRpcResultData};
+use crate::jsonrpc::{self, JsonRpcErrorData, JsonRpcParams, JsonRpcResultData, ParsedResponse};
 use counter::Counter;
 use derive_more::From;
 use ethers::prelude::{TxHash, U64};
@@ -544,9 +544,9 @@ impl Web3Rpcs {
                                         // this error contains "limit" but is not a rate limit error
                                         // TODO: make the expected limit configurable
                                         // TODO: parse the rate_limit_substr and only continue if it is < expected limit
-                                        if error_msg.contains("exceeding limit 2000000")
+                                        if error_msg.contains("exceeding limit 16000000")
                                             || error_msg.ends_with(
-                                                "exceeding --rpc.returndata.limit 2000000",
+                                                "exceeding --rpc.returndata.limit 16000000",
                                             )
                                         {
                                             // they hit our expected limit. return the error now
@@ -622,11 +622,13 @@ impl Web3Rpcs {
         }
 
         if let Some(err) = last_jsonrpc_error {
-            return Ok(err.into());
+            // TODO: set user_error here instead of above
+            return Err(err.into());
         }
 
         if let Some(err) = last_provider_error {
-            return Err(err.into());
+            // TODO: set server_error instead of above
+            return Err(Web3ProxyError::from(err));
         }
 
         if let Some(err) = method_not_available_response {
