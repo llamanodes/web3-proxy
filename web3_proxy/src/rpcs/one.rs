@@ -1154,15 +1154,14 @@ impl Hash for Web3Rpc {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // do not include automatic block limit because it can change
         // do not include tier because it can change
+
         self.backup.hash(state);
         self.created_at.hash(state);
         self.display_name.hash(state);
         self.name.hash(state);
 
-        // TODO: url does NOT include the authorization data. i think created_at should protect us if auth changes without anything else
         self.http_url.hash(state);
-        // TODO: figure out how to get the url for the ws provider
-        // self.ws_provider.map(|x| x.url()).hash(state);
+        self.ws_url.hash(state);
 
         // TODO: don't include soft_limit if we change them to be dynamic
         self.soft_limit.hash(state);
