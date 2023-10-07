@@ -10,7 +10,7 @@ use crate::jsonrpc::{self, JsonRpcParams, JsonRpcResultData};
 use crate::rpcs::request::RequestErrorHandler;
 use anyhow::{anyhow, Context};
 use arc_swap::ArcSwapOption;
-use ethers::prelude::{Address, Bytes, Middleware, Transaction, TxHash, H256, U256, U64};
+use ethers::prelude::{Address, Bytes, Middleware, Transaction, TxHash, U256, U64};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use latency::{EwmaLatency, PeakEwmaLatency, RollingQuantileLatency};
