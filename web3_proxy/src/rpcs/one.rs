@@ -259,7 +259,7 @@ impl Web3Rpc {
         &self,
         max_block: Option<U64>,
         start_instant: Instant,
-    ) -> (Reverse<Instant>, bool, Reverse<U64>, u32) {
+    ) -> (Instant, bool, Reverse<U64>, u32) {
         let mut head_block = self
             .head_block_sender
             .as_ref()
@@ -276,7 +276,7 @@ impl Web3Rpc {
 
         let next_available = self.next_available(start_instant);
 
-        (Reverse(next_available), !backup, Reverse(head_block), tier)
+        (next_available, !backup, Reverse(head_block), tier)
     }
 
     /// sort with `sort_on` and then on `weighted_peak_latency`

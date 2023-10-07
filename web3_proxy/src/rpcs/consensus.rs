@@ -1011,6 +1011,12 @@ impl RpcsForRequest {
 
         stream! {
             loop {
+                if self.request.ttl_expired() {
+                    break;
+                } else {
+                    yield_now().await;
+                }
+
                 let mut earliest_retry_at = None;
                 let mut wait_for_sync = None;
 
@@ -1130,7 +1136,17 @@ impl RpcsForRequest {
                     (Some(wait_for_sync), Some(retry_at)) => {
                         select! {
                             x = wait_for_sync => {
-                                todo!()
+                                match x {
+                                    Ok(rpc) => {
+                                        trace!(%rpc, "rpc ready. it might be used on the next loop");
+                                        // TODO: try a handle now?
+                                        continue;
+                                    },
+                                    Err(err) => {
+                                        trace!(?err, "problem while waiting for an rpc for a request");
+                                        break;
+                                    },
+                                }
                             }
                             _ = sleep_until(retry_at) => {
                                 yield_now().await;
