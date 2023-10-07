@@ -18,6 +18,7 @@ use latency::{EwmaLatency, PeakEwmaLatency, RollingQuantileLatency};
 use migration::sea_orm::DatabaseConnection;
 use nanorand::tls::TlsWyRand;
 use nanorand::Rng;
+use ordered_float::OrderedFloat;
 use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
@@ -276,17 +277,24 @@ impl Web3Rpc {
         (Reverse(next_available), !backup, Reverse(head_block), tier)
     }
 
-    /// TODO: move this to consensus.rs
+    /// sort with `sort_on` and then on `weighted_peak_latency`
+    /// This is useful when you care about latency over spreading the load
+    /// For example, use this when selecting rpcs for balanced_rpcs
+    /// TODO: move this to consensus.rs?
     pub fn sort_for_load_balancing_on(
         &self,
         max_block: Option<U64>,
         start_instant: Instant,
-    ) -> ((Reverse<Instant>, bool, Reverse<U64>, u32), Duration) {
+    ) -> (
+        (Reverse<Instant>, bool, Reverse<U64>, u32),
+        OrderedFloat<f32>,
+    ) {
         let sort_on = self.sort_on(max_block, start_instant);
 
-        let weighted_peak_latency = self.weighted_peak_latency();
+        // TODO: i think median is better than weighted at this point. we save checking weighted for the very end
+        let median_latency = OrderedFloat::from(self.median_latency.as_ref().unwrap().seconds());
 
-        let x = (sort_on, weighted_peak_latency);
+        let x = (sort_on, median_latency);
 
         trace!("sort_for_load_balancing {}: {:?}", self, x);
 
@@ -294,6 +302,8 @@ impl Web3Rpc {
     }
 
     /// like sort_for_load_balancing, but shuffles tiers randomly instead of sorting by weighted_peak_latency
+    /// This is useful when you care about spreading the load over latency.
+    /// For example, use this when selecting rpcs for protected_rpcs
     /// TODO: move this to consensus.rs
     /// TODO: this return type is too complex
     pub fn shuffle_for_load_balancing_on(
