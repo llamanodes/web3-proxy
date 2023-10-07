@@ -265,8 +265,6 @@ where
         nbytes: u64,
         web3_request: &Arc<Web3Request>,
     ) -> Web3ProxyResult<SingleResponse<T>> {
-        Ok(Self::from_bytes(response.bytes().await?)?)
-        /*
         match response.content_length() {
             // short
             Some(len) if len <= nbytes => Ok(Self::from_bytes(response.bytes().await?)?),
@@ -274,8 +272,9 @@ where
             Some(_) => Ok(Self::Stream(StreamResponse {
                 buffer: Bytes::new(),
                 response,
-                web3_request,
+                web3_request: web3_request.clone(),
             })),
+            // unknown length. maybe compressed. maybe streaming. maybe both
             None => {
                 let mut buffer = BytesMut::new();
                 while (buffer.len() as u64) < nbytes {
@@ -283,18 +282,22 @@ where
                         Some(chunk) => {
                             buffer.extend_from_slice(&chunk);
                         }
-                        None => return Ok(Self::from_bytes(buffer.freeze())?),
+                        None => {
+                            // it was short
+                            return Ok(Self::from_bytes(buffer.freeze())?);
+                        }
                     }
                 }
+
+                // we've read nbytes of the response, but there is more to come
                 let buffer = buffer.freeze();
                 Ok(Self::Stream(StreamResponse {
                     buffer,
                     response,
-                    web3_request,
+                    web3_request: web3_request.clone(),
                 }))
             }
         }
-        */
     }
 
     fn from_bytes(buf: Bytes) -> Result<Self, serde_json::Error> {
