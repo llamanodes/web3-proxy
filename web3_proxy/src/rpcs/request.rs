@@ -176,20 +176,19 @@ impl OpenRequestHandle {
         self.rpc.clone()
     }
 
-    pub fn rate_limit_for(&self, x: Duration) {
-        // TODO: we actually only want to send if our value is greater
-
+    pub fn rate_limit_for(&self, duration: Duration) {
         if self.rpc.backup {
-            debug!(?x, "rate limited on {}!", self.rpc);
+            debug!(?duration, "rate limited on {}!", self.rpc);
         } else {
-            warn!(?x, "rate limited on {}!", self.rpc);
+            warn!(?duration, "rate limited on {}!", self.rpc);
         }
 
+        // TODO: use send_if_modified to be sure we only send if our value is greater
         self.rpc
             .hard_limit_until
             .as_ref()
             .unwrap()
-            .send_replace(Instant::now() + x);
+            .send_replace(Instant::now() + duration);
     }
 
     /// Just get the response from the provider without any extra handling.
