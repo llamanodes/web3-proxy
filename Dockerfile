@@ -110,7 +110,7 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/app/target_test \
     set -eux -o pipefail; \
     \
-    export CARGO_TARGET_DIR=target_test \
+    export CARGO_TARGET_DIR=target_test; \
     [ -e "$(pwd)/payment-contracts/src/contracts/mod.rs" ] || touch "$(pwd)/payment-contracts/build.rs"; \
     RUST_LOG=web3_proxy=trace,info \
     cargo \
