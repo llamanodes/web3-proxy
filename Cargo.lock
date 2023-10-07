@@ -6590,7 +6590,7 @@ dependencies = [
 
 [[package]]
 name = "web3_proxy"
-version = "1.43.15"
+version = "1.43.16"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -6672,7 +6672,7 @@ dependencies = [
 
 [[package]]
 name = "web3_proxy_cli"
-version = "1.43.15"
+version = "1.43.16"
 dependencies = [
  "env_logger",
  "parking_lot",
