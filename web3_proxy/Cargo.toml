@@ -1,6 +1,6 @@
 [package]
 name = "web3_proxy"
-version = "1.43.20"
+version = "1.43.21"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -73,7 +73,7 @@ mimalloc = { version = "0.1.39", optional = true }
 moka = { version = "0.12.1", default-features = false, features = ["atomic64", "future", "quanta"] }
 nanorand = { version = "0.7.0", default-features = false, features = ["std", "tls", "wyrand"] }
 num = { version = "0.4.1" }
-num-traits = "0.2.16"
+num-traits = "0.2.17"
 once_cell = { version = "1.18.0" }
 ordered-float = {version = "4.1.0" }
 pagerduty-rs = { version = "0.1.6", default-features = false, features = ["async", "sync"] }
