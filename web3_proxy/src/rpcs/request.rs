@@ -10,21 +10,26 @@ use entities::revert_log;
 use entities::sea_orm_active_enums::Method;
 use ethers::providers::ProviderError;
 use ethers::types::{Address, Bytes};
+use futures::Future;
 use http::StatusCode;
 use migration::sea_orm::{self, ActiveEnum, ActiveModelTrait};
 use nanorand::Rng;
 use serde_json::json;
+use std::pin::Pin;
 use std::sync::atomic;
 use std::sync::Arc;
 use tokio::time::{Duration, Instant};
 use tracing::{debug, error, info, trace, warn, Level};
 
-#[derive(Debug, From)]
+#[derive(From)]
 pub enum OpenRequestResult {
     Handle(OpenRequestHandle),
     /// Unable to start a request. Retry at the given time.
     RetryAt(Instant),
-    /// Unable to start a request because no servers are synced
+    /// The rpc are not synced, but they should be soon.
+    /// You should wait for the given block number.
+    Lagged(Pin<Box<dyn Future<Output = Web3ProxyResult<()>> + Send>>),
+    /// Unable to start a request because no servers are synced or the necessary data has been pruned
     NotReady,
 }
 
