@@ -905,18 +905,12 @@ impl ConsensusFinder {
 
         let num_known = self.rpc_heads.len();
 
-        if num_known < web3_rpcs.min_synced_rpcs {
-            // this keeps us from serving requests when the proxy first starts
-            info!(%num_known, min_synced_rpcs=%web3_rpcs.min_synced_rpcs, "not enough servers known");
-            return Ok(None);
-        }
-
         // TODO: also track the sum of *available* hard_limits? if any servers have no hard limits, use their soft limit or no limit?
         // TODO: struct for the value of the votes hashmap?
         let mut primary_votes: HashMap<Web3ProxyBlock, (HashSet<&Arc<Web3Rpc>>, u32)> =
-            Default::default();
+            HashMap::with_capacity(num_known);
         let mut backup_votes: HashMap<Web3ProxyBlock, (HashSet<&Arc<Web3Rpc>>, u32)> =
-            Default::default();
+            HashMap::with_capacity(num_known);
 
         for (rpc, rpc_head) in self.rpc_heads.iter() {
             let mut block_to_check = rpc_head.clone();
