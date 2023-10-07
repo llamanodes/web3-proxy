@@ -206,6 +206,7 @@ fn main() -> anyhow::Result<()> {
         (None, None)
     };
 
+    // TODO: put sentry behind a feature
     let sentry_env = std::env::var("SENTRY_ENV")
         .map(Cow::from)
         .unwrap_or("production".into());

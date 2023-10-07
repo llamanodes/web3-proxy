@@ -105,6 +105,7 @@ impl ProxydSubCommand {
             {
                 let mut current_config = config_sender.borrow().clone();
 
+                // TODO: move this to a helper function
                 thread::spawn(move || loop {
                     match fs::read_to_string(&top_config_path) {
                         Ok(new_top_config) => {
@@ -140,7 +141,7 @@ impl ProxydSubCommand {
                     }
 
                     // TODO: wait for SIGHUP instead?
-                    // TODO: wait for file to change instead of polling?
+                    // TODO: wait for file to change instead of polling. file notifications are really fragile depending on the system and setup though
                     thread::sleep(Duration::from_secs(10));
                 });
             }
@@ -157,11 +158,13 @@ impl ProxydSubCommand {
         }
 
         info!("waiting for head block");
-        let max_wait_until = Instant::now() + Duration::from_secs(35);
+        let max_wait_until = Instant::now() + Duration::from_secs(30);
         loop {
             select! {
                 _ = sleep_until(max_wait_until) => {
-                    return Err(anyhow::anyhow!("oh no! we never got a head block!"))
+                    // TODO: an error would be fine if we had automated alerting in sentry
+                    // for now, alerts are mostly in pagerduty and pagerduty alerts on panics
+                    panic!("oh no! we never got a head block!");
                 }
                 _ = head_block_receiver.changed() => {
                     if let Some(head_block) = head_block_receiver
@@ -171,6 +174,7 @@ impl ProxydSubCommand {
                         info!(head_hash=?head_block.hash(), head_num=%head_block.number());
                         break;
                     } else {
+                        // this is very unlikely to happen
                         info!("no head block yet!");
                         continue;
                     }
