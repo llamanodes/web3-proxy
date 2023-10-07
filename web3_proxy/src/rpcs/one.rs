@@ -252,7 +252,8 @@ impl Web3Rpc {
     /// TODO: tests on this!
     /// TODO: should tier or block number take priority?
     /// TODO: should this return a struct that implements sorting traits?
-    /// TODO: move this to consensus.rs
+    /// TODO: better return type!
+    /// TODO: move this to consensus.rs?
     fn sort_on(
         &self,
         max_block: Option<U64>,
@@ -281,6 +282,7 @@ impl Web3Rpc {
     /// This is useful when you care about latency over spreading the load
     /// For example, use this when selecting rpcs for balanced_rpcs
     /// TODO: move this to consensus.rs?
+    /// TODO: better return type!
     pub fn sort_for_load_balancing_on(
         &self,
         max_block: Option<U64>,
@@ -292,9 +294,13 @@ impl Web3Rpc {
         let sort_on = self.sort_on(max_block, start_instant);
 
         // TODO: i think median is better than weighted at this point. we save checking weighted for the very end
-        let median_latency = OrderedFloat::from(self.median_latency.as_ref().unwrap().seconds());
+        let median_latency = self
+            .median_latency
+            .as_ref()
+            .map(|x| x.seconds())
+            .unwrap_or_default();
 
-        let x = (sort_on, median_latency);
+        let x = (sort_on, OrderedFloat::from(median_latency));
 
         trace!("sort_for_load_balancing {}: {:?}", self, x);
 
@@ -304,8 +310,8 @@ impl Web3Rpc {
     /// like sort_for_load_balancing, but shuffles tiers randomly instead of sorting by weighted_peak_latency
     /// This is useful when you care about spreading the load over latency.
     /// For example, use this when selecting rpcs for protected_rpcs
-    /// TODO: move this to consensus.rs
-    /// TODO: this return type is too complex
+    /// TODO: move this to consensus.rs?
+    /// TODO: better return type
     pub fn shuffle_for_load_balancing_on(
         &self,
         max_block: Option<U64>,
@@ -458,7 +464,8 @@ impl Web3Rpc {
             }
             true
         } else {
-            false
+            // do we want true or false here? false is accurate, but it stops the proxy from sending any requests so I think we want to lie
+            true
         }
     }
 
@@ -872,8 +879,6 @@ impl Web3Rpc {
                     break;
                 }
 
-                // this should always work
-                // todo!("this has a bug! it gets full very quickly when no one is subscribed!");
                 pending_txid_firehose.send(x).await;
             }
         } else {
@@ -1017,6 +1022,14 @@ impl Web3Rpc {
 
                     sleep_until(retry_at).await;
                 }
+                Ok(OpenRequestResult::Lagged(now_synced_f)) => {
+                    select! {
+                        _ = now_synced_f => {}
+                        _ = sleep_until(web3_request.expire_instant) => {
+                            break;
+                        }
+                    }
+                }
                 Ok(OpenRequestResult::NotReady) => {
                     // TODO: when can this happen? log? emit a stat?
                     trace!("{} has no handle ready", self);
@@ -1119,11 +1132,54 @@ impl Web3Rpc {
         web3_request: &Arc<Web3Request>,
         error_handler: Option<RequestErrorHandler>,
     ) -> Web3ProxyResult<OpenRequestResult> {
+        // TODO: check a boolean set by health checks?
         // TODO: if websocket is reconnecting, return an error?
 
-        // TODO: if this server can't handle this request because it isn't synced, return an error
+        // make sure this block has the oldest block that this request needs
+        // TODO: should this check be optional? we've probably already done it for RpcForRuest::inner. for now its fine to duplicate the check
+        if let Some(block_needed) = web3_request.min_block_needed() {
+            if !self.has_block_data(block_needed) {
+                return Ok(OpenRequestResult::NotReady);
+            }
+        }
 
-        // check shared rate limits
+        // make sure this block has the newest block that this request needs
+        // TODO: should this check be optional? we've probably already done it for RpcForRuest::inner. for now its fine to duplicate the check
+        if let Some(block_needed) = web3_request.max_block_needed() {
+            if !self.has_block_data(block_needed) {
+                let clone = self.clone();
+                let expire_instant = web3_request.expire_instant;
+
+                let synced_f = async move {
+                    let mut head_block_receiver =
+                        clone.head_block_sender.as_ref().unwrap().subscribe();
+
+                    // TODO: if head_block is far behind block_needed, retrurn now
+
+                    loop {
+                        select! {
+                            _ = head_block_receiver.changed() => {
+                                if let Some(head_block) = head_block_receiver.borrow_and_update().clone() {
+                                    if head_block.number() >= block_needed {
+                                        // the block we needed has arrived!
+                                        break;
+                                    }
+                                }
+                            }
+                            _ = sleep_until(expire_instant) => {
+                                return Err(Web3ProxyError::NoServersSynced);
+                            }
+                        }
+                    }
+
+                    Ok(())
+                };
+
+                return Ok(OpenRequestResult::Lagged(Box::pin(synced_f)));
+            }
+        }
+
+        // check rate limits
         match self.try_throttle().await? {
             RedisRateLimitResult::Allowed(_) => {}
             RedisRateLimitResult::RetryAt(retry_at, _) => {

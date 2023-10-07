@@ -139,14 +139,13 @@ impl RankedRpcs {
 
         let num_synced = rpcs.len();
 
-        // TODO: do we need real data in  here? if we are calling from_rpcs, we probably don't even track their block
-        let mut rpc_data = HashMap::<Arc<Web3Rpc>, ConsensusRpcData>::with_capacity(num_synced);
-
-        for rpc in rpcs.iter().cloned() {
-            let data = ConsensusRpcData::new(&rpc, &head_block);
-
-            rpc_data.insert(rpc, data);
-        }
+        let rpc_data = Default::default();
+        // TODO: do we need real data in rpc_data? if we are calling from_rpcs, we probably don't even track their block
+        // let mut rpc_data = HashMap::<Arc<Web3Rpc>, ConsensusRpcData>::with_capacity(num_synced);
+        // for rpc in rpcs.iter().cloned() {
+        //     let data = ConsensusRpcData::new(&rpc, &head_block);
+        //     rpc_data.insert(rpc, data);
+        // }
 
         let sort_mode = SortMethod::Shuffle;
 
@@ -245,51 +244,67 @@ impl RankedRpcs {
             return None;
         }
 
+        let head_block = self.head_block.number();
+
         // these are bigger than we need, but how much does that matter?
         let mut inner = Vec::with_capacity(self.num_active_rpcs());
         let mut outer = Vec::with_capacity(self.num_active_rpcs());
 
-        // TODO: what if min is set to some future block?
-        let max_block_needed = web3_request
-            .max_block_needed()
-            .or_else(|| web3_request.head_block.as_ref().map(|x| x.number()));
-        let min_block_needed = web3_request.min_block_needed();
-
-        for rpc in &self.inner {
-            match self.rpc_will_work_eventually(rpc, min_block_needed, max_block_needed) {
-                ShouldWaitForBlock::NeverReady => continue,
-                ShouldWaitForBlock::Ready => inner.push(rpc.clone()),
-                ShouldWaitForBlock::Wait { .. } => outer.push(rpc.clone()),
-            }
-        }
-
-        let mut rng = nanorand::tls_rng();
-
-        // TODO: use web3_request.start_instant? I think we want it to be now
-        let now = Instant::now();
+        let max_block_needed = web3_request.max_block_needed();
 
         match self.sort_mode {
             SortMethod::Shuffle => {
-                // we use shuffle instead of sort. we will compare weights when iterating RankedRpcsForRequest
+                // if we are shuffling, it is because we don't watch the head_blocks of the rpcs
+                // clone all of the rpcs
+                self.inner.clone_into(&mut inner);
+
+                let mut rng = nanorand::tls_rng();
+
+                // we use shuffle instead of sort. we will compare weights during `RpcsForRequest::to_stream`
+                // TODO: use web3_request.start_instant? I think we want it to be as recent as possible
+                let now = Instant::now();
+
                 inner.sort_by_cached_key(|x| {
-                    x.shuffle_for_load_balancing_on(max_block_needed, &mut rng, now)
-                });
-                outer.sort_by_cached_key(|x| {
                     x.shuffle_for_load_balancing_on(max_block_needed, &mut rng, now)
                 });
             }
             SortMethod::Sort => {
-                // we use shuffle instead of sort. we will compare weights when iterating RankedRpcsForRequest
+                // TODO: what if min is set to some future block?
+                let min_block_needed = web3_request.min_block_needed();
+
+                // TODO: max lag from config
+                let recent_block_needed = head_block.saturating_sub(U64::from(5));
+
+                for rpc in &self.inner {
+                    if self.has_block_data(rpc, recent_block_needed) {
+                        match self.rpc_will_work_eventually(rpc, min_block_needed, max_block_needed)
+                        {
+                            ShouldWaitForBlock::NeverReady => continue,
+                            ShouldWaitForBlock::Ready => inner.push(rpc.clone()),
+                            ShouldWaitForBlock::Wait { .. } => outer.push(rpc.clone()),
+                        }
+                    }
+                }
+
+                let now = Instant::now();
+
+                // we use shuffle instead of sort. we will compare weights during `RpcsForRequest::to_stream`
                 inner.sort_by_cached_key(|x| x.sort_for_load_balancing_on(max_block_needed, now));
                 outer.sort_by_cached_key(|x| x.sort_for_load_balancing_on(max_block_needed, now));
             }
         }
 
-        Some(RpcsForRequest {
-            inner,
-            outer,
-            request: web3_request.clone(),
-        })
+        if inner.is_empty() && outer.is_empty() {
+            warn!(?inner, ?outer, %web3_request, %head_block, "no rpcs for request");
+            None
+        } else {
+            trace!(?inner, ?outer, %web3_request, "for_request");
+            Some(RpcsForRequest {
+                inner,
+                outer,
+                request: web3_request.clone(),
+            })
+        }
     }
 
     pub fn all(&self) -> &[Arc<Web3Rpc>] {
@@ -1001,6 +1016,7 @@ impl RpcsForRequest {
         stream! {
             loop {
                 let mut earliest_retry_at = None;
+                let mut wait_for_sync = None;
 
                 // first check the inners
                 // TODO: DRY
@@ -1029,6 +1045,14 @@ impl RpcsForRequest {
                             );
 
                             earliest_retry_at = earliest_retry_at.min(Some(retry_at));
+                            continue;
+                        }
+                        Ok(OpenRequestResult::Lagged(..)) => {
+                            trace!("{} is lagged. will not work now", best_rpc);
+                            // this will probably always be the same block, right?
+                            if wait_for_sync.is_none() {
+                                wait_for_sync = Some(best_rpc);
+                            }
                             continue;
                         }
                         Ok(OpenRequestResult::NotReady) => {
@@ -1068,6 +1092,7 @@ impl RpcsForRequest {
                     }
                 }
 
+                // TODO: if block_needed, do something with it here. not sure how best to subscribe
                 if let Some(retry_at) = earliest_retry_at {
                     if self.request.expire_instant <= retry_at {
                         break;
