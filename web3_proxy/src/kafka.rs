@@ -50,7 +50,7 @@ impl KafkaDebugLogger {
             .unwrap_or_default();
 
         let kafka_key =
-            rmp_serde::to_vec(&rpc_secret_key_id).expect("ids should always serialize with rmp");
+            serde_json::to_vec(&rpc_secret_key_id).expect("ids should always serialize with rmp");
 
         let chain_id = app.config.chain_id;
 
@@ -134,7 +134,7 @@ impl KafkaDebugLogger {
     pub fn log_debug_request(&self, request: &RequestOrMethod) -> JoinHandle<KafkaLogResult> {
         // TODO: is rust message pack a good choice? try rkyv instead
         let payload =
-            rmp_serde::to_vec(&request).expect("requests should always serialize with rmp");
+            serde_json::to_vec(&request).expect("requests should always serialize with rmp");
 
         self.num_requests.fetch_add(1, atomic::Ordering::Relaxed);
 
@@ -146,7 +146,7 @@ impl KafkaDebugLogger {
         R: serde::Serialize,
     {
         let payload =
-            rmp_serde::to_vec(&response).expect("requests should always serialize with rmp");
+            serde_json::to_vec(&response).expect("requests should always serialize with rmp");
 
         self.num_responses.fetch_add(1, atomic::Ordering::Relaxed);
 

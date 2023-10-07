@@ -19,7 +19,6 @@ pub use pagerduty_rs;
 pub use parking_lot;
 pub use rdkafka;
 pub use reqwest;
-pub use rmp_serde;
 pub use rust_decimal;
 pub use sentry;
 pub use sentry_tracing;

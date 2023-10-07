@@ -9,7 +9,6 @@ use web3_proxy::prelude::rdkafka::{
     consumer::{Consumer, StreamConsumer},
     ClientConfig, Message,
 };
-use web3_proxy::prelude::rmp_serde;
 use web3_proxy::prelude::uuid::Uuid;
 use web3_proxy::secrets::RpcSecretKey;
 use web3_proxy::{config::TopConfig, relational_db::connect_db};
@@ -50,7 +49,7 @@ impl SearchKafkaSubCommand {
             rpc_key_id = Some(x.id);
         }
 
-        let wanted_kafka_key = rpc_key_id.map(|x| rmp_serde::to_vec(&x).unwrap());
+        let wanted_kafka_key = rpc_key_id.map(|x| serde_json::to_vec(&x).unwrap());
 
         let wanted_kafka_key = wanted_kafka_key.as_ref().map(|x| &x[..]);
 

@@ -81,7 +81,7 @@ RUN --mount=type=cache,target=/root/.cargo/git \
 FROM rust as rust_with_env
 
 # changing our features doesn't change any of the steps above
-ENV WEB3_PROXY_FEATURES "rdkafka-src"
+ENV WEB3_PROXY_FEATURES "rdkafka-src,stripe"
 
 # copy the app
 COPY . .

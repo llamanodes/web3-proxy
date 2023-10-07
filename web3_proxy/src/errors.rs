@@ -98,9 +98,6 @@ pub enum Web3ProxyError {
     #[display(fmt = "{:?}", _0)]
     #[error(ignore)]
     JsonRpcErrorData(JsonRpcErrorData),
-    #[display(fmt = "{:?}", _0)]
-    #[error(ignore)]
-    MsgPackEncode(rmp_serde::encode::Error),
     NoBlockNumberOrHash,
     NoBlocksKnown,
     NoConsensusHeadBlock,
@@ -159,6 +156,7 @@ pub enum Web3ProxyError {
     /// simple way to return an error message to the user and an anyhow to our logs
     #[display(fmt = "{}, {}, {:?}", _0, _1, _2)]
     StatusCode(StatusCode, Cow<'static, str>, Option<serde_json::Value>),
+    #[cfg(feature = "stripe")]
     StripeWebhookError(stripe::WebhookError),
     /// TODO: what should be attached to the timout?
     #[display(fmt = "{:?}", _0)]
@@ -658,17 +656,6 @@ impl Web3ProxyError {
                     },
                 )
             }
-            Self::MsgPackEncode(err) => {
-                warn!(?err, "MsgPackEncode");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcErrorData {
-                        message: "msgpack encode error".into(),
-                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
-                    },
-                )
-            }
             Self::NoBlockNumberOrHash => {
                 warn!("NoBlockNumberOrHash");
                 (
@@ -1009,6 +996,7 @@ impl Web3ProxyError {
                     },
                 )
             }
+            #[cfg(feature = "stripe")]
             Self::StripeWebhookError(err) => {
                 trace!(?err, "StripeWebhookError");
                 (

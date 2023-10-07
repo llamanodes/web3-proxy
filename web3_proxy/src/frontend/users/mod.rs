@@ -1,11 +1,13 @@
 //! Handle registration, logins, and managing account data.
 pub mod authentication;
 pub mod payment;
-pub mod payment_stripe;
 pub mod referral;
 pub mod rpc_keys;
 pub mod stats;
 pub mod subuser;
+
+#[cfg(feature = "stripe")]
+pub mod payment_stripe;
 
 use crate::app::Web3ProxyApp;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};

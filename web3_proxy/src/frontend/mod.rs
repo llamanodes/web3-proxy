@@ -18,7 +18,7 @@ use axum::{
 };
 use http::{header::AUTHORIZATION, Request, StatusCode};
 use hyper::Body;
-use listenfd::ListenFd;
+
 use moka::future::{Cache, CacheBuilder};
 use std::sync::Arc;
 use std::{iter::once, time::Duration};
@@ -29,6 +29,9 @@ use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 use tower_http::{cors::CorsLayer, normalize_path::NormalizePathLayer, trace::TraceLayer};
 use tracing::{error_span, info, trace_span};
 use ulid::Ulid;
+
+#[cfg(feature = "listenfd")]
+use listenfd::ListenFd;
 
 /// simple keys for caching responses
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, EnumCount, EnumIter)]
@@ -59,7 +62,7 @@ pub async fn serve(
     // TODO: read config for if fastest/versus should be available publicly. default off
 
     // build our axum Router
-    let router = Router::new()
+    let mut router = Router::new()
         // TODO: i think these routes could be done a lot better
         //
         // HTTP RPC (POST)
@@ -180,10 +183,6 @@ pub async fn serve(
             get(users::payment::user_admin_deposits_get),
         )
         .route(
-            "/user/balance/stripe",
-            post(users::payment_stripe::user_balance_stripe_post),
-        )
-        .route(
             "/user/balance/:tx_hash",
             post(users::payment::user_balance_post),
         )
@@ -247,7 +246,17 @@ pub async fn serve(
         .route(
             "/admin/imitate_login",
             post(admin::admin_imitate_login_post),
-        )
+        );
+
+    #[cfg(feature = "stripe")]
+    {
+        router = router.route(
+            "/user/balance/stripe",
+            post(users::payment_stripe::user_balance_stripe_post),
+        );
+    }
+
+    router = router
         //
         // Axum layers
         // layers are ordered bottom up
@@ -301,6 +310,7 @@ pub async fn serve(
 
     // TODO: https://docs.rs/tower-http/latest/tower_http/propagate_header/index.html
 
+    #[cfg(feature = "listenfd")]
     let server_builder = if let Some(listener) = ListenFd::from_env().take_tcp_listener(0)? {
         // use systemd socket magic for no downtime deploys
         let addr = listener.local_addr()?;
@@ -310,6 +320,12 @@ pub async fn serve(
         axum::Server::from_tcp(listener)?
     } else {
         // TODO: allow only listening on localhost? top_config.app.host.parse()?
+        let addr = SocketAddr::from(([0, 0, 0, 0], app.frontend_port.load(Ordering::Relaxed)));
+
+        axum::Server::try_bind(&addr)?
+    };
+    #[cfg(not(feature = "listenfd"))]
+    let server_builder = {
         let addr = SocketAddr::from(([0, 0, 0, 0], app.frontend_port.load(Ordering::Relaxed)));
 
         axum::Server::try_bind(&addr)?
