@@ -30,6 +30,7 @@ use std::sync::atomic::{self, AtomicU32, AtomicU64, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
 use tokio::select;
 use tokio::sync::{mpsc, watch, RwLock as AsyncRwLock};
+use tokio::task::yield_now;
 use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
 use tracing::{debug, error, info, trace, warn, Level};
 use url::Url;
@@ -1024,7 +1025,10 @@ impl Web3Rpc {
                 }
                 Ok(OpenRequestResult::Lagged(now_synced_f)) => {
                     select! {
-                        _ = now_synced_f => {}
+                        _ = now_synced_f => {
+                            // TODO: i'm guessing this is returning immediatly
+                            yield_now().await;
+                        }
                         _ = sleep_until(web3_request.expire_instant) => {
                             break;
                         }
@@ -1155,15 +1159,25 @@ impl Web3Rpc {
                         clone.head_block_sender.as_ref().unwrap().subscribe();
 
                     // TODO: if head_block is far behind block_needed, retrurn now
+                    head_block_receiver.borrow_and_update();
 
                     loop {
                         select! {
                             _ = head_block_receiver.changed() => {
-                                if let Some(head_block) = head_block_receiver.borrow_and_update().clone() {
-                                    if head_block.number() >= block_needed {
+                                if let Some(head_block_number) = head_block_receiver.borrow_and_update().as_ref().map(|x| x.number()) {
+                                    if head_block_number >= block_needed {
                                         // the block we needed has arrived!
                                         break;
                                     }
+                                    // TODO: configurable lag per chain
+                                    if head_block_number < block_needed.saturating_sub(5.into()) {
+                                        // TODO: more detailed error about this being a far future block
+                                        return Err(Web3ProxyError::NoServersSynced);
+                                    }
+                                } else {
+                                    // TODO: what should we do? this server has no blocks at all. we can wait, but i think exiting now is best
+                                    // yield_now().await;
+                                    return Err(Web3ProxyError::NoServersSynced);
                                 }
                             }
                             _ = sleep_until(expire_instant) => {
@@ -1172,7 +1186,7 @@ impl Web3Rpc {
                         }
                     }
 
-                    Ok(())
+                    Ok(clone)
                 };
 
                 return Ok(OpenRequestResult::Lagged(Box::pin(synced_f)));

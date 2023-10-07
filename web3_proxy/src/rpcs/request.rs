@@ -28,7 +28,8 @@ pub enum OpenRequestResult {
     RetryAt(Instant),
     /// The rpc are not synced, but they should be soon.
     /// You should wait for the given block number.
-    Lagged(Pin<Box<dyn Future<Output = Web3ProxyResult<()>> + Send>>),
+    /// TODO: should this return an OpenRequestHandle? that might recurse
+    Lagged(Pin<Box<dyn Future<Output = Web3ProxyResult<Arc<Web3Rpc>>> + Send>>),
     /// Unable to start a request because no servers are synced or the necessary data has been pruned
     NotReady,
 }
@@ -340,7 +341,7 @@ impl OpenRequestHandle {
             Ok(jsonrpc::SingleResponse::Parsed(x)) => {
                 matches!(&x.payload, Payload::Success { .. })
             }
-            Ok(jsonrpc::SingleResponse::Stream(..)) => false,
+            Ok(jsonrpc::SingleResponse::Stream(..)) => true,
             Err(_) => false,
         };
 

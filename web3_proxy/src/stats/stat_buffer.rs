@@ -137,7 +137,7 @@ impl StatBuffer {
             interval(Duration::from_secs(self.db_save_interval_seconds as u64));
 
         // TODO: this should be a FlushedStats that we add to
-        let mut total_frontend_requests = 0;
+        let mut total_requests = 0;
         let mut tsdb_frontend_requests = 0;
         let mut tsdb_internal_requests = 0;
         let mut db_frontend_requests = 0;
@@ -147,7 +147,7 @@ impl StatBuffer {
             select! {
                 stat = stat_receiver.recv() => {
                     if let Some(stat) = stat {
-                        total_frontend_requests += self._buffer_app_stat(stat).await?;
+                        total_requests += self._buffer_app_stat(stat).await?;
 
                         // TODO: if buffers are big, flush now?
                     } else {
@@ -232,7 +232,7 @@ impl StatBuffer {
         db_internal_requests += flushed_stats.relational_internal_requests;
 
         // TODO: if these totals don't match, something is wrong! log something or maybe even return an error
-        info!(%total_frontend_requests, %tsdb_frontend_requests, %tsdb_internal_requests, %db_frontend_requests, %db_internal_requests, "accounting and stat save loop complete");
+        info!(%total_requests, %tsdb_frontend_requests, %tsdb_internal_requests, %db_frontend_requests, %db_internal_requests, "accounting and stat save loop complete");
 
         Ok(())
     }

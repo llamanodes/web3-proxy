@@ -19,6 +19,8 @@ use serde::Serialize;
 use std::cmp::{min_by_key, Ordering, Reverse};
 use std::sync::{atomic, Arc};
 use std::time::Duration;
+use tokio::select;
+use tokio::task::yield_now;
 use tokio::time::{sleep_until, Instant};
 use tracing::{debug, enabled, info, trace, warn, Level};
 
@@ -1041,11 +1043,11 @@ impl RpcsForRequest {
                             earliest_retry_at = earliest_retry_at.min(Some(retry_at));
                             continue;
                         }
-                        Ok(OpenRequestResult::Lagged(..)) => {
+                        Ok(OpenRequestResult::Lagged(x)) => {
                             trace!("{} is lagged. will not work now", best_rpc);
                             // this will probably always be the same block, right?
                             if wait_for_sync.is_none() {
-                                wait_for_sync = Some(best_rpc);
+                                wait_for_sync = Some(x);
                             }
                             continue;
                         }
@@ -1086,14 +1088,56 @@ impl RpcsForRequest {
                     }
                 }
 
-                // TODO: if block_needed, do something with it here. not sure how best to subscribe
+                // if we got this far, no rpcs are ready
+
+                // clear earliest_retry_at if it is too far in the future to help us
                 if let Some(retry_at) = earliest_retry_at {
                     if self.request.expire_instant <= retry_at {
+                        // no point in waiting. it wants us to wait too long
+                        earliest_retry_at = None;
+                    }
+                }
+
+                match (wait_for_sync, earliest_retry_at) {
+                    (None, None) => {
+                        // we have nothing to wait for. uh oh!
                         break;
                     }
-                    sleep_until(retry_at).await;
-                } else {
-                    break;
+                    (None, Some(retry_at)) => {
+                        // try again after rate limits are done
+                        sleep_until(retry_at).await;
+                    }
+                    (Some(wait_for_sync), None) => {
+                        select! {
+                            x = wait_for_sync => {
+                                match x {
+                                    Ok(rpc) => {
+                                        trace!(%rpc, "rpc ready. it might be used on the next loop");
+                                        // TODO: try a handle now?
+                                        continue;
+                                    },
+                                    Err(err) => {
+                                        trace!(?err, "problem while waiting for an rpc for a request");
+                                        break;
+                                    },
+                                }
+                            }
+                            _ = sleep_until(self.request.expire_instant) => {
+                                break;
+                            }
+                        }
+                    }
+                    (Some(wait_for_sync), Some(retry_at)) => {
+                        select! {
+                            x = wait_for_sync => {
+                                todo!()
+                            }
+                            _ = sleep_until(retry_at) => {
+                                yield_now().await;
+                                continue;
+                            }
+                        }
+                    }
                 }
             }
         }
