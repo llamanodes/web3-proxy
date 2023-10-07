@@ -29,7 +29,7 @@ influxdb2-structmap = { git = "https://github.com/llamanodes/influxdb2/", rev = 
 
 # TODO: we can't actually use 0.6 because they want a Provider and we have an Arc<Provider>
 # TODO: this has features ethers which probably brings in things. make sure it has the minimal features
-siwe = { git = "https://github.com/llamanodes/siwe-rs", rev = "266f494143a4ea627e1d4090d725a5ef77535f67", features = ["ethers", "serde"] }
+siwe = { git = "https://github.com/llamanodes/siwe-rs", branch = "for_web3_proxy", features = ["ethers", "serde"] }
 
 # TODO: regex has several "perf" features that we might want to use
 # TODO: make sure this uuid version matches sea-orm. PR to put this in their prelude

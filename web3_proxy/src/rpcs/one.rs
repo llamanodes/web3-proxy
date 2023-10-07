@@ -847,16 +847,10 @@ impl Web3Rpc {
 
         if let Some(ws_provider) = self.ws_provider.load().as_ref() {
             // todo: move subscribe_blocks onto the request handle
-            let error_handler = Some(Level::ERROR.into());
-
-            // we don't actually care about params here. we aren't going to use this handle for
-            let active_request_handle = self
-                .internal_request::<_, H256>("eth_subscribe", &(), error_handler, None)
-                .await;
+            self.wait_for_throttle(Instant::now() + Duration::from_secs(5))
+                .await?;
 
             let mut pending_txs_sub = ws_provider.subscribe_pending_txs().await?;
-
-            drop(active_request_handle);
 
             while let Some(x) = pending_txs_sub.next().await {
                 if *subscribe_stop_rx.borrow_and_update() {

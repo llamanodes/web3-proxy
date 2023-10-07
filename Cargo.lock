@@ -5230,7 +5230,7 @@ checksum = "38b58827f4464d87d377d175e90bf58eb00fd8716ff0a62f80356b5e61555d0d"
 [[package]]
 name = "siwe"
 version = "0.5.2"
-source = "git+https://github.com/llamanodes/siwe-rs?rev=266f494143a4ea627e1d4090d725a5ef77535f67#266f494143a4ea627e1d4090d725a5ef77535f67"
+source = "git+https://github.com/llamanodes/siwe-rs?branch=for_web3_proxy#5866c7a5ce3a7e2a14d247d00f0a5915bc0bbd08"
 dependencies = [
  "ethers",
  "hex",

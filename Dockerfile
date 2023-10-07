@@ -90,12 +90,13 @@ COPY . .
 # TODO: clean needed because of rust upgrade and jenkins caches :'(
 RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/app/target \
+    --mount=type=cache,target=/app/target_test \
     set -eux -o pipefail; \
     \
     [ -e "$(pwd)/payment-contracts/src/contracts/mod.rs" ] || touch "$(pwd)/payment-contracts/build.rs"; \
-    cargo \
-    --locked \
-    fetch
+    cargo --locked fetch; \
+    CARGO_TARGET_DIR=target_test cargo --locked fetch
 
 # build tests (done its in own FROM so that it can run in parallel)
 FROM rust_with_env as build_tests
@@ -106,9 +107,10 @@ COPY --from=rust_nextest /root/.cargo/bin/cargo-nextest* /root/.cargo/bin/
 # test the application with cargo-nextest
 RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/app/target \
+    --mount=type=cache,target=/app/target_test \
     set -eux -o pipefail; \
     \
+    export CARGO_TARGET_DIR=target_test \
     [ -e "$(pwd)/payment-contracts/src/contracts/mod.rs" ] || touch "$(pwd)/payment-contracts/build.rs"; \
     RUST_LOG=web3_proxy=trace,info \
     cargo \
