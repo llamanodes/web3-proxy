@@ -9,6 +9,7 @@ use crate::frontend::authorization::Web3Request;
 use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::frontend::status::MokaCacheSerializer;
 use crate::jsonrpc::{self, JsonRpcErrorData, JsonRpcParams, JsonRpcResultData};
+use deduped_broadcast::DedupedBroadcaster;
 use derive_more::From;
 use ethers::prelude::{TxHash, U64};
 use futures::future::try_join_all;
@@ -62,7 +63,7 @@ pub struct Web3Rpcs {
     /// calculated based on max_head_block_lag and averge block times
     pub(super) max_head_block_age: Duration,
     /// all of the pending txids for all of the rpcs. this still has duplicates
-    pub(super) pending_txid_firehose_sender: Option<mpsc::Sender<TxHash>>,
+    pub(super) pending_txid_firehose: Option<Arc<DedupedBroadcaster<TxHash>>>,
 }
 
 /// this is a RankedRpcs that should be ready to use
@@ -102,7 +103,7 @@ impl Web3Rpcs {
         min_sum_soft_limit: u32,
         name: Cow<'static, str>,
         watch_consensus_head_sender: Option<watch::Sender<Option<Web3ProxyBlock>>>,
-        pending_txid_firehose_sender: Option<mpsc::Sender<TxHash>>,
+        pending_txid_firehose: Option<Arc<DedupedBroadcaster<TxHash>>>,
     ) -> anyhow::Result<(
         Arc<Self>,
         Web3ProxyJoinHandle<()>,
@@ -149,7 +150,7 @@ impl Web3Rpcs {
             min_synced_rpcs: min_head_rpcs,
             min_sum_soft_limit,
             name,
-            pending_txid_firehose_sender,
+            pending_txid_firehose,
             watch_head_block: watch_consensus_head_sender,
             watch_ranked_rpcs: watch_consensus_rpcs_sender,
         });
@@ -234,7 +235,7 @@ impl Web3Rpcs {
                     http_client,
                     blocks_by_hash_cache,
                     block_and_rpc_sender,
-                    self.pending_txid_firehose_sender.clone(),
+                    self.pending_txid_firehose.clone(),
                     self.max_head_block_age,
                 ));
 

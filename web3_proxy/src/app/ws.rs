@@ -61,6 +61,8 @@ impl Web3ProxyApp {
         // TODO: DRY This up. lots of duplication between newHeads and newPendingTransactions
         match subscribe_to {
             "newHeads" => {
+                // we clone the watch before spawning so that theres less chance of missing anything
+                // TODO: watch receivers can miss a block. is that okay?
                 let head_block_receiver = self.watch_consensus_head_receiver.clone();
                 let app = self.clone();
                 let authorization = web3_request.authorization.clone();
@@ -144,6 +146,7 @@ impl Web3ProxyApp {
             }
             // TODO: bring back the other custom subscription types that had the full transaction object
             "newPendingTransactions" => {
+                // we subscribe before spawning so that theres less chance of missing anything
                 let pending_txid_firehose = self.pending_txid_firehose.subscribe();
                 let app = self.clone();
                 let authorization = web3_request.authorization.clone();
@@ -154,61 +157,72 @@ impl Web3ProxyApp {
                         subscription_registration,
                     );
 
-                    while let Some(Ok(new_txid)) = pending_txid_firehose.next().await {
-                        // TODO: include the head_block here?
-                        match Web3Request::new_with_app(
-                            &app,
-                            authorization.clone(),
-                            None,
-                            RequestOrMethod::Method(
-                                "eth_subscribe(newPendingTransactions)".into(),
-                                0,
-                            ),
-                            None,
-                        )
-                        .await
-                        {
+                    while let Some(maybe_txid) = pending_txid_firehose.next().await {
+                        match maybe_txid {
                             Err(err) => {
-                                error!(?err, "error creating subscription_web3_request");
-                                // what should we do to turn this error into a message for them?
-                                break;
+                                trace!(
+                                    ?err,
+                                    "error inside newPendingTransactions. probably lagged"
+                                );
+                                continue;
                             }
-                            Ok(subscription_web3_request) => {
-                                // check if we should close the websocket connection
-                                if let Some(close_message) = app
-                                    .rate_limit_close_websocket(&subscription_web3_request)
-                                    .await
+                            Ok(new_txid) => {
+                                // TODO: include the head_block here?
+                                match Web3Request::new_with_app(
+                                    &app,
+                                    authorization.clone(),
+                                    None,
+                                    RequestOrMethod::Method(
+                                        "eth_subscribe(newPendingTransactions)".into(),
+                                        0,
+                                    ),
+                                    None,
+                                )
+                                .await
                                 {
-                                    let _ = response_sender.send(close_message).await;
-                                    break;
-                                }
+                                    Err(err) => {
+                                        error!(?err, "error creating subscription_web3_request");
+                                        // what should we do to turn this error into a message for them?
+                                        break;
+                                    }
+                                    Ok(subscription_web3_request) => {
+                                        // check if we should close the websocket connection
+                                        if let Some(close_message) = app
+                                            .rate_limit_close_websocket(&subscription_web3_request)
+                                            .await
+                                        {
+                                            let _ = response_sender.send(close_message).await;
+                                            break;
+                                        }
 
-                                // TODO: make a struct/helper function for this
-                                let response_json = json!({
-                                    "jsonrpc": "2.0",
-                                    "method":"eth_subscription",
-                                    "params": {
-                                        "subscription": subscription_id,
-                                        "result": new_txid,
-                                    },
-                                });
+                                        // TODO: make a struct/helper function for this
+                                        let response_json = json!({
+                                            "jsonrpc": "2.0",
+                                            "method":"eth_subscription",
+                                            "params": {
+                                                "subscription": subscription_id,
+                                                "result": new_txid,
+                                            },
+                                        });
 
-                                let response_str = serde_json::to_string(&response_json)
-                                    .expect("this should always be valid json");
+                                        let response_str = serde_json::to_string(&response_json)
+                                            .expect("this should always be valid json");
 
-                                // we could use JsonRpcForwardedResponseEnum::num_bytes() here, but since we already have the string, this is easier
-                                let response_bytes = response_str.len();
+                                        // we could use JsonRpcForwardedResponseEnum::num_bytes() here, but since we already have the string, this is easier
+                                        let response_bytes = response_str.len();
 
-                                subscription_web3_request.add_response(response_bytes);
+                                        subscription_web3_request.add_response(response_bytes);
 
-                                // TODO: do clients support binary messages?
-                                // TODO: can we check a content type header?
-                                let response_msg = Message::Text(response_str);
+                                        // TODO: do clients support binary messages?
+                                        // TODO: can we check a content type header?
+                                        let response_msg = Message::Text(response_str);
 
-                                if response_sender.send(response_msg).await.is_err() {
-                                    // TODO: increment error_response? i don't think so. i think this will happen once every time a client disconnects.
-                                    // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
-                                    break;
+                                        if response_sender.send(response_msg).await.is_err() {
+                                            // TODO: increment error_response? i don't think so. i think this will happen once every time a client disconnects.
+                                            // TODO: cancel this subscription earlier? select on head_block_receiver.next() and an abort handle?
+                                            break;
+                                        }
+                                    }
                                 }
                             }
                         }

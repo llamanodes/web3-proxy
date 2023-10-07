@@ -10,6 +10,7 @@ use crate::jsonrpc::{self, JsonRpcParams, JsonRpcResultData};
 use crate::rpcs::request::RequestErrorHandler;
 use anyhow::{anyhow, Context};
 use arc_swap::ArcSwapOption;
+use deduped_broadcast::DedupedBroadcaster;
 use ethers::prelude::{Address, Bytes, Middleware, Transaction, TxHash, U256, U64};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
@@ -104,7 +105,7 @@ impl Web3Rpc {
         block_interval: Duration,
         block_map: BlocksByHashCache,
         block_and_rpc_sender: Option<mpsc::UnboundedSender<BlockAndRpc>>,
-        pending_txid_firehose_sender: Option<mpsc::Sender<TxHash>>,
+        pending_txid_firehose: Option<Arc<DedupedBroadcaster<TxHash>>>,
         max_head_block_age: Duration,
     ) -> anyhow::Result<(Arc<Web3Rpc>, Web3ProxyJoinHandle<()>)> {
         let created_at = Instant::now();
@@ -222,7 +223,7 @@ impl Web3Rpc {
                     .subscribe_with_reconnect(
                         block_map,
                         block_and_rpc_sender,
-                        pending_txid_firehose_sender,
+                        pending_txid_firehose,
                         chain_id,
                     )
                     .await
@@ -624,7 +625,7 @@ impl Web3Rpc {
         self: Arc<Self>,
         block_map: BlocksByHashCache,
         block_and_rpc_sender: Option<mpsc::UnboundedSender<BlockAndRpc>>,
-        pending_txid_firehose_sender: Option<mpsc::Sender<TxHash>>,
+        pending_txid_firehose: Option<Arc<DedupedBroadcaster<TxHash>>>,
         chain_id: u64,
     ) -> Web3ProxyResult<()> {
         loop {
@@ -633,7 +634,7 @@ impl Web3Rpc {
                 .subscribe(
                     block_map.clone(),
                     block_and_rpc_sender.clone(),
-                    pending_txid_firehose_sender.clone(),
+                    pending_txid_firehose.clone(),
                     chain_id,
                 )
                 .await
@@ -667,7 +668,7 @@ impl Web3Rpc {
         self: Arc<Self>,
         block_map: BlocksByHashCache,
         block_and_rpc_sender: Option<mpsc::UnboundedSender<BlockAndRpc>>,
-        pending_txid_firehose_sender: Option<mpsc::Sender<TxHash>>,
+        pending_txid_firehose: Option<Arc<DedupedBroadcaster<TxHash>>>,
         chain_id: u64,
     ) -> Web3ProxyResult<()> {
         let error_handler = if self.backup {
@@ -792,7 +793,7 @@ impl Web3Rpc {
         }
 
         // subscribe to new transactions
-        if let Some(pending_txid_firehose) = pending_txid_firehose_sender.clone() {
+        if let Some(pending_txid_firehose) = pending_txid_firehose.clone() {
             let clone = self.clone();
             let subscribe_stop_rx = subscribe_stop_tx.subscribe();
 
@@ -829,7 +830,7 @@ impl Web3Rpc {
 
     async fn subscribe_new_transactions(
         self: &Arc<Self>,
-        pending_txid_firehose: mpsc::Sender<TxHash>,
+        pending_txid_firehose: Arc<DedupedBroadcaster<TxHash>>,
         mut subscribe_stop_rx: watch::Receiver<bool>,
     ) -> Web3ProxyResult<()> {
         trace!("subscribing to new transactions on {}", self);
@@ -846,28 +847,28 @@ impl Web3Rpc {
         }
 
         if let Some(ws_provider) = self.ws_provider.load().as_ref() {
-            // todo: move subscribe_blocks onto the request handle
+            // todo: move subscribe_blocks onto the request handle instead of having a seperate wait_for_throttle
             self.wait_for_throttle(Instant::now() + Duration::from_secs(5))
                 .await?;
 
+            // TODO: only subscribe if a user has subscribed
             let mut pending_txs_sub = ws_provider.subscribe_pending_txs().await?;
 
             while let Some(x) = pending_txs_sub.next().await {
-                if *subscribe_stop_rx.borrow_and_update() {
+                // TODO: check this less often
+                if *subscribe_stop_rx.borrow() {
                     // TODO: this is checking way too often. have this on a timer instead
                     trace!("stopping ws block subscription on {}", self);
                     break;
                 }
 
                 // this should always work
-                if let Err(err) = pending_txid_firehose.try_send(x) {
-                    error!(
-                        ?err,
-                        "pending_txid_firehose failed sending. it must be full"
-                    );
-                }
+                // todo!("this has a bug! it gets full very quickly when no one is subscribed!");
+                pending_txid_firehose.send(x).await;
             }
         } else {
+            // only websockets subscribe to pending transactions
+            // its possibel to do with http, but not recommended
             // TODO: what should we do here?
             loop {
                 if *subscribe_stop_rx.borrow_and_update() {

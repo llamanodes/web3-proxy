@@ -3,6 +3,7 @@ use crate::compute_units::default_usd_per_cu;
 use crate::rpcs::blockchain::{BlocksByHashCache, Web3ProxyBlock};
 use crate::rpcs::one::Web3Rpc;
 use argh::FromArgs;
+use deduped_broadcast::DedupedBroadcaster;
 use ethers::prelude::{Address, TxHash};
 use ethers::types::{U256, U64};
 use hashbrown::HashMap;
@@ -426,7 +427,7 @@ impl Web3RpcConfig {
         http_client: Option<reqwest::Client>,
         blocks_by_hash_cache: BlocksByHashCache,
         block_and_rpc_sender: Option<mpsc::UnboundedSender<BlockAndRpc>>,
-        pending_txid_firehouse_sender: Option<mpsc::Sender<TxHash>>,
+        pending_txid_firehouse: Option<Arc<DedupedBroadcaster<TxHash>>>,
         max_head_block_age: Duration,
     ) -> anyhow::Result<(Arc<Web3Rpc>, Web3ProxyJoinHandle<()>)> {
         if !self.extra.is_empty() {
@@ -444,7 +445,7 @@ impl Web3RpcConfig {
             block_interval,
             blocks_by_hash_cache,
             block_and_rpc_sender,
-            pending_txid_firehouse_sender,
+            pending_txid_firehouse,
             max_head_block_age,
         )
         .await

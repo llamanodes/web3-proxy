@@ -1,106 +1,65 @@
+use moka::future::{Cache, CacheBuilder};
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::{
-    collections::hash_map::DefaultHasher,
-    fmt::Debug,
-    hash::{Hash, Hasher},
-};
-use tokio::sync::{broadcast, mpsc};
-
-struct DedupedBroadcasterTask<T>
-where
-    T: Clone + Debug + Hash + Send + Sync + 'static,
-{
-    unfiltered_rx: mpsc::Receiver<T>,
-    broadcast_filtered_tx: Arc<broadcast::Sender<T>>,
-    cache: lru::LruCache<u64, ()>,
-    total_unfiltered: Arc<AtomicUsize>,
-    total_filtered: Arc<AtomicUsize>,
-    total_broadcasts: Arc<AtomicUsize>,
-}
+use std::time::Duration;
+use std::{fmt::Debug, hash::Hash};
+use tokio::sync::broadcast;
 
 pub struct DedupedBroadcaster<T>
 where
     T: Clone + Debug + Hash + Send + Sync + 'static,
 {
-    /// takes in things to broadcast. Can include duplicates, but only one will be sent.
-    unfiltered_tx: mpsc::Sender<T>,
     /// subscribe to this to get deduplicated items
-    broadcast_filtered_tx: Arc<broadcast::Sender<T>>,
+    broadcast_filtered_tx: broadcast::Sender<T>,
+    cache: Cache<T, ()>,
     total_unfiltered: Arc<AtomicUsize>,
     total_filtered: Arc<AtomicUsize>,
     total_broadcasts: Arc<AtomicUsize>,
 }
 
-impl<T> DedupedBroadcasterTask<T>
-where
-    T: Clone + Debug + Hash + Send + Sync + 'static,
-{
-    /// forward things from input_receiver to output_sender if they aren't in the cache
-    async fn run(mut self) {
-        while let Some(item) = self.unfiltered_rx.recv().await {
-            let mut hasher = DefaultHasher::new();
-            item.hash(&mut hasher);
-            let hashed = hasher.finish();
-
-            self.total_unfiltered
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-            // we don't actually care what the return value is. we just want to send only if the cache is empty
-            // TODO: count new vs unique
-            self.cache.get_or_insert(hashed, || {
-                self.total_filtered
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-                if let Ok(x) = self.broadcast_filtered_tx.send(item) {
-                    self.total_broadcasts.fetch_add(x, Ordering::Relaxed);
-                }
-            });
-        }
-    }
-}
-
 impl<T> DedupedBroadcaster<T>
 where
-    T: Clone + Debug + Hash + Send + Sync + 'static,
+    T: Clone + Debug + Eq + Hash + PartialEq + Send + Sync + 'static,
 {
-    pub fn new(capacity: usize, cache_capacity: usize) -> Self {
-        let (unfiltered_tx, unfiltered_rx) = mpsc::channel::<T>(capacity);
+    pub fn new(capacity: usize, cache_capacity: usize) -> Arc<Self> {
         let (broadcast_filtered_tx, _) = broadcast::channel(capacity);
 
-        let cache = lru::LruCache::new(cache_capacity.try_into().unwrap());
-
-        let broadcast_filtered_tx = Arc::new(broadcast_filtered_tx);
+        let cache = CacheBuilder::new(cache_capacity as u64)
+            .time_to_idle(Duration::from_secs(10 * 60))
+            .name("DedupedBroadcaster")
+            .build();
 
         let total_unfiltered = Arc::new(AtomicUsize::new(0));
         let total_filtered = Arc::new(AtomicUsize::new(0));
         let total_broadcasts = Arc::new(AtomicUsize::new(0));
 
-        let task = DedupedBroadcasterTask {
-            unfiltered_rx,
-            broadcast_filtered_tx: broadcast_filtered_tx.clone(),
+        let x = Self {
+            broadcast_filtered_tx,
             cache,
-            total_unfiltered: total_unfiltered.clone(),
-            total_filtered: total_filtered.clone(),
-            total_broadcasts: total_broadcasts.clone(),
+            total_broadcasts,
+            total_filtered,
+            total_unfiltered,
         };
 
-        // TODO: do something with the handle?
-        tokio::task::spawn(task.run());
-
-        Self {
-            unfiltered_tx,
-            broadcast_filtered_tx,
-            total_unfiltered,
-            total_filtered,
-            total_broadcasts,
-        }
+        Arc::new(x)
     }
 
-    pub fn sender(&self) -> &mpsc::Sender<T> {
-        &self.unfiltered_tx
+    /// filter duplicates and send the rest to any subscribers
+    /// TODO: change this to be `send` and put a moka cache here instead of lru. then the de-dupe load will be spread across senders
+    pub async fn send(&self, item: T) {
+        self.total_unfiltered.fetch_add(1, Ordering::Relaxed);
+
+        self.cache
+            .get_with(item.clone(), async {
+                self.total_filtered.fetch_add(1, Ordering::Relaxed);
+
+                if let Ok(x) = self.broadcast_filtered_tx.send(item) {
+                    self.total_broadcasts.fetch_add(x, Ordering::Relaxed);
+                }
+            })
+            .await;
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<T> {
@@ -172,18 +131,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_deduped_broadcaster() {
+        // TODO: what sizes?
         let broadcaster = DedupedBroadcaster::new(10, 10);
 
         let mut receiver_1 = broadcaster.subscribe();
         let _receiver_2 = broadcaster.subscribe();
 
-        broadcaster.sender().send(1).await.unwrap();
-        broadcaster.sender().send(1).await.unwrap();
-        broadcaster.sender().send(2).await.unwrap();
-        broadcaster.sender().send(1).await.unwrap();
-        broadcaster.sender().send(2).await.unwrap();
-        broadcaster.sender().send(3).await.unwrap();
-        broadcaster.sender().send(3).await.unwrap();
+        broadcaster.send(1).await;
+        broadcaster.send(1).await;
+        broadcaster.send(2).await;
+        broadcaster.send(1).await;
+        broadcaster.send(2).await;
+        broadcaster.send(3).await;
+        broadcaster.send(3).await;
 
         yield_now().await;
 

@@ -87,7 +87,7 @@ pub struct Web3ProxyApp {
     /// TODO: broadcast channel instead?
     pub watch_consensus_head_receiver: watch::Receiver<Option<Web3ProxyBlock>>,
     /// rpc clients that subscribe to newPendingTransactions use this channel
-    pub pending_txid_firehose: deduped_broadcast::DedupedBroadcaster<TxHash>,
+    pub pending_txid_firehose: Arc<DedupedBroadcaster<TxHash>>,
     pub hostname: Option<String>,
     pub frontend_port: Arc<AtomicU16>,
     /// rate limit anonymous users
@@ -437,7 +437,8 @@ impl Web3ProxyApp {
 
         let chain_id = top_config.app.chain_id;
 
-        let deduped_txid_firehose = DedupedBroadcaster::new(5_000, 5_000);
+        // TODO: deduped_txid_firehose capacity from config
+        let deduped_txid_firehose = DedupedBroadcaster::new(100, 20_000);
 
         // TODO: remove this. it should only be done by apply_top_config
         let (balanced_rpcs, balanced_handle, consensus_connections_watcher) = Web3Rpcs::spawn(
@@ -447,7 +448,7 @@ impl Web3ProxyApp {
             top_config.app.min_sum_soft_limit,
             "balanced rpcs".into(),
             Some(watch_consensus_head_sender),
-            Some(deduped_txid_firehose.sender().clone()),
+            Some(deduped_txid_firehose.clone()),
         )
         .await
         .web3_context("spawning balanced rpcs")?;
@@ -1414,6 +1415,10 @@ impl Web3ProxyApp {
                 // TODO: decode the transaction
 
                 // TODO: error if the chain_id is incorrect
+                // TODO: return now if already confirmed
+                // TODO: error if the nonce is way far in the future
+
+                // TODO: self.pending_txid_firehose.send(txid).await;
 
                 let response = self
                     .try_send_protected(
@@ -1465,6 +1470,8 @@ impl Web3ProxyApp {
                         }
                     }
                 }
+
+                // TODO: if successful, send the txid to the pending transaction firehose
 
                 // emit transaction count stats
                 // TODO: use this cache to avoid sending duplicate transactions?
