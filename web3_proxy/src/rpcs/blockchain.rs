@@ -34,7 +34,7 @@ impl Serialize for Web3ProxyBlock {
         // TODO: i'm not sure about this name
         let mut state = serializer.serialize_struct("saved_block", 2)?;
 
-        state.serialize_field("age", &self.age())?;
+        state.serialize_field("age", &self.age().as_secs_f32())?;
 
         let block = json!({
             "hash": self.0.hash,
