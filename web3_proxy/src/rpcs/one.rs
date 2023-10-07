@@ -288,10 +288,7 @@ impl Web3Rpc {
         &self,
         max_block: Option<U64>,
         start_instant: Instant,
-    ) -> (
-        (Reverse<Instant>, bool, Reverse<U64>, u32),
-        OrderedFloat<f32>,
-    ) {
+    ) -> ((Instant, bool, Reverse<U64>, u32), OrderedFloat<f32>) {
         let sort_on = self.sort_on(max_block, start_instant);
 
         // TODO: i think median is better than weighted at this point. we save checking weighted for the very end
@@ -318,7 +315,7 @@ impl Web3Rpc {
         max_block: Option<U64>,
         rng: &mut TlsWyRand,
         start_instant: Instant,
-    ) -> ((Reverse<Instant>, bool, Reverse<U64>, u32), u8) {
+    ) -> ((Instant, bool, Reverse<U64>, u32), u8) {
         let sort_on = self.sort_on(max_block, start_instant);
 
         let r = rng.generate::<u8>();
