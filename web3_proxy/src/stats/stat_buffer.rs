@@ -161,7 +161,7 @@ impl StatBuffer {
                     if count > 0 {
                         db_frontend_requests += new_frontend_requests;
                         db_internal_requests += new_internal_requests;
-                        debug!("Saved {} stats for {} requests to the relational db", count, new_frontend_requests);
+                        debug!("Saved {} stats for {}+{} requests to the relational db", count, new_frontend_requests, new_internal_requests);
                     }
                 }
                 _ = tsdb_save_interval.tick() => {
@@ -170,7 +170,7 @@ impl StatBuffer {
                     if count > 0 {
                         tsdb_frontend_requests += new_frontend_requests;
                         tsdb_internal_requests += new_internal_requests;
-                        debug!("Saved {} stats for {} requests to the tsdb @ {}/{}", count, new_frontend_requests, self.tsdb_window, self.num_tsdb_windows);
+                        debug!("Saved {} stats for {}+{} requests to the tsdb @ {}/{}", count, new_frontend_requests, new_internal_requests, self.tsdb_window, self.num_tsdb_windows);
                     }
                 }
                 x = flush_receiver.recv() => {
