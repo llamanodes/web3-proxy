@@ -445,20 +445,21 @@ impl Web3Rpcs {
         let ranked_rpcs: Arc<RankedRpcs> =
             if let Some(ranked_rpcs) = self.watch_ranked_rpcs.borrow().clone() {
                 ranked_rpcs
-            } else if let Some(head_block) = web3_request.head_block.clone() {
-                // if we are here, self isn't watching head blocks but some other Web3Rpcs is. Return all the rpcs
+            } else if self.watch_head_block.is_some() {
+                // if we are here, this set of rpcs is subscribed to newHeads. But we didn't get a RankedRpcs. that means something is wrong
+                return Err(Web3ProxyError::NoServersSynced);
+            } else {
+                // no RankedRpcs, but also no newHeads subscription. This is probably a set of "protected" rpcs or similar
+                // TODO: return a future that resolves once we do have something?
                 let rpcs = self.by_name.read().values().cloned().collect();
 
-                if let Some(x) = RankedRpcs::from_rpcs(rpcs, head_block) {
+                if let Some(x) = RankedRpcs::from_rpcs(rpcs, web3_request.head_block.clone()) {
                     Arc::new(x)
                 } else {
                     // i doubt we will ever get here
                     // TODO: return a future that resolves once we do have something?
                     return Err(Web3ProxyError::NoServersSynced);
                 }
-            } else {
-                // TODO: return a future that resolves once we do have something?
-                return Err(Web3ProxyError::NoServersSynced);
             };
 
         match ranked_rpcs.for_request(web3_request) {

@@ -129,16 +129,24 @@ pub struct RpcsForRequest {
 }
 
 impl RankedRpcs {
-    pub fn from_rpcs(rpcs: Vec<Arc<Web3Rpc>>, head_block: Web3ProxyBlock) -> Option<Self> {
+    pub fn from_rpcs(rpcs: Vec<Arc<Web3Rpc>>, head_block: Option<Web3ProxyBlock>) -> Option<Self> {
         // we don't need to sort the rpcs now. we will sort them when a request neds them
         // TODO: the shame about this is that we lose just being able to compare 2 random servers
+
+        let head_block = head_block?;
 
         let backups_needed = rpcs.iter().any(|x| x.backup);
 
         let num_synced = rpcs.len();
 
         // TODO: do we need real data in  here? if we are calling from_rpcs, we probably don't even track their block
-        let rpc_data = Default::default();
+        let mut rpc_data = HashMap::<Arc<Web3Rpc>, ConsensusRpcData>::with_capacity(num_synced);
+
+        for rpc in rpcs.iter().cloned() {
+            let data = ConsensusRpcData::new(&rpc, &head_block);
+
+            rpc_data.insert(rpc, data);
+        }
 
         let sort_mode = SortMethod::Shuffle;
 
