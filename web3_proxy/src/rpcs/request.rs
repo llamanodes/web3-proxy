@@ -383,17 +383,24 @@ impl OpenRequestHandle {
 
                             match error.code {
                                 -32000 => {
-                                    // TODO: regex?
-                                    let archive_prefixes = [
-                                        "header not found",
-                                        "header for hash not found",
-                                        "missing trie node",
-                                    ];
-                                    for prefix in archive_prefixes {
-                                        if error.message.starts_with(prefix) {
-                                            // TODO: what error?
-                                            response = Err(Web3ProxyError::NoBlockNumberOrHash);
-                                            break;
+                                    if error.message.contains("MDBX_PANIC:") {
+                                        response = Err(Web3ProxyError::MdbxPanic(
+                                            self.connection_name(),
+                                            error.message.clone(),
+                                        ));
+                                    } else {
+                                        // TODO: regex?
+                                        let archive_prefixes = [
+                                            "header not found",
+                                            "header for hash not found",
+                                            "missing trie node",
+                                        ];
+                                        for prefix in archive_prefixes {
+                                            if error.message.starts_with(prefix) {
+                                                // TODO: what error?
+                                                response = Err(Web3ProxyError::NoBlockNumberOrHash);
+                                                break;
+                                            }
                                         }
                                     }
                                 }

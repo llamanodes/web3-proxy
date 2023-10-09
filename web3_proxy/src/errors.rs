@@ -98,6 +98,9 @@ pub enum Web3ProxyError {
     #[display(fmt = "{:?}", _0)]
     #[error(ignore)]
     JsonRpcErrorData(JsonRpcErrorData),
+    #[from(ignore)]
+    #[display(fmt = "{}", _0)]
+    MdbxPanic(String, Cow<'static, str>),
     NoBlockNumberOrHash,
     NoBlocksKnown,
     NoConsensusHeadBlock,
@@ -199,6 +202,7 @@ impl Web3ProxyError {
 
     /// turn the error into an axum response.
     /// <https://www.jsonrpc.org/specification#error_object>
+    /// TODO? change to `to_response_parts(self)`
     pub fn as_response_parts(&self) -> (StatusCode, JsonRpcResponseEnum<Arc<RawValue>>) {
         // TODO: include a unique request id in the data
         let (code, err): (StatusCode, JsonRpcErrorData) = match self {
@@ -641,6 +645,20 @@ impl Web3ProxyError {
             Self::JsonRpcErrorData(jsonrpc_error_data) => {
                 // TODO: do this without clone? the Arc needed it though
                 (StatusCode::OK, jsonrpc_error_data.clone())
+            }
+            Self::MdbxPanic(rpc, msg) => {
+                error!(%msg, "mdbx panic");
+
+                // TODO: this is bad enough that we should send something to pager duty
+
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonRpcErrorData {
+                        message: "mdbx panic".into(),
+                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
+                        data: Some(serde_json::Value::String(msg.to_string())),
+                    },
+                )
             }
             Self::MethodNotFound(method) => {
                 warn!("MethodNotFound: {}", method);
