@@ -1,6 +1,6 @@
 [package]
 name = "web3_proxy"
-version = "1.43.22"
+version = "1.43.23"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -90,7 +90,7 @@ serde_json = { version = "1.0.107", default-features = false, features = ["raw_v
 serde_prometheus = "0.2.4"
 strum = { version = "0.25.0", features = ["derive"] }
 time = { version = "0.3" }
-tokio = { version = "1.32.0", features = ["full", "tracing"] }
+tokio = { version = "1.33.0", features = ["full", "tracing"] }
 tokio-console = { version = "0.1.10", optional = true }
 tokio-stream = { version = "0.1.14", features = ["sync"] }
 toml = "0.8.2"
@@ -109,6 +109,6 @@ test-log = { version = "0.2.12", default-features = false, features = ["trace"] 
 
 [dev-dependencies]
 env_logger = { version ="0.10", default-features = true, features = ["auto-color"] }
-tokio = { version = "1.32.0", default-features = false, features = ["full", "test-util"] }
+tokio = { version = "1.33.0", default-features = false, features = ["full", "test-util"] }
 tracing = {version = "0.1", default-features = false}
 tracing-subscriber = {version = "0.3", default-features = false, features = ["env-filter", "fmt"]}
