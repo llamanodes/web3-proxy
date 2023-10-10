@@ -164,8 +164,6 @@ pub struct Web3Request {
     /// We use Instant and not timestamps to avoid problems with leap seconds and similar issues
     #[derivative(Default(value = "Instant::now()"))]
     pub start_instant: Instant,
-    #[derivative(Default(value = "Instant::now() + Duration::from_secs(295)"))]
-    pub expire_instant: Instant,
     /// if this is empty, there was a cache_hit
     /// otherwise, it is populated with any rpc servers that were used by this request
     pub backend_requests: BackendRequests,
@@ -193,6 +191,12 @@ pub struct Web3Request {
 
     /// Cancel-safe channel for sending stats to the buffer
     pub stat_sender: Option<mpsc::UnboundedSender<AppStat>>,
+
+    /// How long to spend waiting for an rpc that can serve this request
+    pub connect_timeout: Duration,
+    /// How long to spend waiting for an rpc to respond to this request
+    /// TODO: this should start once the connection is established
+    pub expire_timeout: Duration,
 }
 
 impl Display for Web3Request {
@@ -340,10 +344,6 @@ impl Web3Request {
     ) -> Web3ProxyResult<Arc<Self>> {
         let start_instant = Instant::now();
 
-        // TODO: get this default from config, or from user settings
-        // 5 minutes with a buffer for other things being slow
-        let expire_instant = start_instant + max_wait.unwrap_or_else(|| Duration::from_secs(295));
-
         // let request: RequestOrMethod = request.into();
 
         // we VERY INTENTIONALLY log to kafka BEFORE calculating the cache key
@@ -363,6 +363,9 @@ impl Web3Request {
             _ => CacheMode::Never,
         };
 
+        let connect_timeout = Duration::from_secs(3);
+        let expire_timeout = max_wait.unwrap_or_else(|| Duration::from_secs(295));
+
         let x = Self {
             archive_request: false.into(),
             authorization,
@@ -370,7 +373,8 @@ impl Web3Request {
             cache_mode,
             chain_id,
             error_response: false.into(),
-            expire_instant,
+            connect_timeout,
+            expire_timeout,
             head_block: head_block.clone(),
             kafka_debug_logger,
             no_servers: 0.into(),
@@ -488,6 +492,7 @@ impl Web3Request {
         self.inner.id()
     }
 
+    #[inline]
     pub fn max_block_needed(&self) -> Option<U64> {
         self.cache_mode.to_block().map(|x| *x.num())
     }
@@ -500,13 +505,27 @@ impl Web3Request {
         }
     }
 
-    pub fn ttl(&self) -> Duration {
-        self.expire_instant
-            .saturating_duration_since(Instant::now())
+    #[inline]
+    pub fn connect_timeout_at(&self) -> Instant {
+        // TODO: get from config
+        self.start_instant + Duration::from_secs(3)
     }
 
-    pub fn ttl_expired(&self) -> bool {
-        self.expire_instant < Instant::now()
+    #[inline]
+    pub fn connect_timeout(&self) -> bool {
+        self.connect_timeout_at() <= Instant::now()
+    }
+
+    #[inline]
+    pub fn expire_at(&self) -> Instant {
+        // TODO: get from config
+        // erigon's timeout is 5 minutes so we want it shorter than that
+        self.start_instant + Duration::from_secs(295)
+    }
+
+    #[inline]
+    pub fn expired(&self) -> bool {
+        self.expire_at() <= Instant::now()
     }
 
     pub fn try_send_stat(mut self) -> Web3ProxyResult<()> {

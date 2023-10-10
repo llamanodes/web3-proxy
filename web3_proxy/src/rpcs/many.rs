@@ -408,16 +408,21 @@ impl Web3Rpcs {
                 Err(x) => return Err(x),
             };
 
-            if next_try > web3_request.expire_instant {
-                let next_try = Instant::now().duration_since(next_try).as_secs();
+            if next_try > web3_request.connect_timeout_at() {
+                let retry_in = Instant::now().duration_since(next_try).as_secs();
 
                 // we don't use Web3ProxyError::RateLimited because that is for the user being rate limited
                 return Err(Web3ProxyError::StatusCode(
                     StatusCode::TOO_MANY_REQUESTS,
                     "backend rpcs are all rate limited!".into(),
-                    Some(json!({"retry_at": next_try})),
+                    Some(json!({"retry_in": retry_in})),
                 ));
             }
+
+            trace!(?next_try, "retry needed");
+
+            // todo!("this must be a bug in our tests. in prod if things are overloaded i could see it happening")
+            debug_assert!(Instant::now() < next_try);
 
             select! {
                 _ = sleep_until(next_try) => {
@@ -587,7 +592,7 @@ impl Web3Rpcs {
         // cloudflare gives {"jsonrpc":"2.0","error":{"code":-32043,"message":"Requested data cannot be older than 128 blocks."},"id":1}
         Err(JsonRpcErrorData {
             message: "Requested data is not available".into(),
-            code: -32043,
+            code: -32001,
             data: Some(json!({
                 "request": web3_request
             })),

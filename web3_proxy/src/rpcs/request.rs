@@ -31,7 +31,7 @@ pub enum OpenRequestResult {
     /// TODO: should this return an OpenRequestHandle? that might recurse
     Lagged(Pin<Box<dyn Future<Output = Web3ProxyResult<Arc<Web3Rpc>>> + Send>>),
     /// Unable to start a request because no servers are synced or the necessary data has been pruned
-    NotReady,
+    Failed,
 }
 
 /// Make RPC requests through this handle and drop it when you are done.

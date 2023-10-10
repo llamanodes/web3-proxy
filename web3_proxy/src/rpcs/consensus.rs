@@ -378,9 +378,8 @@ impl RankedRpcs {
         }
     }
 
-    // TODO: better name for this
     // TODO: this should probably be on the rpcs as "can_serve_request"
-    // TODO: this should probably take the method, too
+    // TODO: and it should take the method into account, too
     pub fn rpc_will_work_now(
         &self,
         min_block_needed: Option<U64>,
@@ -423,6 +422,7 @@ impl RankedRpcs {
 }
 
 // TODO: refs for all of these. borrow on a Sender is cheap enough
+// TODO: move this to many.rs
 impl Web3Rpcs {
     pub fn head_block(&self) -> Option<Web3ProxyBlock> {
         self.watch_head_block
@@ -1004,81 +1004,107 @@ fn best_rpc<'a>(rpc_a: &'a Arc<Web3Rpc>, rpc_b: &'a Arc<Web3Rpc>) -> &'a Arc<Web
 }
 
 impl RpcsForRequest {
-    /// TODO: uncomment the code that makes this wait for rpcs if it thinks they will be ready soon
     pub fn to_stream(self) -> impl Stream<Item = OpenRequestHandle> {
-        // TODO: get error_handler out of the web3_request, probably the authorization
-        // let error_handler = web3_request.authorization.error_handler;
-        let error_handler = None;
-
         stream! {
+            trace!("entered stream");
+            // TODO: get error_handler out of the web3_request? probably the authorization
+            // let error_handler = web3_request.authorization.error_handler;
+            let error_handler = None;
+
+            let max_len = self.inner.len() + self.outer.len();
+
+            // TODO: do this without having 3 Vecs
+            let mut filtered = Vec::with_capacity(max_len);
+            let mut attempted = Vec::with_capacity(max_len);
+            let mut failed = Vec::with_capacity(max_len);
+
+            // todo!("be sure to set server_error if we exit without any rpcs!");
             loop {
-                if self.request.ttl_expired() {
+                if self.request.connect_timeout() {
                     break;
-                } else {
-                    // TODO: think about this more
-                    yield_now().await;
                 }
 
                 let mut earliest_retry_at = None;
                 let mut wait_for_sync = None;
 
-                // first check the inners
-                // TODO: DRY
-                for rpcs_iter in [self.inner.iter(), self.outer.iter()] {
-                    for (rpc_a, rpc_b) in rpcs_iter.circular_tuple_windows() {
-                        // TODO: ties within X% to the server with the smallest block_data_limit?
-                        // find rpc with the lowest weighted peak latency. backups always lose. rate limits always lose
-                        // TODO: should next_available be reversed?
-                        // TODO: this is similar to sort_for_load_balancing_on, but at this point we don't want to prefer tiers
-                        // TODO: move ethis to a helper function just so we can test it
-                        // TODO: should x.next_available should be Reverse<_>?
-                        let best_rpc = best_rpc(rpc_a, rpc_b);
+                // first check the inners, then the outers
+                for rpcs in [&self.inner, &self.outer] {
 
-                        match best_rpc
-                            .try_request_handle(&self.request, error_handler)
-                            .await
-                        {
-                            Ok(OpenRequestResult::Handle(handle)) => {
-                                trace!("opened handle: {}", best_rpc);
-                                yield handle;
-                            }
-                            Ok(OpenRequestResult::RetryAt(retry_at)) => {
-                                trace!(
-                                    "retry on {} @ {}",
-                                    best_rpc,
-                                    retry_at.duration_since(Instant::now()).as_secs_f32()
-                                );
+                    attempted.clear();
 
-                                earliest_retry_at = earliest_retry_at.min(Some(retry_at));
-                                continue;
-                            }
-                            Ok(OpenRequestResult::Lagged(x)) => {
-                                trace!("{} is lagged. will not work now", best_rpc);
-                                // this will probably always be the same block, right?
-                                if wait_for_sync.is_none() {
-                                    wait_for_sync = Some(x);
+                    while attempted.len() + failed.len() < rpcs.len() {
+                        filtered.clear();
+
+                        // TODO: i'd like to do this without the collect, but since we push into `attempted`, having `attempted.contains` causes issues
+                        filtered.extend(rpcs.iter().filter(|x| !(attempted.contains(x) || failed.contains(x))));
+
+                        // tuple_windows doesn't do anything for single item iters. make the code DRY by just having it compare itself
+                        if filtered.len() == 1 {
+                            filtered.push(filtered[0]);
+                        }
+
+                        for (rpc_a, rpc_b) in filtered.iter().tuple_windows() {
+                            // TODO: ties within X% to the server with the smallest block_data_limit?
+                            // find rpc with the lowest weighted peak latency. backups always lose. rate limits always lose
+                            // TODO: should next_available be reversed?
+                            // TODO: this is similar to sort_for_load_balancing_on, but at this point we don't want to prefer tiers
+                            // TODO: move ethis to a helper function just so we can test it
+                            // TODO: should x.next_available should be Reverse<_>?
+                            let best_rpc = best_rpc(rpc_a, rpc_b);
+
+                            attempted.push(best_rpc);
+
+                            match best_rpc
+                                .try_request_handle(&self.request, error_handler)
+                                .await
+                            {
+                                Ok(OpenRequestResult::Handle(handle)) => {
+                                    trace!("opened handle: {}", best_rpc);
+                                    yield handle;
                                 }
-                                continue;
-                            }
-                            Ok(OpenRequestResult::NotReady) => {
-                                // TODO: log a warning? emit a stat?
-                                trace!("best_rpc not ready: {}", best_rpc);
-                                continue;
-                            }
-                            Err(err) => {
-                                trace!("No request handle for {}. err={:?}", best_rpc, err);
-                                continue;
+                                Ok(OpenRequestResult::RetryAt(retry_at)) => {
+                                    trace!(
+                                        "retry on {} @ {}",
+                                        best_rpc,
+                                        retry_at.duration_since(Instant::now()).as_secs_f32()
+                                    );
+
+                                    earliest_retry_at = earliest_retry_at.min(Some(retry_at));
+                                    continue;
+                                }
+                                Ok(OpenRequestResult::Lagged(x)) => {
+                                    trace!("{} is lagged. will not work now", best_rpc);
+                                    // this will probably always be the same block, right?
+                                    if wait_for_sync.is_none() {
+                                        wait_for_sync = Some(x);
+                                    }
+                                    continue;
+                                }
+                                Ok(OpenRequestResult::Failed) => {
+                                    // TODO: log a warning? emit a stat?
+                                    trace!("best_rpc not ready: {}", best_rpc);
+                                    attempted.pop();
+                                    failed.push(best_rpc);
+                                    continue;
+                                }
+                                Err(err) => {
+                                    trace!("No request handle for {}. err={:?}", best_rpc, err);
+                                    attempted.pop();
+                                    failed.push(best_rpc);
+                                    continue;
+                                }
                             }
                         }
+
+                        debug_assert!(!attempted.is_empty());
                     }
                 }
 
                 // if we got this far, no inner or outer rpcs are ready. thats suprising since an inner should have been
-                // maybe someone requested something silly like a far future block?
 
                 // clear earliest_retry_at if it is too far in the future to help us
                 if let Some(retry_at) = earliest_retry_at {
-                    if self.request.expire_instant <= retry_at {
+                    if self.request.connect_timeout_at() <= retry_at {
                         // no point in waiting. it wants us to wait too long
                         earliest_retry_at = None;
                     }
@@ -1090,15 +1116,16 @@ impl RpcsForRequest {
                         // we have nothing to wait for. uh oh!
                         break;
                     }
-                    (_, Some(retry_at)) => {
+                    (None, Some(retry_at)) => {
                         // try again after rate limits are done
-                        sleep_until(retry_at).await;
+                        if retry_at > Instant::now() {
+                            sleep_until(retry_at).await;
+                        } else {
+                            // TODO: why is this happening? why would we get rate limited to now? it should be like a second at minimum
+                            yield_now().await;
+                        }
                     }
                     (Some(wait_for_sync), None) => {
-                        break;
-
-                        // TODO: think about this more
-                        /*
                         select! {
                             x = wait_for_sync => {
                                 match x {
@@ -1113,13 +1140,11 @@ impl RpcsForRequest {
                                     },
                                 }
                             }
-                            _ = sleep_until(self.request.expire_instant) => {
+                            _ = sleep_until(self.request.expire_at()) => {
                                 break;
                             }
                         }
-                         */
                     }
-                    /*
                     (Some(wait_for_sync), Some(retry_at)) => {
                         select! {
                             x = wait_for_sync => {
@@ -1136,14 +1161,16 @@ impl RpcsForRequest {
                                 }
                             }
                             _ = sleep_until(retry_at) => {
+                                // if sleep didn't have to wait at all, something seems wrong. have a minimum wait?
                                 yield_now().await;
                                 continue;
                             }
                         }
                     }
-                    */
                 }
             }
         }
+
+        // TODO: log that no servers were available. this might not be a server error. the user might have requested something in the far future (common when people mix up chains)
     }
 }

@@ -79,7 +79,7 @@ ordered-float = {version = "4.1.0" }
 pagerduty-rs = { version = "0.1.6", default-features = false, features = ["async", "sync"] }
 parking_lot = { version = "0.12.1", features = ["arc_lock", "nightly"] }
 rdkafka = { version = "0.34.0", features = ["tracing"] }
-regex = "1.9.6"
+regex = "1.10.0"
 reqwest = { version = "0.11.22", default-features = false, features = ["json", "default-tls"] }
 rust_decimal = { version = "1.32.0" }
 sentry = { version = "0.31.7", default-features = false, features = ["anyhow", "backtrace", "contexts", "panic", "reqwest", "native-tls", "serde_json", "tracing"] }

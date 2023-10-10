@@ -66,6 +66,12 @@ pub enum Web3ProxyError {
     EthersHttpClient(ethers::providers::HttpClientError),
     EthersProvider(ethers::prelude::ProviderError),
     EthersWsClient(ethers::prelude::WsClientError),
+    #[display(fmt = "{} < {}", head, requested)]
+    #[from(ignore)]
+    FarFutureBlock {
+        head: U64,
+        requested: U64,
+    },
     GasEstimateNotU256,
     HdrRecord(hdrhistogram::errors::RecordError),
     Headers(headers::Error),
@@ -382,6 +388,20 @@ impl Web3ProxyError {
                     )
                 }
             },
+            Self::FarFutureBlock { head, requested } => {
+                trace!(?head, ?requested, "FarFutureBlock");
+                (
+                    StatusCode::OK,
+                    JsonRpcErrorData {
+                        message: "requested block is too far in the future".into(),
+                        code: (-32002).into(),
+                        data: Some(json!({
+                            "head": head,
+                            "requested": requested,
+                        })),
+                    },
+                )
+            }
             // Self::JsonRpcForwardedError(x) => (StatusCode::OK, x),
             Self::GasEstimateNotU256 => {
                 trace!("GasEstimateNotU256");
@@ -656,7 +676,7 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "mdbx panic".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: Some(serde_json::Value::String(msg.to_string())),
+                        data: Some(json!({"rpc": rpc})),
                     },
                 )
             }

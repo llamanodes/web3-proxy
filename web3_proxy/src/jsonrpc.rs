@@ -3,7 +3,6 @@ use axum::response::{IntoResponse, Response as AxumResponse};
 use axum::Json;
 use bytes::{Bytes, BytesMut};
 use derive_more::From;
-use ethers::providers::ProviderError;
 use futures_util::stream::{self, StreamExt};
 use futures_util::TryStreamExt;
 use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
@@ -218,7 +217,7 @@ pub struct StreamResponse {
 
 impl StreamResponse {
     // TODO: error handing
-    pub async fn read<T>(self) -> Result<ParsedResponse<T>, ProviderError>
+    pub async fn read<T>(self) -> Web3ProxyResult<ParsedResponse<T>>
     where
         T: de::DeserializeOwned,
     {
@@ -306,7 +305,7 @@ where
     }
 
     // TODO: error handling
-    pub async fn parsed(self) -> Result<ParsedResponse<T>, ProviderError> {
+    pub async fn parsed(self) -> Web3ProxyResult<ParsedResponse<T>> {
         match self {
             Self::Parsed(resp) => Ok(resp),
             Self::Stream(resp) => resp.read().await,
@@ -362,7 +361,7 @@ pub enum Response<T = Arc<RawValue>> {
 }
 
 impl Response<Arc<RawValue>> {
-    pub async fn to_json_string(self) -> Result<String, ProviderError> {
+    pub async fn to_json_string(self) -> Web3ProxyResult<String> {
         let x = match self {
             Self::Single(resp) => {
                 // TODO: handle streaming differently?
@@ -662,6 +661,11 @@ impl JsonRpcErrorData {
         serde_json::to_string(self)
             .expect("should always serialize")
             .len()
+    }
+
+    pub fn is_retryable(&self) -> bool {
+        // TODO: move stuff from request to here
+        todo!()
     }
 }
 

@@ -30,7 +30,6 @@ use std::sync::atomic::{self, AtomicU32, AtomicU64, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
 use tokio::select;
 use tokio::sync::{mpsc, watch, RwLock as AsyncRwLock};
-use tokio::task::yield_now;
 use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
 use tracing::{debug, error, info, trace, warn, Level};
 use url::Url;
@@ -353,6 +352,8 @@ impl Web3Rpc {
 
         // TODO: binary search between 90k and max?
         // TODO: start at 0 or 1?
+        let mut last = U256::MAX;
+        // TODO: these should all be U256, not u64
         for block_data_limit in [0, 32, 64, 128, 256, 512, 1024, 90_000, u64::MAX] {
             let head_block_num = self
                 .internal_request::<_, U256>(
@@ -366,6 +367,13 @@ impl Web3Rpc {
                 .context("head_block_num error during check_block_data_limit")?;
 
             let maybe_archive_block = head_block_num.saturating_sub((block_data_limit).into());
+
+            if last == maybe_archive_block {
+                // we already checked it. exit early
+                break;
+            }
+
+            last = maybe_archive_block;
 
             trace!(
                 "checking maybe_archive_block on {}: {}",
@@ -992,8 +1000,6 @@ impl Web3Rpc {
         web3_request: &Arc<Web3Request>,
         error_handler: Option<RequestErrorHandler>,
     ) -> Web3ProxyResult<OpenRequestHandle> {
-        let mut head_block_sender = None;
-
         loop {
             match self.try_request_handle(web3_request, error_handler).await {
                 Ok(OpenRequestResult::Handle(handle)) => return Ok(handle),
@@ -1011,7 +1017,7 @@ impl Web3Rpc {
                     debug_assert!(wait > Duration::from_secs(0));
 
                     // TODO: have connect_timeout in addition to the full ttl
-                    if retry_at > web3_request.expire_instant {
+                    if retry_at > web3_request.expire_at() {
                         // break now since we will wait past our maximum wait time
                         return Err(Web3ProxyError::Timeout(Some(
                             web3_request.start_instant.elapsed(),
@@ -1022,35 +1028,34 @@ impl Web3Rpc {
                 }
                 Ok(OpenRequestResult::Lagged(now_synced_f)) => {
                     select! {
-                        _ = now_synced_f => {
-                            // TODO: i'm guessing this is returning immediatly
-                            yield_now().await;
-                        }
-                        _ = sleep_until(web3_request.expire_instant) => {
+                        _ = now_synced_f => {}
+                        _ = sleep_until(web3_request.expire_at()) => {
                             break;
                         }
                     }
                 }
-                Ok(OpenRequestResult::NotReady) => {
+                Ok(OpenRequestResult::Failed) => {
                     // TODO: when can this happen? log? emit a stat?
                     trace!("{} has no handle ready", self);
 
-                    if head_block_sender.is_none() {
-                        head_block_sender = self.head_block_sender.as_ref().map(|x| x.subscribe());
-                    }
+                    // if head_block_sender.is_none() {
+                    //     head_block_sender = self.head_block_sender.as_ref().map(|x| x.subscribe());
+                    // }
 
-                    if let Some(head_block_sender) = &mut head_block_sender {
-                        select! {
-                            _ = head_block_sender.changed() => {
-                                head_block_sender.borrow_and_update();
-                            }
-                            _ = sleep_until(web3_request.expire_instant) => {
-                                break;
-                            }
-                        }
-                    } else {
-                        break;
-                    }
+                    // if let Some(head_block_sender) = &mut head_block_sender {
+                    //     select! {
+                    //         _ = head_block_sender.changed() => {
+                    //             head_block_sender.borrow_and_update();
+                    //         }
+                    //         _ = sleep_until(web3_request.expire_at()) => {
+                    //             break;
+                    //         }
+                    //     }
+                    // } else {
+                    //     break;
+                    // }
+
+                    break;
                 }
                 Err(err) => return Err(err),
             }
@@ -1140,7 +1145,8 @@ impl Web3Rpc {
         // TODO: should this check be optional? we've probably already done it for RpcForRuest::inner. for now its fine to duplicate the check
         if let Some(block_needed) = web3_request.min_block_needed() {
             if !self.has_block_data(block_needed) {
-                return Ok(OpenRequestResult::NotReady);
+                trace!(%web3_request, %block_needed, "{} cannot serve this request. Missing min block", self);
+                return Ok(OpenRequestResult::Failed);
             }
         }
 
@@ -1148,9 +1154,13 @@ impl Web3Rpc {
         // TODO: should this check be optional? we've probably already done it for RpcForRuest::inner. for now its fine to duplicate the check
         if let Some(block_needed) = web3_request.max_block_needed() {
             if !self.has_block_data(block_needed) {
-                let clone = self.clone();
-                let expire_instant = web3_request.expire_instant;
+                trace!(%web3_request, %block_needed, "{} cannot serve this request. Missing max block", self);
 
+                let clone = self.clone();
+                let connect_timeout_at = web3_request.connect_timeout_at();
+
+                // create a future that resolves once this rpc can serve this request
+                // TODO: i don't love this future. think about it more
                 let synced_f = async move {
                     let mut head_block_receiver =
                         clone.head_block_sender.as_ref().unwrap().subscribe();
@@ -1163,21 +1173,23 @@ impl Web3Rpc {
                             _ = head_block_receiver.changed() => {
                                 if let Some(head_block_number) = head_block_receiver.borrow_and_update().as_ref().map(|x| x.number()) {
                                     if head_block_number >= block_needed {
-                                        // the block we needed has arrived!
+                                        trace!("the block we needed has arrived!");
                                         break;
                                     }
-                                    // TODO: configurable lag per chain
-                                    if head_block_number < block_needed.saturating_sub(5.into()) {
-                                        // TODO: more detailed error about this being a far future block
-                                        return Err(Web3ProxyError::NoServersSynced);
+                                    // wait up to 2 blocks
+                                    // TODO: configurable wait per chain
+                                    if head_block_number + U64::from(2) < block_needed {
+                                        return Err(Web3ProxyError::FarFutureBlock { head: head_block_number, requested: block_needed });
                                     }
                                 } else {
                                     // TODO: what should we do? this server has no blocks at all. we can wait, but i think exiting now is best
                                     // yield_now().await;
+                                    error!("no head block during try_request_handle on {}", clone);
                                     return Err(Web3ProxyError::NoServersSynced);
                                 }
                             }
-                            _ = sleep_until(expire_instant) => {
+                            _ = sleep_until(connect_timeout_at) => {
+                                error!("connection timeout on {}", clone);
                                 return Err(Web3ProxyError::NoServersSynced);
                             }
                         }
@@ -1198,7 +1210,7 @@ impl Web3Rpc {
             }
             RedisRateLimitResult::RetryNever => {
                 warn!("how did retry never on {} happen?", self);
-                return Ok(OpenRequestResult::NotReady);
+                return Ok(OpenRequestResult::Failed);
             }
         };
 

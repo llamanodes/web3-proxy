@@ -47,7 +47,7 @@ use std::time::Duration;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc, oneshot, watch, Semaphore};
 use tokio::task::JoinHandle;
-use tokio::time::{sleep, timeout, Instant};
+use tokio::time::{sleep, timeout, timeout_at, Instant};
 use tracing::{error, info, trace, warn};
 
 // TODO: make this customizable?
@@ -1621,8 +1621,8 @@ impl Web3ProxyApp {
                     } else if self.jsonrpc_response_failed_cache_keys.contains_key(&cache_key) {
                         // this is a cache_key that we know won't cache
                         // NOTICE! We do **NOT** use get which means the key's hotness is not updated. we don't use time-to-idler here so thats fine. but be careful if that changes
-                        timeout(
-                            web3_request.ttl(),
+                        timeout_at(
+                            web3_request.expire_at(),
                             self.balanced_rpcs
                             .try_proxy_connection::<Arc<RawValue>>(
                                 web3_request,
@@ -1642,8 +1642,8 @@ impl Web3ProxyApp {
                         let mut x = match timeout(Duration::from_secs(1), s.acquire_owned()).await {
                             Err(_) => {
                                 // TODO: should we try to cache this? whatever has the semaphore //should// handle that for us
-                                timeout(
-                                    web3_request.ttl(),
+                                timeout_at(
+                                    web3_request.expire_at(),
                                     self.balanced_rpcs
                                     .try_proxy_connection::<Arc<RawValue>>(
                                         web3_request,
@@ -1661,10 +1661,8 @@ impl Web3ProxyApp {
                                         app
                                             .jsonrpc_response_cache
                                             .try_get_with::<_, Web3ProxyError>(cache_key, async {
-                                                let duration = web3_request.ttl().saturating_sub(Duration::from_secs(1));
-
                                                 // TODO: dynamic timeout based on whats left on web3_request
-                                                let response_data = timeout(duration, app.balanced_rpcs
+                                                let response_data = timeout_at(web3_request.expire_at(), app.balanced_rpcs
                                                     .try_proxy_connection::<Arc<RawValue>>(
                                                         &web3_request,
                                                 )).await;
@@ -1738,8 +1736,8 @@ impl Web3ProxyApp {
 
                     x
                 } else {
-                    let mut x = timeout(
-                        web3_request.ttl(),
+                    let mut x = timeout_at(
+                        web3_request.expire_at(),
                         self.balanced_rpcs
                         .try_proxy_connection::<Arc<RawValue>>(
                             web3_request,

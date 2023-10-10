@@ -1,10 +1,7 @@
 use serde_json::Value;
 use std::{str::FromStr, time::Duration};
-use tokio::{
-    task::yield_now,
-    time::{sleep, Instant},
-};
-use tracing::info;
+use tokio::{task::yield_now, time::sleep};
+use tracing::{info, warn};
 use web3_proxy::prelude::ethers::{
     prelude::{Block, Transaction, TxHash, H256, U256, U64},
     providers::{Http, JsonRpcClient, Quorum, QuorumProvider, WeightedProvider},
@@ -39,6 +36,17 @@ async fn it_starts_and_stops() {
     let anvil_provider = &a.provider;
     let proxy_provider = &x.proxy_provider;
 
+    // check the /health page
+    let proxy_url = x.proxy_provider.url();
+    let health_response = reqwest::get(format!("{}health", proxy_url)).await;
+    dbg!(&health_response);
+    assert_eq!(health_response.unwrap().status(), StatusCode::OK);
+
+    // check the /status page
+    let status_response = reqwest::get(format!("{}status", proxy_url)).await;
+    dbg!(&status_response);
+    assert_eq!(status_response.unwrap().status(), StatusCode::OK);
+
     let anvil_result = anvil_provider
         .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
         .await
@@ -51,17 +59,6 @@ async fn it_starts_and_stops() {
         .unwrap();
 
     assert_eq!(anvil_result, proxy_result);
-
-    // check the /health page
-    let proxy_url = x.proxy_provider.url();
-    let health_response = reqwest::get(format!("{}health", proxy_url)).await;
-    dbg!(&health_response);
-    assert_eq!(health_response.unwrap().status(), StatusCode::OK);
-
-    // check the /status page
-    let status_response = reqwest::get(format!("{}status", proxy_url)).await;
-    dbg!(&status_response);
-    assert_eq!(status_response.unwrap().status(), StatusCode::OK);
 
     let first_block_num = anvil_result.number.unwrap();
 
@@ -81,13 +78,9 @@ async fn it_starts_and_stops() {
 
     yield_now().await;
 
-    let mut proxy_result;
-    let start = Instant::now();
-    loop {
-        if start.elapsed() > Duration::from_secs(1) {
-            panic!("took too long to sync!");
-        }
+    let mut proxy_result = None;
 
+    for _ in 0..10 {
         proxy_result = proxy_provider
             .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
             .await
@@ -99,7 +92,9 @@ async fn it_starts_and_stops() {
             }
         }
 
-        sleep(Duration::from_millis(10)).await;
+        warn!(?proxy_result, ?second_block_num);
+
+        sleep(Duration::from_millis(100)).await;
     }
 
     assert_eq!(anvil_result, proxy_result.unwrap());
