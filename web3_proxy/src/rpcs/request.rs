@@ -416,6 +416,13 @@ impl OpenRequestHandle {
                                         ResponseType::Error
                                     }
                                 }
+                                -32005 => {
+                                    if error.message == "rate limit exceeded" {
+                                        ResponseType::RateLimited
+                                    } else {
+                                        ResponseType::Error
+                                    }
+                                }
                                 -32601 => {
                                     let error_msg = error.message.as_ref();
 
