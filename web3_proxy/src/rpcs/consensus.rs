@@ -1055,7 +1055,7 @@ impl RpcsForRequest {
                             attempted.push(best_rpc);
 
                             match best_rpc
-                                .try_request_handle(&self.request, error_handler)
+                                .try_request_handle(&self.request, error_handler, false)
                                 .await
                             {
                                 Ok(OpenRequestResult::Handle(handle)) => {
