@@ -52,6 +52,12 @@ pub enum Web3ProxyError {
     #[error(ignore)]
     Anyhow(anyhow::Error),
     Arc(Arc<Self>),
+    #[from(ignore)]
+    #[display(fmt = "{:?} to {:?}", min, max)]
+    ArchiveRequired {
+        min: Option<U64>,
+        max: Option<U64>,
+    },
     #[error(ignore)]
     #[from(ignore)]
     BadRequest(Cow<'static, str>),
@@ -232,6 +238,21 @@ impl Web3ProxyError {
                         message: format!("FORBIDDEN: {}", msg).into(),
                         code: StatusCode::FORBIDDEN.as_u16().into(),
                         data: None,
+                    },
+                )
+            }
+            Self::ArchiveRequired { min, max } => {
+                // TODO: attach something to this trace. probably don't include much in the message though. don't want to leak creds by accident
+                trace!(?min, ?max, "archive node required");
+                (
+                    StatusCode::OK,
+                    JsonRpcErrorData {
+                        message: "Archive data required".into(),
+                        code: StatusCode::OK.as_u16().into(),
+                        data: Some(json!({
+                            "min": min,
+                            "max": max,
+                        })),
                     },
                 )
             }

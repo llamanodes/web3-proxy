@@ -398,10 +398,22 @@ impl OpenRequestHandle {
                                         for prefix in archive_prefixes {
                                             if error.message.starts_with(prefix) {
                                                 // TODO: what error?
-                                                response = Err(Web3ProxyError::NoBlockNumberOrHash);
+                                                response = Err(Web3ProxyError::ArchiveRequired {
+                                                    min: self.web3_request.min_block_needed(),
+                                                    max: self.web3_request.max_block_needed(),
+                                                });
                                                 break;
                                             }
                                         }
+                                    }
+
+                                    ResponseType::Error
+                                }
+                                -32001 => {
+                                    if error.message == "Exceeded the quota usage" {
+                                        ResponseType::RateLimited
+                                    } else {
+                                        ResponseType::Error
                                     }
                                 }
                                 -32601 => {
@@ -422,11 +434,11 @@ impl OpenRequestHandle {
                                         response =
                                             Err(Web3ProxyError::MethodNotFound(method.into()))
                                     }
-                                }
-                                _ => {}
-                            }
 
-                            ResponseType::Error
+                                    ResponseType::Error
+                                }
+                                _ => ResponseType::Error,
+                            }
                         }
                     }
                 },
