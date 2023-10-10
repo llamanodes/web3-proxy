@@ -2748,7 +2748,7 @@ dependencies = [
  "go-parse-duration",
  "influxdb2-derive",
  "influxdb2-structmap",
- "ordered-float 3.9.1",
+ "ordered-float 3.9.2",
  "reqwest",
  "secrecy",
  "serde",
@@ -2779,7 +2779,7 @@ source = "git+https://github.com/llamanodes/influxdb2?rev=2d125128696a29d7e0b9ab
 dependencies = [
  "chrono",
  "num-traits",
- "ordered-float 3.9.1",
+ "ordered-float 3.9.2",
 ]
 
 [[package]]
@@ -3479,9 +3479,9 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "ordered-float"
-version = "3.9.1"
+version = "3.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a54938017eacd63036332b4ae5c8a49fc8c0c1d6d629893057e4f13609edd06"
+checksum = "f1e1c390732d15f1d48471625cd92d154e66db2c56645e29a9cd26f4699f72dc"
 dependencies = [
  "num-traits",
  "rand 0.8.5",
@@ -3490,9 +3490,9 @@ dependencies = [
 
 [[package]]
 name = "ordered-float"
-version = "4.1.0"
+version = "4.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3a540f3e3b3d7929c884e46d093d344e4e5bdeed54d08bf007df50c93cc85d5"
+checksum = "536900a8093134cf9ccf00a27deb3532421099e958d9dd431135d0c7543ca1e8"
 dependencies = [
  "num-traits",
 ]
@@ -4737,7 +4737,7 @@ dependencies = [
  "chrono",
  "derivative",
  "inherent",
- "ordered-float 3.9.1",
+ "ordered-float 3.9.2",
  "rust_decimal",
  "sea-query-derive",
  "serde_json",
@@ -6568,7 +6568,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b85594e8299160103ff39146412bf32711b11af3856d70c9b5539211adcbc502"
 dependencies = [
  "num",
- "ordered-float 3.9.1",
+ "ordered-float 3.9.2",
  "serde",
  "serde_json",
 ]
@@ -6585,7 +6585,7 @@ dependencies = [
 
 [[package]]
 name = "web3_proxy"
-version = "1.43.25"
+version = "1.43.26"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -6633,7 +6633,7 @@ dependencies = [
  "num",
  "num-traits",
  "once_cell",
- "ordered-float 4.1.0",
+ "ordered-float 4.1.1",
  "pagerduty-rs",
  "parking_lot",
  "payment-contracts",
@@ -6667,7 +6667,7 @@ dependencies = [
 
 [[package]]
 name = "web3_proxy_cli"
-version = "1.43.25"
+version = "1.43.26"
 dependencies = [
  "env_logger",
  "parking_lot",

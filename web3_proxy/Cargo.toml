@@ -1,6 +1,6 @@
 [package]
 name = "web3_proxy"
-version = "1.43.25"
+version = "1.43.26"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -75,7 +75,7 @@ nanorand = { version = "0.7.0", default-features = false, features = ["std", "tl
 num = { version = "0.4.1" }
 num-traits = "0.2.17"
 once_cell = { version = "1.18.0" }
-ordered-float = {version = "4.1.0" }
+ordered-float = {version = "4.1.1" }
 pagerduty-rs = { version = "0.1.6", default-features = false, features = ["async", "sync"] }
 parking_lot = { version = "0.12.1", features = ["arc_lock", "nightly"] }
 rdkafka = { version = "0.34.0", features = ["tracing"] }
