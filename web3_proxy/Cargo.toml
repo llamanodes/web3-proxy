@@ -1,6 +1,6 @@
 [package]
 name = "web3_proxy"
-version = "1.43.32"
+version = "1.43.27"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -24,7 +24,7 @@ payment-contracts = { path = "../payment-contracts" }
 redis-rate-limiter = { path = "../redis-rate-limiter" }
 
 #ethers = { git = "https://github.com/llamanodes/ethers-rs/", rev = "eb68f5d60850008cd302762bd3a5a4bdcfecc713", default-features = false, features = ["openssl", "ws"] }
-influxdb2 = { git = "https://github.com/llamanodes/influxdb2", default-features = false, features = ["native-tls"], rev = "2d125128696a29d7e0b9abc052c928937e7c0579" }
+influxdb2 = { git = "https://github.com/llamanodes/influxdb2", default-features = false, features = ["rustls"], rev = "2d125128696a29d7e0b9abc052c928937e7c0579" }
 influxdb2-structmap = { git = "https://github.com/llamanodes/influxdb2/", rev = "2d125128696a29d7e0b9abc052c928937e7c0579"}
 
 # TODO: we can't actually use 0.6 because they want a Provider and we have an Arc<Provider>
@@ -42,7 +42,7 @@ arc-swap = { version = "1.6.0" }
 argh = "0.1.12"
 async-recursion = "1.0.5"
 async-stream = "0.3.5"
-async-stripe = { version = "0.25.2", default-features = false, features = ["billing", "checkout", "connect", "runtime-tokio-hyper", "webhook-events"], optional = true }
+async-stripe = { version = "0.25.2", default-features = false, features = ["billing", "checkout", "connect", "runtime-tokio-hyper-rustls", "webhook-events"], optional = true }
 async-trait = "0.1.73"
 axum = { version = "0.6.20", features = ["headers", "tracing", "ws"] }
 axum-client-ip = "0.4.2"
@@ -54,7 +54,7 @@ console-subscriber = { version = "0.2.0", features = ["env-filter", "parking_lot
 derivative = "2.2.0"
 derive_more = { version = "0.99.17", features = ["nightly"] }
 ethbloom = { version = "0.13.0" }
-ethers = { version = "2.0.10", default-features = false, features = ["openssl", "ws"] }
+ethers = { version = "2.0.10", default-features = false, features = ["rustls", "ws"] }
 fdlimit = "0.2.1"
 fstrings = "0.2"
 futures = { version = "0.3.28" }
@@ -76,13 +76,13 @@ num = { version = "0.4.1" }
 num-traits = "0.2.17"
 once_cell = { version = "1.18.0" }
 ordered-float = {version = "4.1.1" }
-pagerduty-rs = { version = "0.1.6", default-features = false, features = ["async", "sync"] }
+pagerduty-rs = { version = "0.1.6", default-features = false, features = ["async", "rustls", "sync"] }
 parking_lot = { version = "0.12.1", features = ["arc_lock", "nightly"] }
 rdkafka = { version = "0.34.0", features = ["tracing"] }
 regex = "1.10.0"
-reqwest = { version = "0.11.22", default-features = false, features = ["json", "default-tls"] }
+reqwest = { version = "0.11.22", default-features = false, features = ["json", "rustls"] }
 rust_decimal = { version = "1.32.0" }
-sentry = { version = "0.31.7", default-features = false, features = ["anyhow", "backtrace", "contexts", "panic", "reqwest", "native-tls", "serde_json", "tracing"] }
+sentry = { version = "0.31.7", default-features = false, features = ["anyhow", "backtrace", "contexts", "panic", "reqwest", "rustls", "serde_json", "tracing"] }
 sentry-tracing = "0.31.7"
 serde = { version = "1.0.188" }
 serde-inline-default = "0.1.1"
