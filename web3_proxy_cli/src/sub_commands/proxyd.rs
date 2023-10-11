@@ -3,6 +3,7 @@ use std::sync::atomic::AtomicU16;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{fs, thread};
+use tokio::time::sleep;
 use tracing::{error, info, trace, warn};
 use web3_proxy::app::{flatten_handle, flatten_handles, App};
 use web3_proxy::config::TopConfig;

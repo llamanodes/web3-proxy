@@ -1013,8 +1013,6 @@ impl Authorization {
 
         let a = Arc::new(a);
 
-        // todo!(semaphore permit)
-
         Ok((a, p))
     }
 }

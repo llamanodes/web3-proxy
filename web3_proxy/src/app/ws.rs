@@ -82,7 +82,7 @@ impl App {
                             continue;
                         };
 
-                        // TODO: this needs a permit
+                        // todo!(this needs a permit)
                         let subscription_web3_request = ValidatedRequest::new_with_app(
                             &app,
                             authorization.clone(),

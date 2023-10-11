@@ -1386,7 +1386,6 @@ impl Serialize for Web3Rpc {
     where
         S: Serializer,
     {
-        // 14 if we bring head_delay back
         let mut state = serializer.serialize_struct("Web3Rpc", 14)?;
 
         // the url is excluded because it likely includes private information. just show the name that we use in keys
