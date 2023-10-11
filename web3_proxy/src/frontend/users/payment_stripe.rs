@@ -1,4 +1,4 @@
-use crate::app::Web3ProxyApp;
+use crate::app::App;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
 use crate::globals::global_db_conn;
 use crate::premium::grant_premium_tier;
@@ -19,7 +19,7 @@ use tracing::{debug, error, warn};
 /// this endpoint is called from the webhook with the user_id parameter in the request
 #[debug_handler]
 pub async fn user_balance_stripe_post(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     // InsecureClientIp(ip): InsecureClientIp,
     headers: HeaderMap,
     payload: String,
