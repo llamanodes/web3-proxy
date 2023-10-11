@@ -436,22 +436,18 @@ impl RankedRpcs {
 // TODO: refs for all of these. borrow on a Sender is cheap enough
 // TODO: move this to many.rs
 impl Web3Rpcs {
+    #[inline]
     pub fn head_block(&self) -> Option<Web3ProxyBlock> {
         self.watch_head_block
             .as_ref()
             .and_then(|x| x.borrow().clone())
     }
 
-    /// note: you probably want to use `head_block` instead
-    /// TODO: return a ref?
-    pub fn head_block_hash(&self) -> Option<H256> {
-        self.head_block().map(|x| *x.hash())
-    }
-
-    /// note: you probably want to use `head_block` instead
-    /// TODO: return a ref?
+    #[inline]
     pub fn head_block_num(&self) -> Option<U64> {
-        self.head_block().map(|x| x.number())
+        self.watch_head_block
+            .as_ref()
+            .and_then(|x| x.borrow().as_ref().map(|x| x.number()))
     }
 
     pub fn synced(&self) -> bool {
