@@ -1,6 +1,4 @@
 //! Helper functions for turning ether's BlockNumber into numbers and updating incoming queries to match.
-use std::time::Duration;
-
 use crate::app::Web3ProxyApp;
 use crate::jsonrpc::JsonRpcRequest;
 use crate::{
@@ -8,7 +6,6 @@ use crate::{
     rpcs::blockchain::Web3ProxyBlock,
 };
 use anyhow::Context;
-use async_recursion::async_recursion;
 use derive_more::From;
 use ethers::{
     prelude::{BlockNumber, U64},
@@ -68,7 +65,6 @@ impl From<&Web3ProxyBlock> for BlockNumAndHash {
 
 /// modify params to always have a block hash and not "latest"
 /// TODO: it would be nice to replace "latest" with the hash, but not all methods support that
-#[async_recursion]
 pub async fn clean_block_number<'a>(
     params: &'a mut serde_json::Value,
     block_param_id: usize,
@@ -109,7 +105,8 @@ pub async fn clean_block_number<'a>(
                         } else if let Some(app) = app {
                             let block = app
                                 .balanced_rpcs
-                                .block(&block_hash, None, None)
+                                .blocks_by_hash
+                                .get(&block_hash)
                                 .await
                                 .context("fetching block number from hash")?;
 
@@ -142,7 +139,8 @@ pub async fn clean_block_number<'a>(
                             // TODO: what should this max_wait be?
                             let block = app
                                 .balanced_rpcs
-                                .block(&block_hash, None, Some(Duration::from_secs(3)))
+                                .blocks_by_hash
+                                .get(&block_hash)
                                 .await
                                 .context("fetching block number from hash")?;
 
@@ -173,15 +171,18 @@ pub async fn clean_block_number<'a>(
                     if block_num == head_block_num {
                         (head_block.into(), changed)
                     } else if let Some(app) = app {
+                        // TODO: we used to make a query here, but thats causing problems with recursion now. come back to this
                         let block_hash = app
                             .balanced_rpcs
-                            .block_hash(&block_num)
+                            .blocks_by_number
+                            .get(&block_num)
                             .await
                             .context("fetching block hash from number")?;
 
                         let block = app
                             .balanced_rpcs
-                            .block(&block_hash, None, None)
+                            .blocks_by_hash
+                            .get(&block_hash)
                             .await
                             .context("fetching block from hash")?;
 
@@ -269,17 +270,8 @@ impl CacheMode {
                 warn!(
                     method = %request.method,
                     params = ?request.params,
-                    "no servers available to get block from params. caching with head block"
+                    "no servers available to get block from params but head block known. caching with head block"
                 );
-                if let Some(head_block) = head_block {
-                    // TODO: strange to get NoBlocksKnown **and** have a head block. think about this more
-                    CacheMode::Standard {
-                        block: head_block.into(),
-                        cache_errors: true,
-                    }
-                } else {
-                    CacheMode::Never
-                }
             }
             Err(err) => {
                 error!(
@@ -288,15 +280,16 @@ impl CacheMode {
                     ?err,
                     "could not get block from params. caching with head block"
                 );
-                if let Some(head_block) = head_block {
-                    CacheMode::Standard {
-                        block: head_block.into(),
-                        cache_errors: true,
-                    }
-                } else {
-                    CacheMode::Never
-                }
             }
+        }
+
+        if let Some(head_block) = head_block {
+            CacheMode::Standard {
+                block: head_block.into(),
+                cache_errors: true,
+            }
+        } else {
+            CacheMode::Never
         }
     }
 

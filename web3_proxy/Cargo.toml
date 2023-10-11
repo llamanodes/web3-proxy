@@ -40,7 +40,6 @@ siwe = { git = "https://github.com/llamanodes/siwe-rs", branch = "for_web3_proxy
 anyhow = { version = "1.0.75", features = ["backtrace"] }
 arc-swap = { version = "1.6.0" }
 argh = "0.1.12"
-async-recursion = "1.0.5"
 async-stream = "0.3.5"
 async-stripe = { version = "0.25.2", default-features = false, features = ["billing", "checkout", "connect", "runtime-tokio-hyper-rustls", "webhook-events"], optional = true }
 async-trait = "0.1.73"

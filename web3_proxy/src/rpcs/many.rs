@@ -50,9 +50,9 @@ pub struct Web3Rpcs {
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
     /// all blocks, including uncles
     /// TODO: i think uncles should be excluded
-    pub(super) blocks_by_hash: BlocksByHashCache,
+    pub(crate) blocks_by_hash: BlocksByHashCache,
     /// blocks on the heaviest chain
-    pub(super) blocks_by_number: BlocksByNumberCache,
+    pub(crate) blocks_by_number: BlocksByNumberCache,
     /// the number of rpcs required to agree on consensus for the head block (thundering herd protection)
     pub(super) min_synced_rpcs: usize,
     /// the soft limit required to agree on consensus for the head block. (thundering herd protection)
