@@ -1,5 +1,5 @@
 //! Helper functions for turning ether's BlockNumber into numbers and updating incoming queries to match.
-use crate::app::Web3ProxyApp;
+use crate::app::App;
 use crate::jsonrpc::SingleRequest;
 use crate::{
     errors::{Web3ProxyError, Web3ProxyResult},
@@ -69,7 +69,7 @@ pub async fn clean_block_number<'a>(
     params: &'a mut serde_json::Value,
     block_param_id: usize,
     head_block: &'a Web3ProxyBlock,
-    app: Option<&'a Web3ProxyApp>,
+    app: Option<&'a App>,
 ) -> Web3ProxyResult<BlockNumAndHash> {
     match params.as_array_mut() {
         None => {
@@ -262,7 +262,7 @@ impl CacheMode {
     pub async fn new<'a>(
         request: &'a mut SingleRequest,
         head_block: Option<&'a Web3ProxyBlock>,
-        app: Option<&'a Web3ProxyApp>,
+        app: Option<&'a App>,
     ) -> Self {
         match Self::try_new(request, head_block, app).await {
             Ok(x) => return x,
@@ -296,7 +296,7 @@ impl CacheMode {
     pub async fn try_new(
         request: &mut SingleRequest,
         head_block: Option<&Web3ProxyBlock>,
-        app: Option<&Web3ProxyApp>,
+        app: Option<&App>,
     ) -> Web3ProxyResult<Self> {
         let params = &mut request.params;
 
@@ -329,7 +329,7 @@ impl CacheMode {
             }
         }
 
-        match request.method.as_str() {
+        match request.method.as_ref() {
             "debug_traceTransaction" => {
                 // TODO: make sure re-orgs work properly!
                 Ok(CacheMode::SuccessForever)
@@ -541,7 +541,7 @@ mod test {
 
         let id = LooseId::Number(9);
 
-        let mut request = SingleRequest::new(id, method.to_string(), params).unwrap();
+        let mut request = SingleRequest::new(id, method.into(), params).unwrap();
 
         // TODO: instead of empty, check None?
         let x = CacheMode::try_new(&mut request, Some(&head_block), None)
@@ -576,7 +576,7 @@ mod test {
 
         let id = LooseId::Number(99);
 
-        let mut request = SingleRequest::new(id, method.to_string(), params).unwrap();
+        let mut request = SingleRequest::new(id, method.into(), params).unwrap();
 
         let x = CacheMode::try_new(&mut request, Some(&head_block), None)
             .await
@@ -611,7 +611,7 @@ mod test {
 
         let head_block = Web3ProxyBlock::try_new(Arc::new(head_block)).unwrap();
 
-        let mut request = SingleRequest::new(99.into(), method.to_string(), params).unwrap();
+        let mut request = SingleRequest::new(99.into(), method.into(), params).unwrap();
 
         let x = CacheMode::try_new(&mut request, Some(&head_block), None)
             .await

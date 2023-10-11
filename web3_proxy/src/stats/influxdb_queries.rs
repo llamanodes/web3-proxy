@@ -2,7 +2,7 @@ use super::StatType;
 use crate::errors::Web3ProxyErrorContext;
 use crate::globals::global_db_replica_conn;
 use crate::{
-    app::Web3ProxyApp,
+    app::App,
     errors::{Web3ProxyError, Web3ProxyResponse},
     http_params::{
         get_chain_id_from_params, get_query_start_from_params, get_query_stop_from_params,
@@ -27,7 +27,7 @@ use tracing::{error, trace, warn};
 use ulid::Ulid;
 
 pub async fn query_user_influx_stats<'a>(
-    app: &'a Web3ProxyApp,
+    app: &'a App,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     params: &'a HashMap<String, String>,
     stat_response_type: StatType,

@@ -1,9 +1,9 @@
 //! Websocket-specific functions for the Web3ProxyApp
 
-use super::Web3ProxyApp;
+use super::App;
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
-use crate::frontend::authorization::{RequestOrMethod, Web3Request};
-use crate::jsonrpc;
+use crate::frontend::authorization::RequestOrMethod;
+use crate::jsonrpc::{self, ValidatedRequest};
 use crate::response_cache::ForwardedResponse;
 use axum::extract::ws::{CloseFrame, Message};
 use deferred_rate_limiter::DeferredRateLimitResult;
@@ -21,10 +21,10 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::WatchStream;
 use tracing::{error, trace};
 
-impl Web3ProxyApp {
+impl App {
     pub async fn eth_subscribe<'a>(
         self: &'a Arc<Self>,
-        web3_request: Arc<Web3Request>,
+        web3_request: Arc<ValidatedRequest>,
         subscription_count: &'a AtomicU64,
         // TODO: taking a sender for Message instead of the exact json we are planning to send feels wrong, but its easier for now
         response_sender: mpsc::Sender<Message>,
@@ -82,9 +82,11 @@ impl Web3ProxyApp {
                             continue;
                         };
 
-                        let subscription_web3_request = Web3Request::new_with_app(
+                        // TODO: this needs a permit
+                        let subscription_web3_request = ValidatedRequest::new_with_app(
                             &app,
                             authorization.clone(),
+                            None,
                             None,
                             RequestOrMethod::Method("eth_subscribe(newHeads)".into(), 0),
                             Some(new_head),
@@ -168,9 +170,11 @@ impl Web3ProxyApp {
                             }
                             Ok(new_txid) => {
                                 // TODO: include the head_block here?
-                                match Web3Request::new_with_app(
+                                // todo!(this needs a permit)
+                                match ValidatedRequest::new_with_app(
                                     &app,
                                     authorization.clone(),
+                                    None,
                                     None,
                                     RequestOrMethod::Method(
                                         "eth_subscribe(newPendingTransactions)".into(),
@@ -261,7 +265,7 @@ impl Web3ProxyApp {
         Ok((subscription_abort_handle, response))
     }
 
-    async fn rate_limit_close_websocket(&self, web3_request: &Web3Request) -> Option<Message> {
+    async fn rate_limit_close_websocket(&self, web3_request: &ValidatedRequest) -> Option<Message> {
         let authorization = &web3_request.authorization;
 
         if !authorization.active_premium().await {

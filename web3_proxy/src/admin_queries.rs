@@ -1,4 +1,4 @@
-use crate::app::Web3ProxyApp;
+use crate::app::App;
 use crate::errors::{Web3ProxyError, Web3ProxyResponse};
 use crate::globals::{global_db_conn, global_db_replica_conn};
 use crate::http_params::get_user_id_from_params;
@@ -21,7 +21,7 @@ use tracing::{info, trace};
 // This function is used to give permission to certain users
 
 pub async fn query_admin_modify_usertier<'a>(
-    app: &'a Web3ProxyApp,
+    app: &'a App,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     params: &'a HashMap<String, String>,
 ) -> Web3ProxyResponse {

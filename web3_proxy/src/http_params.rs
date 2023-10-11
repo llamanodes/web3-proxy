@@ -1,6 +1,6 @@
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::relational_db::{DatabaseConnection, DatabaseReplica};
-use crate::{app::Web3ProxyApp, user_token::UserBearerToken};
+use crate::{app::App, user_token::UserBearerToken};
 use anyhow::Context;
 use axum::{
     headers::{authorization::Bearer, Authorization},
@@ -137,7 +137,7 @@ pub fn get_rpc_key_id_from_params(
 }
 
 pub fn get_chain_id_from_params(
-    app: &Web3ProxyApp,
+    app: &App,
     params: &HashMap<String, String>,
 ) -> anyhow::Result<u64> {
     params.get("chain_id").map_or_else(

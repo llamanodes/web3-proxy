@@ -2,7 +2,7 @@
 
 use super::authorization::login_is_authorized;
 use crate::admin_queries::query_admin_modify_usertier;
-use crate::app::Web3ProxyApp;
+use crate::app::App;
 use crate::errors::Web3ProxyResponse;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext};
 use crate::frontend::users::authentication::PostLogin;
@@ -52,7 +52,7 @@ pub struct AdminIncreaseBalancePost {
 /// - user_role_tier that is supposed to be adapted
 #[debug_handler]
 pub async fn admin_increase_balance(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Json(payload): Json<AdminIncreaseBalancePost>,
 ) -> Web3ProxyResponse {
@@ -115,7 +115,7 @@ pub async fn admin_increase_balance(
 /// TODO: JSON post data instead of query params
 #[debug_handler]
 pub async fn admin_change_user_roles(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
@@ -130,7 +130,7 @@ pub async fn admin_change_user_roles(
 /// We assume that the admin has already logged in, and has a bearer token ...
 #[debug_handler]
 pub async fn admin_imitate_login_get(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     Path(mut params): Path<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
@@ -287,7 +287,7 @@ pub async fn admin_imitate_login_get(
 /// The bearer token can be used to authenticate other admin requests
 #[debug_handler]
 pub async fn admin_imitate_login_post(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     Json(payload): Json<PostLogin>,
 ) -> Web3ProxyResponse {

@@ -5,7 +5,7 @@ use super::request::{OpenRequestHandle, OpenRequestResult};
 use crate::app::{flatten_handle, Web3ProxyJoinHandle};
 use crate::config::{BlockAndRpc, Web3RpcConfig};
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
-use crate::frontend::authorization::Web3Request;
+use crate::jsonrpc::ValidatedRequest;
 use crate::jsonrpc::{self, JsonRpcParams, JsonRpcResultData};
 use crate::rpcs::request::RequestErrorHandler;
 use anyhow::{anyhow, Context};
@@ -22,6 +22,7 @@ use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::json;
+use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -29,6 +30,7 @@ use std::sync::atomic::{self, AtomicBool, AtomicU32, AtomicU64, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
 use tokio::select;
 use tokio::sync::{mpsc, watch, RwLock as AsyncRwLock};
+use tokio::task::yield_now;
 use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
 use tracing::{debug, error, info, trace, warn, Level};
 use url::Url;
@@ -364,7 +366,7 @@ impl Web3Rpc {
         for block_data_limit in [0, 32, 64, 128, 256, 512, 1024, 90_000, u64::MAX] {
             let head_block_num = self
                 .internal_request::<_, U256>(
-                    "eth_blockNumber",
+                    "eth_blockNumber".into(),
                     &[(); 0],
                     // error here are expected, so keep the level low
                     Some(Level::DEBUG.into()),
@@ -392,7 +394,7 @@ impl Web3Rpc {
             // TODO: what should the request be?
             let archive_result: Result<Bytes, _> = self
                 .internal_request(
-                    "eth_getCode",
+                    "eth_getCode".into(),
                     &json!((
                         "0xdead00000000000000000000000000000000beef",
                         maybe_archive_block,
@@ -416,6 +418,8 @@ impl Web3Rpc {
             }
 
             limit = Some(block_data_limit);
+
+            yield_now().await;
         }
 
         if let Some(limit) = limit {
@@ -491,7 +495,7 @@ impl Web3Rpc {
         // trace!("waiting on chain id for {}", self);
         let found_chain_id: U64 = self
             .internal_request(
-                "eth_chainId",
+                "eth_chainId".into(),
                 &[(); 0],
                 Some(Level::TRACE.into()),
                 Some(Duration::from_secs(5)),
@@ -617,7 +621,7 @@ impl Web3Rpc {
                 let to = if let Some(txid) = head_block.transactions().last().cloned() {
                     let tx = self
                         .internal_request::<_, Option<Transaction>>(
-                            "eth_getTransactionByHash",
+                            "eth_getTransactionByHash".into(),
                             &(txid,),
                             error_handler,
                             Some(Duration::from_secs(5)),
@@ -639,7 +643,7 @@ impl Web3Rpc {
 
                 let _code = self
                     .internal_request::<_, Option<Bytes>>(
-                        "eth_getCode",
+                        "eth_getCode".into(),
                         &(to, block_number),
                         error_handler,
                         Some(Duration::from_secs(5)),
@@ -1004,7 +1008,7 @@ impl Web3Rpc {
             // TODO: send this request to the ws_provider instead of the http_provider
             let latest_block: Result<Option<ArcBlock>, _> = self
                 .internal_request(
-                    "eth_getBlockByNumber",
+                    "eth_getBlockByNumber".into(),
                     &("latest", false),
                     error_handler,
                     Some(Duration::from_secs(5)),
@@ -1039,7 +1043,7 @@ impl Web3Rpc {
             loop {
                 let block_result = self
                     .internal_request::<_, Option<ArcBlock>>(
-                        "eth_getBlockByNumber",
+                        "eth_getBlockByNumber".into(),
                         &("latest", false),
                         error_handler,
                         Some(Duration::from_secs(5)),
@@ -1078,7 +1082,7 @@ impl Web3Rpc {
 
     pub async fn wait_for_request_handle(
         self: &Arc<Self>,
-        web3_request: &Arc<Web3Request>,
+        web3_request: &Arc<ValidatedRequest>,
         error_handler: Option<RequestErrorHandler>,
         allow_unhealthy: bool,
     ) -> Web3ProxyResult<OpenRequestHandle> {
@@ -1211,7 +1215,7 @@ impl Web3Rpc {
 
     pub async fn try_request_handle(
         self: &Arc<Self>,
-        web3_request: &Arc<Web3Request>,
+        web3_request: &Arc<ValidatedRequest>,
         error_handler: Option<RequestErrorHandler>,
         allow_unhealthy: bool,
     ) -> Web3ProxyResult<OpenRequestResult> {
@@ -1303,7 +1307,7 @@ impl Web3Rpc {
 
     pub async fn internal_request<P: JsonRpcParams, R: JsonRpcResultData>(
         self: &Arc<Self>,
-        method: &str,
+        method: Cow<'static, str>,
         params: &P,
         error_handler: Option<RequestErrorHandler>,
         max_wait: Option<Duration>,
@@ -1312,7 +1316,7 @@ impl Web3Rpc {
         let head_block = self.head_block_sender.as_ref().unwrap().borrow().clone();
 
         let web3_request =
-            Web3Request::new_internal(method.into(), params, head_block, max_wait).await?;
+            ValidatedRequest::new_internal(method, params, head_block, max_wait).await?;
 
         // TODO: if we are inside the health checks and we aren't healthy yet. we need some sort of flag to force try_handle to not error
 
@@ -1322,7 +1326,7 @@ impl Web3Rpc {
 
     pub async fn authorized_request<R: JsonRpcResultData>(
         self: &Arc<Self>,
-        web3_request: &Arc<Web3Request>,
+        web3_request: &Arc<ValidatedRequest>,
         error_handler: Option<RequestErrorHandler>,
         allow_unhealthy: bool,
     ) -> Web3ProxyResult<R> {

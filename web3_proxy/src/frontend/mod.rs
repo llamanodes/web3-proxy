@@ -10,7 +10,7 @@ pub mod rpc_proxy_ws;
 pub mod status;
 pub mod users;
 
-use crate::app::Web3ProxyApp;
+use crate::app::App;
 use crate::errors::Web3ProxyResult;
 use axum::{
     routing::{get, post},
@@ -45,7 +45,7 @@ pub type ResponseCache = Cache<ResponseCacheKey, (StatusCode, &'static str, axum
 
 /// Start the frontend server.
 pub async fn serve(
-    app: Arc<Web3ProxyApp>,
+    app: Arc<App>,
     mut shutdown_receiver: broadcast::Receiver<()>,
     shutdown_complete_sender: broadcast::Sender<()>,
 ) -> Web3ProxyResult<()> {

@@ -1,5 +1,5 @@
 use super::StatType;
-use crate::app::Web3ProxyApp;
+use crate::app::App;
 use crate::errors::{Web3ProxyError, Web3ProxyResponse, Web3ProxyResult};
 use crate::globals::{global_db_conn, global_db_replica_conn};
 use crate::http_params::{
@@ -57,7 +57,7 @@ pub fn filter_query_window_seconds(
 }
 
 pub async fn query_user_stats<'a>(
-    app: &'a Web3ProxyApp,
+    app: &'a App,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     params: &'a HashMap<String, String>,
     stat_response_type: StatType,

@@ -2,7 +2,7 @@
 use crate::errors::Web3ProxyResponse;
 use crate::globals::global_db_conn;
 use crate::referral_code::ReferralCode;
-use crate::{app::Web3ProxyApp, globals::global_db_replica_conn};
+use crate::{app::App, globals::global_db_replica_conn};
 use anyhow::Context;
 use axum::{
     extract::Query,
@@ -29,7 +29,7 @@ use std::sync::Arc;
 /// This is the link that the user can share to third parties, and get credits.
 #[debug_handler]
 pub async fn user_referral_link_get(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Query(_params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
@@ -74,7 +74,7 @@ pub async fn user_referral_link_get(
 
 #[debug_handler]
 pub async fn user_used_referral_stats(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Query(_params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
@@ -132,7 +132,7 @@ pub async fn user_used_referral_stats(
 
 #[debug_handler]
 pub async fn user_shared_referral_stats(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Query(_params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {

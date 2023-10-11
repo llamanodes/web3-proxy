@@ -1,5 +1,5 @@
 //! Handle registration, logins, and managing account data.
-use crate::app::Web3ProxyApp;
+use crate::app::App;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
 use crate::frontend::authorization::login_is_authorized;
 use crate::globals::{global_db_conn, global_db_replica_conn};
@@ -76,7 +76,7 @@ pub struct LoginPostResponse {
 /// We can prompt for an email and and payment after they log in.
 #[debug_handler]
 pub async fn user_login_get(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     // TODO: what does axum's error handling look like if the path fails to parse?
     Path(mut params): Path<HashMap<String, String>>,
@@ -224,7 +224,7 @@ pub async fn register_new_user(
 /// The bearer token can be used to authenticate other requests, such as getting the user's stats or modifying the user's profile.
 #[debug_handler]
 pub async fn user_login_post(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     Query(query): Query<PostLoginQuery>,
     Json(payload): Json<PostLogin>,

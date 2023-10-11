@@ -1,5 +1,5 @@
 //! Handle registration, logins, and managing account data.
-use crate::app::Web3ProxyApp;
+use crate::app::App;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
 use crate::globals::{global_db_conn, global_db_replica_conn};
 use crate::secrets::RpcSecretKey;
@@ -27,7 +27,7 @@ use std::sync::Arc;
 /// `GET /user/keys` -- Use a bearer token to get the user's api keys and their settings.
 #[debug_handler]
 pub async fn rpc_keys_get(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
     let user = app.bearer_is_authorized(bearer).await?;
@@ -123,7 +123,7 @@ pub async fn rpc_keys_get(
 /// `DELETE /user/keys` -- Use a bearer token to delete an existing key.
 #[debug_handler]
 pub async fn rpc_keys_delete(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
     let _user = app.bearer_is_authorized(bearer).await?;
@@ -153,7 +153,7 @@ pub struct UserKeyManagement {
 /// `POST /user/keys` or `PUT /user/keys` -- Use a bearer token to create or update an existing key.
 #[debug_handler]
 pub async fn rpc_keys_management(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Json(payload): Json<UserKeyManagement>,
 ) -> Web3ProxyResponse {

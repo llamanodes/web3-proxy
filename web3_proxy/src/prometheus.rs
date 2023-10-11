@@ -8,12 +8,12 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::info;
 
-use crate::app::Web3ProxyApp;
+use crate::app::App;
 use crate::errors::Web3ProxyResult;
 
 /// Run a prometheus metrics server on the given port.
 pub async fn serve(
-    app: Arc<Web3ProxyApp>,
+    app: Arc<App>,
     mut shutdown_receiver: broadcast::Receiver<()>,
 ) -> Web3ProxyResult<()> {
     // routes should be ordered most to least common
@@ -44,7 +44,7 @@ pub async fn serve(
         .map_err(Into::into)
 }
 
-async fn root(Extension(app): Extension<Arc<Web3ProxyApp>>) -> Response {
+async fn root(Extension(app): Extension<Arc<App>>) -> Response {
     let serialized = app.prometheus_metrics().await;
 
     let mut r = serialized.into_response();

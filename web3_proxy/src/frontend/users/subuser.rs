@@ -1,5 +1,5 @@
 //! Handle subusers, viewing subusers, and viewing accessible rpc-keys
-use crate::app::Web3ProxyApp;
+use crate::app::App;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
 use crate::globals::{global_db_conn, global_db_replica_conn};
 use crate::secrets::RpcSecretKey;
@@ -29,7 +29,7 @@ use tracing::trace;
 use ulid::{self, Ulid};
 
 pub async fn get_keys_as_subuser(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Query(_params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
@@ -94,7 +94,7 @@ pub async fn get_keys_as_subuser(
 }
 
 pub async fn get_subusers(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Query(mut params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
@@ -166,7 +166,7 @@ pub async fn get_subusers(
 
 #[debug_handler]
 pub async fn modify_subuser(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Query(mut params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {

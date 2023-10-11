@@ -1,4 +1,4 @@
-use crate::app::Web3ProxyApp;
+use crate::app::App;
 use crate::frontend::authorization::{Authorization, RequestOrMethod};
 use core::fmt;
 use ethers::types::U64;
@@ -33,7 +33,7 @@ type KafkaLogResult = Result<(i32, i64), (rdkafka::error::KafkaError, OwnedMessa
 
 impl KafkaDebugLogger {
     pub fn try_new(
-        app: &Web3ProxyApp,
+        app: &App,
         authorization: Arc<Authorization>,
         head_block_num: Option<U64>,
         kafka_topic: &str,

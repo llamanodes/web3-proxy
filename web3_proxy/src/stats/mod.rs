@@ -9,7 +9,8 @@ use self::stat_buffer::BufferedRpcQueryStats;
 use crate::caches::{RpcSecretKeyCache, UserBalanceCache};
 use crate::compute_units::ComputeUnit;
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
-use crate::frontend::authorization::{Authorization, AuthorizationType, Web3Request};
+use crate::frontend::authorization::{Authorization, AuthorizationType};
+use crate::jsonrpc::ValidatedRequest;
 use crate::rpcs::one::Web3Rpc;
 use anyhow::{anyhow, Context};
 use chrono::{DateTime, Months, TimeZone, Utc};
@@ -202,7 +203,7 @@ impl RpcQueryStats {
 /// For now there is just one, but I think there might be others later
 #[derive(Debug, From)]
 pub enum AppStat {
-    RpcQuery(Web3Request),
+    RpcQuery(ValidatedRequest),
 }
 
 // TODO: move to stat_buffer.rs?
@@ -546,7 +547,7 @@ impl BufferedRpcQueryStats {
 /// We want this to run when there is **one and only one** copy of this RequestMetadata left
 /// There are often multiple copies if a request is being sent to multiple servers in parallel
 impl RpcQueryStats {
-    fn try_from_metadata(metadata: Web3Request) -> Web3ProxyResult<Self> {
+    fn try_from_metadata(metadata: ValidatedRequest) -> Web3ProxyResult<Self> {
         // TODO: do this without a clone
         let authorization = metadata.authorization.clone();
 

@@ -3,7 +3,7 @@
 use super::authorization::{ip_is_authorized, key_is_authorized};
 use super::rpc_proxy_ws::ProxyMode;
 use crate::errors::Web3ProxyError;
-use crate::{app::Web3ProxyApp, jsonrpc::JsonRpcRequestEnum};
+use crate::{app::App, jsonrpc::JsonRpcRequestEnum};
 use axum::extract::rejection::JsonRejection;
 use axum::extract::Path;
 use axum::headers::{Origin, Referer, UserAgent};
@@ -23,7 +23,7 @@ use std::time::Duration;
 /// If possible, please use a WebSocket instead.
 #[debug_handler]
 pub async fn proxy_web3_rpc(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     payload: Result<Json<JsonRpcRequestEnum>, JsonRejection>,
@@ -33,7 +33,7 @@ pub async fn proxy_web3_rpc(
 
 #[debug_handler]
 pub async fn fastest_proxy_web3_rpc(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     payload: Result<Json<JsonRpcRequestEnum>, JsonRejection>,
@@ -45,7 +45,7 @@ pub async fn fastest_proxy_web3_rpc(
 
 #[debug_handler]
 pub async fn versus_proxy_web3_rpc(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     payload: Result<Json<JsonRpcRequestEnum>, JsonRejection>,
@@ -54,7 +54,7 @@ pub async fn versus_proxy_web3_rpc(
 }
 
 async fn _proxy_web3_rpc(
-    app: Arc<Web3ProxyApp>,
+    app: Arc<App>,
     ip: &IpAddr,
     origin: Option<&Origin>,
     payload: Result<Json<JsonRpcRequestEnum>, JsonRejection>,
@@ -67,7 +67,7 @@ async fn _proxy_web3_rpc(
 
     let first_id = payload.first_id();
 
-    let (authorization, _semaphore) = ip_is_authorized(&app, ip, origin, proxy_mode)
+    let authorization = ip_is_authorized(&app, ip, origin, proxy_mode)
         .await
         .map_err(|e| e.into_response_with_id(first_id.clone()))?;
 
@@ -126,7 +126,7 @@ async fn _proxy_web3_rpc(
 /// If possible, please use a WebSocket instead.
 #[debug_handler]
 pub async fn proxy_web3_rpc_with_key(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
@@ -151,7 +151,7 @@ pub async fn proxy_web3_rpc_with_key(
 #[debug_handler]
 #[allow(clippy::too_many_arguments)]
 pub async fn debug_proxy_web3_rpc_with_key(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
@@ -195,7 +195,7 @@ pub async fn debug_proxy_web3_rpc_with_key(
 
 #[debug_handler]
 pub async fn fastest_proxy_web3_rpc_with_key(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
@@ -218,7 +218,7 @@ pub async fn fastest_proxy_web3_rpc_with_key(
 
 #[debug_handler]
 pub async fn versus_proxy_web3_rpc_with_key(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
@@ -241,7 +241,7 @@ pub async fn versus_proxy_web3_rpc_with_key(
 
 #[allow(clippy::too_many_arguments)]
 async fn _proxy_web3_rpc_with_key(
-    app: Arc<Web3ProxyApp>,
+    app: Arc<App>,
     ip: &IpAddr,
     origin: Option<&Origin>,
     referer: Option<&Referer>,
@@ -262,7 +262,7 @@ async fn _proxy_web3_rpc_with_key(
         .parse()
         .map_err(|e: Web3ProxyError| e.into_response_with_id(first_id.clone()))?;
 
-    let (authorization, _semaphore) =
+    let authorization =
         key_is_authorized(&app, &rpc_key, ip, origin, proxy_mode, referer, user_agent)
             .await
             .map_err(|e| e.into_response_with_id(first_id.clone()))?;

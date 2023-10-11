@@ -2,10 +2,10 @@
 //!
 //! WebSockets are the preferred method of receiving requests, but not all clients have good support.
 
-use super::authorization::{ip_is_authorized, key_is_authorized, Authorization, Web3Request};
+use super::authorization::{ip_is_authorized, key_is_authorized, Authorization};
 use crate::errors::{Web3ProxyError, Web3ProxyResponse};
-use crate::jsonrpc::{self, ParsedResponse};
-use crate::{app::Web3ProxyApp, errors::Web3ProxyResult, jsonrpc::SingleRequest};
+use crate::jsonrpc::{self, ParsedResponse, ValidatedRequest};
+use crate::{app::App, errors::Web3ProxyResult, jsonrpc::SingleRequest};
 use axum::headers::{Origin, Referer, UserAgent};
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
@@ -54,7 +54,7 @@ pub enum ProxyMode {
 /// Queries a single server at a time
 #[debug_handler]
 pub async fn websocket_handler(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
@@ -66,7 +66,7 @@ pub async fn websocket_handler(
 /// Queries all synced backends with every request! This might get expensive!
 // #[debug_handler]
 pub async fn fastest_websocket_handler(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
@@ -87,7 +87,7 @@ pub async fn fastest_websocket_handler(
 /// Queries **all** backends with every request! This might get expensive!
 #[debug_handler]
 pub async fn versus_websocket_handler(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
@@ -98,12 +98,12 @@ pub async fn versus_websocket_handler(
 
 async fn _websocket_handler(
     proxy_mode: ProxyMode,
-    app: Arc<Web3ProxyApp>,
+    app: Arc<App>,
     ip: &IpAddr,
     origin: Option<&Origin>,
     ws_upgrade: Option<WebSocketUpgrade>,
 ) -> Web3ProxyResponse {
-    let (authorization, _semaphore) = ip_is_authorized(&app, ip, origin, proxy_mode).await?;
+    let authorization = ip_is_authorized(&app, ip, origin, proxy_mode).await?;
 
     let authorization = Arc::new(authorization);
 
@@ -127,7 +127,7 @@ async fn _websocket_handler(
 /// Can optionally authorized based on origin, referer, or user agent.
 #[debug_handler]
 pub async fn websocket_handler_with_key(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     Path(rpc_key): Path<String>,
     origin: Option<TypedHeader<Origin>>,
@@ -151,7 +151,7 @@ pub async fn websocket_handler_with_key(
 #[debug_handler]
 #[allow(clippy::too_many_arguments)]
 pub async fn debug_websocket_handler_with_key(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     Path(rpc_key): Path<String>,
     origin: Option<TypedHeader<Origin>>,
@@ -190,7 +190,7 @@ pub async fn debug_websocket_handler_with_key(
 
 #[debug_handler]
 pub async fn fastest_websocket_handler_with_key(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     Path(rpc_key): Path<String>,
     origin: Option<TypedHeader<Origin>>,
@@ -214,7 +214,7 @@ pub async fn fastest_websocket_handler_with_key(
 
 #[debug_handler]
 pub async fn versus_websocket_handler_with_key(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     Path(rpc_key): Path<String>,
     origin: Option<TypedHeader<Origin>>,
@@ -238,7 +238,7 @@ pub async fn versus_websocket_handler_with_key(
 #[allow(clippy::too_many_arguments)]
 async fn _websocket_handler_with_key(
     proxy_mode: ProxyMode,
-    app: Arc<Web3ProxyApp>,
+    app: Arc<App>,
     ip: &IpAddr,
     rpc_key: String,
     origin: Option<&Origin>,
@@ -248,7 +248,7 @@ async fn _websocket_handler_with_key(
 ) -> Web3ProxyResponse {
     let rpc_key = rpc_key.parse()?;
 
-    let (authorization, _semaphore) =
+    let authorization =
         key_is_authorized(&app, &rpc_key, ip, origin, proxy_mode, referer, user_agent).await?;
 
     trace!("websocket_handler_with_key {:?}", authorization);
@@ -295,11 +295,7 @@ async fn _websocket_handler_with_key(
     }
 }
 
-async fn proxy_web3_socket(
-    app: Arc<Web3ProxyApp>,
-    authorization: Arc<Authorization>,
-    socket: WebSocket,
-) {
+async fn proxy_web3_socket(app: Arc<App>, authorization: Arc<Authorization>, socket: WebSocket) {
     // split the websocket so we can read and write concurrently
     let (ws_tx, ws_rx) = socket.split();
 
@@ -314,7 +310,7 @@ async fn proxy_web3_socket(
 }
 
 async fn websocket_proxy_web3_rpc(
-    app: &Arc<Web3ProxyApp>,
+    app: &Arc<App>,
     authorization: Arc<Authorization>,
     json_request: SingleRequest,
     response_sender: &mpsc::Sender<Message>,
@@ -323,9 +319,16 @@ async fn websocket_proxy_web3_rpc(
 ) -> Web3ProxyResult<jsonrpc::Response> {
     match &json_request.method[..] {
         "eth_subscribe" => {
-            let web3_request =
-                Web3Request::new_with_app(app, authorization, None, json_request.into(), None)
-                    .await?;
+            // TODO: this needs a permit
+            let web3_request = ValidatedRequest::new_with_app(
+                app,
+                authorization,
+                None,
+                None,
+                json_request.into(),
+                None,
+            )
+            .await?;
 
             // TODO: how can we subscribe with proxy_mode?
             match app
@@ -350,9 +353,16 @@ async fn websocket_proxy_web3_rpc(
             }
         }
         "eth_unsubscribe" => {
-            let web3_request =
-                Web3Request::new_with_app(app, authorization, None, json_request.into(), None)
-                    .await?;
+            // todo!(this needs a permit)
+            let web3_request = ValidatedRequest::new_with_app(
+                app,
+                authorization,
+                None,
+                None,
+                json_request.into(),
+                None,
+            )
+            .await?;
 
             // sometimes we get a list, sometimes we get the id directly
             // check for the list first, then just use the whole thing
@@ -403,7 +413,7 @@ async fn websocket_proxy_web3_rpc(
 
 /// websockets support a few more methods than http clients
 async fn handle_socket_payload(
-    app: &Arc<Web3ProxyApp>,
+    app: &Arc<App>,
     authorization: &Arc<Authorization>,
     payload: &str,
     response_sender: &mpsc::Sender<Message>,
@@ -448,7 +458,7 @@ async fn handle_socket_payload(
 }
 
 async fn read_web3_socket(
-    app: Arc<Web3ProxyApp>,
+    app: Arc<App>,
     authorization: Arc<Authorization>,
     mut ws_rx: SplitStream<WebSocket>,
     response_sender: mpsc::Sender<Message>,

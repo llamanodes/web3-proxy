@@ -10,6 +10,7 @@ use migration::sea_orm::prelude::Decimal;
 use std::{ops::Add, str::FromStr};
 use tracing::{instrument, trace, warn};
 
+/// TODO: i don't like how we use this inside the config and also have it available publicly. we should only getting this value from the config
 pub fn default_usd_per_cu(chain_id: u64) -> Decimal {
     match chain_id {
         999_001_999 => Decimal::from_str("0.10").unwrap(),

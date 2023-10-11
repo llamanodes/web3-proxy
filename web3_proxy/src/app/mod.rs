@@ -3,11 +3,11 @@ mod ws;
 use crate::caches::{RegisteredUserRateLimitKey, RpcSecretKeyCache, UserBalanceCache};
 use crate::config::{AppConfig, TopConfig};
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
-use crate::frontend::authorization::{Authorization, Web3Request};
+use crate::frontend::authorization::Authorization;
 use crate::globals::{global_db_conn, DatabaseError, APP, DB_CONN, DB_REPLICA};
 use crate::jsonrpc::{
     self, JsonRpcErrorData, JsonRpcParams, JsonRpcRequestEnum, JsonRpcResultData, LooseId,
-    SingleRequest, SingleResponse,
+    SingleRequest, SingleResponse, ValidatedRequest,
 };
 use crate::relational_db::{connect_db, migrate_db};
 use crate::response_cache::{ForwardedResponse, JsonRpcResponseCache, JsonRpcResponseWeigher};
@@ -67,7 +67,7 @@ pub type Web3ProxyJoinHandle<T> = JoinHandle<Web3ProxyResult<T>>;
 
 /// The application
 // TODO: i'm sure this is more arcs than necessary, but spawning futures makes references hard
-pub struct Web3ProxyApp {
+pub struct App {
     /// Send requests to the best server available
     pub balanced_rpcs: Arc<Web3Rpcs>,
     /// Send 4337 Abstraction Bundler requests to one of these servers
@@ -161,7 +161,7 @@ pub async fn flatten_handles<T>(
 /// starting an app creates many tasks
 pub struct Web3ProxyAppSpawn {
     /// the app. probably clone this to use in other groups of handles
-    pub app: Arc<Web3ProxyApp>,
+    pub app: Arc<App>,
     /// handles for the balanced and private rpcs
     pub app_handles: FuturesUnordered<Web3ProxyJoinHandle<()>>,
     /// these are important and must be allowed to finish
@@ -172,7 +172,7 @@ pub struct Web3ProxyAppSpawn {
     pub ranked_rpcs: watch::Receiver<Option<Arc<RankedRpcs>>>,
 }
 
-impl Web3ProxyApp {
+impl App {
     /// The main entrypoint.
     pub async fn spawn(
         frontend_port: Arc<AtomicU16>,
@@ -983,7 +983,8 @@ impl Web3ProxyApp {
         authorization: Arc<Authorization>,
     ) -> Web3ProxyResult<R> {
         // TODO: proper ids
-        let request = SingleRequest::new(LooseId::Number(1), method.to_string(), json!(params))?;
+        let request =
+            SingleRequest::new(LooseId::Number(1), method.to_string().into(), json!(params))?;
 
         let (_, response, _) = self.proxy_request(request, authorization, None).await;
 
@@ -1097,7 +1098,7 @@ impl Web3ProxyApp {
     /// if no protected rpcs are configured, then some public rpcs are used instead
     async fn try_send_protected(
         self: &Arc<Self>,
-        web3_request: &Arc<Web3Request>,
+        web3_request: &Arc<ValidatedRequest>,
     ) -> Web3ProxyResult<SingleResponse<Arc<RawValue>>> {
         if self.protected_rpcs.is_empty() {
             self.balanced_rpcs.request_with_metadata(web3_request).await
@@ -1118,17 +1119,23 @@ impl Web3ProxyApp {
         // TODO: this clone is only for an error response. refactor to not need it
         let error_id = request.id.clone();
 
-        let web3_request =
-            match Web3Request::new_with_app(self, authorization, None, request.into(), head_block)
-                .await
-            {
-                Ok(x) => x,
-                Err(err) => {
-                    let (a, b) = err.as_json_response_parts(error_id);
+        let web3_request = match ValidatedRequest::new_with_app(
+            self,
+            authorization,
+            None,
+            None,
+            request.into(),
+            head_block,
+        )
+        .await
+        {
+            Ok(x) => x,
+            Err(err) => {
+                let (a, b) = err.as_json_response_parts(error_id);
 
-                    return (a, b, vec![]);
-                }
-            };
+                return (a, b, vec![]);
+            }
+        };
 
         // TODO: trace/kafka log request.params before we send them to _proxy_request_with_caching which might modify them
 
@@ -1205,7 +1212,7 @@ impl Web3ProxyApp {
     /// TODO: how can we make this generic?
     async fn _proxy_request_with_caching(
         self: &Arc<Self>,
-        web3_request: &Arc<Web3Request>,
+        web3_request: &Arc<ValidatedRequest>,
     ) -> Web3ProxyResult<jsonrpc::SingleResponse> {
         // TODO: serve net_version without querying the backend
         // TODO: don't force RawValue
@@ -1757,7 +1764,7 @@ impl Web3ProxyApp {
     }
 }
 
-impl fmt::Debug for Web3ProxyApp {
+impl fmt::Debug for App {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: the default formatter takes forever to write. this is too quiet though
         f.debug_struct("Web3ProxyApp").finish_non_exhaustive()

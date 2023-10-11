@@ -3,7 +3,8 @@ use std::sync::Arc;
 use tracing::{error, info};
 use web3_proxy::app::BILLING_PERIOD_SECONDS;
 use web3_proxy::config::TopConfig;
-use web3_proxy::frontend::authorization::{Authorization, RequestOrMethod, Web3Request};
+use web3_proxy::frontend::authorization::{Authorization, RequestOrMethod};
+use web3_proxy::jsonrpc::ValidatedRequest;
 use web3_proxy::prelude::anyhow::{self, Context};
 use web3_proxy::prelude::argh::{self, FromArgs};
 use web3_proxy::prelude::chrono;
@@ -190,8 +191,8 @@ impl MigrateStatsToV2SubCommand {
 
                     let request = RequestOrMethod::Method(method, int_request_bytes as usize);
 
-                    // Create Web3Request
-                    let web3_request = Web3Request {
+                    // Create ValidatedRequest
+                    let web3_request = ValidatedRequest {
                         archive_request: x.archive_request.into(),
                         authorization: authorization.clone(),
                         backend_requests: Mutex::new(backend_rpcs),
@@ -213,7 +214,9 @@ impl MigrateStatsToV2SubCommand {
                         usd_per_cu: top_config.app.usd_per_cu.unwrap_or_default(),
                         cache_mode: Default::default(),
                         start_instant: Instant::now(),
-                        ..Default::default()
+                        connect_timeout: Default::default(),
+                        expire_timeout: Default::default(),
+                        permit: None,
                     };
 
                     web3_request.try_send_stat()?;

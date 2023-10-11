@@ -2,19 +2,19 @@
 use super::blockchain::{BlocksByHashCache, BlocksByNumberCache, Web3ProxyBlock};
 use super::consensus::{RankedRpcs, RpcsForRequest};
 use super::one::Web3Rpc;
-use crate::app::{flatten_handle, Web3ProxyApp, Web3ProxyJoinHandle};
+use crate::app::{flatten_handle, App, Web3ProxyJoinHandle};
 use crate::config::{average_block_interval, BlockAndRpc, Web3RpcConfig};
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
-use crate::frontend::authorization::Web3Request;
 use crate::frontend::rpc_proxy_ws::ProxyMode;
 use crate::frontend::status::MokaCacheSerializer;
+use crate::jsonrpc::ValidatedRequest;
 use crate::jsonrpc::{self, JsonRpcErrorData, JsonRpcParams, JsonRpcResultData};
 use deduped_broadcast::DedupedBroadcaster;
 use derive_more::From;
 use ethers::prelude::{TxHash, U64};
 use futures::future::try_join_all;
-use futures::stream::FuturesUnordered;
-use futures::StreamExt;
+use futures::stream::StreamExt;
+use futures_util::future::join_all;
 use hashbrown::HashMap;
 use http::StatusCode;
 use moka::future::CacheBuilder;
@@ -167,7 +167,7 @@ impl Web3Rpcs {
     /// update the rpcs in this group
     pub async fn apply_server_configs(
         &self,
-        app: &Web3ProxyApp,
+        app: &App,
         rpc_configs: &HashMap<String, Web3RpcConfig>,
     ) -> Web3ProxyResult<()> {
         // safety checks
@@ -203,7 +203,7 @@ impl Web3Rpcs {
         let server_id = app.config.unique_id;
 
         // turn configs into connections (in parallel)
-        let mut spawn_handles: FuturesUnordered<_> = rpc_configs
+        let spawn_handles: Vec<_> = rpc_configs
             .into_iter()
             .filter_map(|(server_name, server_config)| {
                 if server_config.disabled {
@@ -226,7 +226,7 @@ impl Web3Rpcs {
 
                 names_to_keep.push(server_name.clone());
 
-                let handle = tokio::spawn(server_config.clone().spawn(
+                let handle = server_config.clone().spawn(
                     server_name.clone(),
                     vredis_pool,
                     server_id,
@@ -237,15 +237,15 @@ impl Web3Rpcs {
                     block_and_rpc_sender,
                     self.pending_txid_firehose.clone(),
                     self.max_head_block_age,
-                ));
+                );
 
                 Some(handle)
             })
             .collect();
 
-        while let Some(x) = spawn_handles.next().await {
+        for x in join_all(spawn_handles).await {
             match x {
-                Ok(Ok((new_rpc, _handle))) => {
+                Ok((new_rpc, _handle)) => {
                     // web3 connection worked
 
                     let old_rpc = self.by_name.read().get(&new_rpc.name).map(Arc::clone);
@@ -287,15 +287,11 @@ impl Web3Rpcs {
                         self.by_name.write().insert(new_rpc.name.clone(), new_rpc);
                     }
                 }
-                Ok(Err(err)) => {
+                Err(err) => {
                     // if we got an error here, the app can continue on
                     // TODO: include context about which connection failed
                     // TODO: retry automatically
                     error!("Unable to create connection. err={:?}", err);
-                }
-                Err(err) => {
-                    // something actually bad happened. exit with an error
-                    return Err(err.into());
                 }
             }
         }
@@ -393,10 +389,10 @@ impl Web3Rpcs {
         Ok(())
     }
 
-    /// TODO: i think this RpcsForRequest should be stored on the Web3Request when its made. that way any waiting for sync happens early and we don't need waiting anywhere else in the app
+    /// TODO: i think this RpcsForRequest should be stored on the ValidatedRequest when its made. that way any waiting for sync happens early and we don't need waiting anywhere else in the app
     pub async fn wait_for_rpcs_for_request(
         &self,
-        web3_request: &Arc<Web3Request>,
+        web3_request: &Arc<ValidatedRequest>,
     ) -> Web3ProxyResult<RpcsForRequest> {
         let mut watch_consensus_rpcs = self.watch_ranked_rpcs.subscribe();
 
@@ -444,7 +440,7 @@ impl Web3Rpcs {
     /// TODO: should this wait for ranked rpcs? maybe only a fraction of web3_request's time?
     pub async fn try_rpcs_for_request(
         &self,
-        web3_request: &Arc<Web3Request>,
+        web3_request: &Arc<ValidatedRequest>,
     ) -> Web3ProxyResult<RpcsForRequest> {
         // TODO: by_name might include things that are on a forked
         let ranked_rpcs: Arc<RankedRpcs> =
@@ -475,14 +471,14 @@ impl Web3Rpcs {
 
     pub async fn internal_request<P: JsonRpcParams, R: JsonRpcResultData>(
         &self,
-        method: &str,
+        method: Cow<'static, str>,
         params: &P,
         max_wait: Option<Duration>,
     ) -> Web3ProxyResult<R> {
         let head_block = self.head_block();
 
         let web3_request =
-            Web3Request::new_internal(method.into(), params, head_block, max_wait).await?;
+            ValidatedRequest::new_internal(method, params, head_block, max_wait).await?;
 
         let response = self.request_with_metadata(&web3_request).await?;
 
@@ -503,7 +499,7 @@ impl Web3Rpcs {
     /// TODO: should max_tries be on web3_request. maybe as tries_left?
     pub async fn request_with_metadata<R: JsonRpcResultData>(
         &self,
-        web3_request: &Arc<Web3Request>,
+        web3_request: &Arc<ValidatedRequest>,
     ) -> Web3ProxyResult<jsonrpc::SingleResponse<R>> {
         // TODO: collect the most common error. Web3ProxyError isn't Hash + Eq though. And making it so would be a pain
         let mut errors = vec![];
@@ -603,7 +599,7 @@ impl Web3Rpcs {
     #[allow(clippy::too_many_arguments)]
     pub async fn try_proxy_connection<R: JsonRpcResultData>(
         &self,
-        web3_request: &Arc<Web3Request>,
+        web3_request: &Arc<ValidatedRequest>,
     ) -> Web3ProxyResult<jsonrpc::SingleResponse<R>> {
         let proxy_mode = web3_request.proxy_mode();
 
@@ -911,7 +907,7 @@ mod tests {
 
     //     // request that requires the head block
     //     // best_synced_backend_connection which servers to be synced with the head block should not find any nodes
-    //     let r = Web3Request::new_internal(
+    //     let r = ValidatedRequest::new_internal(
     //         "eth_getBlockByNumber".to_string(),
     //         &(head_block.number.unwrap(), false),
     //         Some(Web3ProxyBlock::try_from(head_block.clone()).unwrap()),
@@ -1007,7 +1003,7 @@ mod tests {
     //     assert!(!lagged_rpc.has_block_data(head_block.number.unwrap()));
 
     //     // request on the lagged block should get a handle from either server
-    //     let r = Web3Request::new_internal(
+    //     let r = ValidatedRequest::new_internal(
     //         "eth_getBlockByNumber".to_string(),
     //         &(lagged_block.number.unwrap(), false),
     //         Some(Web3ProxyBlock::try_from(head_block.clone()).unwrap()),
@@ -1022,7 +1018,7 @@ mod tests {
 
     //     // request on the head block should get a handle
     //     // TODO: make sure the handle is for the expected rpc
-    //     let r = Web3Request::new_internal(
+    //     let r = ValidatedRequest::new_internal(
     //         "eth_getBlockByNumber".to_string(),
     //         &(head_block.number.unwrap(), false),
     //         Some(Web3ProxyBlock::try_from(head_block.clone()).unwrap()),
@@ -1039,7 +1035,7 @@ mod tests {
     //     // TODO: bring this back. it is failing because there is no global APP and so things default to not needing caching. no cache checks means we don't know this is a future block
     //     // future block should not get a handle
     //     let future_block_num = head_block.as_ref().number.unwrap() + U64::from(10);
-    //     let r = Web3Request::new_internal(
+    //     let r = ValidatedRequest::new_internal(
     //         "eth_getBlockByNumber".to_string(),
     //         &(future_block_num, false),
     //         Some(Web3ProxyBlock::try_from(head_block.clone()).unwrap()),
@@ -1121,7 +1117,7 @@ mod tests {
     //     assert_eq!(rpcs.num_synced_rpcs(), 0);
 
     //     // best_synced_backend_connection requires servers to be synced with the head block
-    //     let r = Web3Request::new_internal(
+    //     let r = ValidatedRequest::new_internal(
     //         "eth_getBlockByNumber".to_string(),
     //         &("latest", false),
     //         Some(head_block.clone()),
@@ -1232,7 +1228,7 @@ mod tests {
 
     //     // best_synced_backend_connection requires servers to be synced with the head block
     //     // TODO: test with and without passing the head_block.number?
-    //     let r = Web3Request::new_internal(
+    //     let r = ValidatedRequest::new_internal(
     //         "eth_getBlockByNumber".to_string(),
     //         &(head_block.number(), false),
     //         Some(head_block.clone()),
@@ -1249,7 +1245,7 @@ mod tests {
     //         OpenRequestResult::Handle(_)
     //     ));
 
-    //     let r = Web3Request::new_internal(
+    //     let r = ValidatedRequest::new_internal(
     //         "eth_getBlockByNumber".to_string(),
     //         &(head_block.number(), false),
     //         Some(head_block.clone()),
@@ -1262,8 +1258,8 @@ mod tests {
 
     //     // assert_eq!(best_available_server, best_available_server_from_none);
 
-    //     // TODO: actually test a future block. this Web3Request doesn't require block #1
-    //     let r = Web3Request::new_internal(
+    //     // TODO: actually test a future block. this ValidatedRequest doesn't require block #1
+    //     let r = ValidatedRequest::new_internal(
     //         "eth_getBlockByNumber".to_string(),
     //         &(head_block.number(), false),
     //         Some(head_block.clone()),
@@ -1415,7 +1411,7 @@ mod tests {
     //     assert_eq!(rpcs.num_synced_rpcs(), 1);
 
     //     // best_synced_backend_connection requires servers to be synced with the head block
-    //     let r = Web3Request::new_internal(
+    //     let r = ValidatedRequest::new_internal(
     //         "eth_getBlockByNumber".to_string(),
     //         &(block_2.number(), false),
     //         Some(block_2.clone()),
@@ -1433,7 +1429,7 @@ mod tests {
     //     );
 
     //     // this should give us both servers
-    //     let r = Web3Request::new_internal(
+    //     let r = ValidatedRequest::new_internal(
     //         "eth_getBlockByNumber".to_string(),
     //         &(block_1.number(), false),
     //         Some(block_2.clone()),
@@ -1468,7 +1464,7 @@ mod tests {
     //     // this should give us only the archive server
     //     // TODO: i think this might have problems because block_1 - 100 isn't a real block and so queries for it will fail. then it falls back to caching with the head block
     //     // TODO: what if we check if its an archive block while doing cache_mode.
-    //     let r = Web3Request::new_internal(
+    //     let r = ValidatedRequest::new_internal(
     //         "eth_getBlockByNumber".to_string(),
     //         &(block_archive.number(), false),
     //         Some(block_2.clone()),

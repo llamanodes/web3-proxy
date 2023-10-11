@@ -1,4 +1,4 @@
-use crate::app::Web3ProxyApp;
+use crate::app::App;
 use crate::balance::Balance;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse, Web3ProxyResult};
 use crate::frontend::authorization::login_is_authorized;
@@ -41,7 +41,7 @@ use tracing::{debug, error, info, trace, warn};
 /// - show deposits history (currency, amounts, transaction id)
 #[debug_handler]
 pub async fn user_balance_get(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
     let user = app.bearer_is_authorized(bearer).await?;
@@ -61,7 +61,7 @@ pub async fn user_balance_get(
 /// - shows a list of all deposits, including their chain-id, amount and tx-hash
 #[debug_handler]
 pub async fn user_chain_deposits_get(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
     let user = app.bearer_is_authorized(bearer).await?;
@@ -100,7 +100,7 @@ pub async fn user_chain_deposits_get(
 /// - shows a list of all deposits done through stripe
 #[debug_handler]
 pub async fn user_stripe_deposits_get(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
     let user = app.bearer_is_authorized(bearer).await?;
@@ -143,7 +143,7 @@ pub async fn user_stripe_deposits_get(
 /// - shows a list of all deposits done by admins
 #[debug_handler]
 pub async fn user_admin_deposits_get(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
     let user = app.bearer_is_authorized(bearer).await?;
@@ -181,7 +181,7 @@ pub async fn user_admin_deposits_get(
 /// `POST /user/balance/:tx_hash` -- Process a confirmed txid to update a user's balance.
 #[debug_handler]
 pub async fn user_balance_post(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     ip: Option<InsecureClientIp>,
     Path(mut params): Path<HashMap<String, String>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
@@ -441,7 +441,7 @@ pub async fn user_balance_post(
 /// `POST /user/balance_uncle/:uncle_hash` -- Process an uncle block to potentially update a user's balance.
 #[debug_handler]
 pub async fn user_balance_uncle_post(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     ip: Option<InsecureClientIp>,
     Path(mut params): Path<HashMap<String, String>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
@@ -477,7 +477,7 @@ pub async fn user_balance_uncle_post(
 }
 
 pub async fn handle_uncle_block(
-    app: &Arc<Web3ProxyApp>,
+    app: &Arc<App>,
     uncle_hash: H256,
 ) -> Web3ProxyResult<Option<HashMap<u64, Decimal>>> {
     // cancel if uncle_hash is actually a confirmed block

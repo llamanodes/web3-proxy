@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{fs, thread};
 use tracing::{error, info, trace, warn};
-use web3_proxy::app::{flatten_handle, flatten_handles, Web3ProxyApp};
+use web3_proxy::app::{flatten_handle, flatten_handles, App};
 use web3_proxy::config::TopConfig;
 use web3_proxy::globals::global_db_conn;
 use web3_proxy::prelude::anyhow;
@@ -86,7 +86,7 @@ impl ProxydSubCommand {
             broadcast::channel(1);
 
         // start the main app
-        let mut spawned_app = Web3ProxyApp::spawn(
+        let mut spawned_app = App::spawn(
             frontend_port,
             prometheus_port,
             top_config.clone(),

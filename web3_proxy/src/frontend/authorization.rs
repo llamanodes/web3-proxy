@@ -1,52 +1,39 @@
 //! Utilities for authorization of logged in and anonymous users.
 
 use super::rpc_proxy_ws::ProxyMode;
-use crate::app::{Web3ProxyApp, APP_USER_AGENT};
+use crate::app::{App, APP_USER_AGENT};
 use crate::balance::Balance;
-use crate::block_number::CacheMode;
 use crate::caches::RegisteredUserRateLimitKey;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
-use crate::globals::{global_db_replica_conn, APP};
-use crate::jsonrpc::{self, JsonRpcParams, LooseId, SingleRequest};
-use crate::kafka::KafkaDebugLogger;
-use crate::response_cache::JsonRpcQueryCacheKey;
-use crate::rpcs::blockchain::Web3ProxyBlock;
-use crate::rpcs::one::Web3Rpc;
+use crate::globals::global_db_replica_conn;
+use crate::jsonrpc::{self, SingleRequest};
 use crate::secrets::RpcSecretKey;
-use crate::stats::{AppStat, BackendRequests};
 use crate::user_token::UserBearerToken;
 use anyhow::Context;
 use axum::headers::authorization::Bearer;
 use axum::headers::{Header, Origin, Referer, UserAgent};
 use chrono::Utc;
 use deferred_rate_limiter::{DeferredRateLimitResult, DeferredRateLimiter};
-use derivative::Derivative;
 use derive_more::From;
 use entities::{login, rpc_key, user, user_tier};
-use ethers::types::{Bytes, U64};
+use ethers::types::Bytes;
 use ethers::utils::keccak256;
 use futures::TryFutureExt;
 use hashbrown::HashMap;
 use http::HeaderValue;
 use ipnet::IpNet;
-use migration::sea_orm::prelude::Decimal;
 use migration::sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use redis_rate_limiter::redis::AsyncCommands;
 use redis_rate_limiter::{RedisRateLimitResult, RedisRateLimiter};
-use serde::ser::SerializeStruct;
 use serde::Serialize;
-use serde_json::json;
 use serde_json::value::RawValue;
 use std::borrow::Cow;
-use std::fmt::{self, Debug, Display};
+use std::fmt::{Debug, Display};
 use std::hash::{Hash, Hasher};
-use std::mem;
 use std::num::NonZeroU64;
-use std::sync::atomic::{self, AtomicBool, AtomicI64, AtomicU64};
-use std::time::Duration;
 use std::{net::IpAddr, str::FromStr, sync::Arc};
 use tokio::sync::RwLock as AsyncRwLock;
-use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::Instant;
 use tracing::{error, trace, warn};
 use ulid::Ulid;
@@ -55,7 +42,7 @@ use uuid::Uuid;
 /// TODO: should this have IpAddr and Origin or AuthorizationChecks?
 #[derive(Debug)]
 pub enum RateLimitResult {
-    Allowed(Authorization, Option<OwnedSemaphorePermit>),
+    Allowed(Authorization),
     RateLimited(
         Authorization,
         /// when their rate limit resets and they can try more requests
@@ -129,124 +116,13 @@ impl Hash for RpcSecretKey {
     }
 }
 
-#[derive(Debug, Default, From, Serialize)]
+#[derive(Clone, Debug, Default, From, Serialize)]
 pub enum RequestOrMethod {
     Request(SingleRequest),
     /// sometimes we don't have a full request. for example, when we are logging a websocket subscription
     Method(Cow<'static, str>, usize),
     #[default]
     None,
-}
-
-/// TODO: instead of a bunch of atomics, this should probably use a RwLock
-#[derive(Debug, Derivative)]
-#[derivative(Default)]
-pub struct Web3Request {
-    /// TODO: set archive_request during the new instead of after
-    /// TODO: this is more complex than "requires a block older than X height". different types of data can be pruned differently
-    pub archive_request: AtomicBool,
-
-    pub authorization: Arc<Authorization>,
-
-    pub cache_mode: CacheMode,
-
-    /// TODO: this should probably be in a global config. although maybe if we run multiple chains in one process this will be useful
-    pub chain_id: u64,
-
-    pub head_block: Option<Web3ProxyBlock>,
-
-    /// TODO: this should be in a global config. not copied to every single request
-    pub usd_per_cu: Decimal,
-
-    pub inner: RequestOrMethod,
-
-    /// Instant that the request was received (or at least close to it)
-    /// We use Instant and not timestamps to avoid problems with leap seconds and similar issues
-    #[derivative(Default(value = "Instant::now()"))]
-    pub start_instant: Instant,
-    /// if this is empty, there was a cache_hit
-    /// otherwise, it is populated with any rpc servers that were used by this request
-    pub backend_requests: BackendRequests,
-    /// The number of times the request got stuck waiting because no servers were synced
-    pub no_servers: AtomicU64,
-    /// If handling the request hit an application error
-    /// This does not count things like a transcation reverting or a malformed request
-    pub error_response: AtomicBool,
-    /// Size in bytes of the JSON response. Does not include headers or things like that.
-    pub response_bytes: AtomicU64,
-    /// How many milliseconds it took to respond to the request
-    pub response_millis: AtomicU64,
-    /// What time the (first) response was proxied.
-    /// TODO: think about how to store response times for ProxyMode::Versus
-    pub response_timestamp: AtomicI64,
-    /// True if the response required querying a backup RPC
-    /// RPC aggregators that query multiple providers to compare response may use this header to ignore our response.
-    pub response_from_backup_rpc: AtomicBool,
-    /// If the request is invalid or received a jsonrpc error response (excluding reverts)
-    pub user_error_response: AtomicBool,
-
-    /// ProxyMode::Debug logs requests and responses with Kafka
-    /// TODO: maybe this shouldn't be determined by ProxyMode. A request param should probably enable this
-    pub kafka_debug_logger: Option<Arc<KafkaDebugLogger>>,
-
-    /// Cancel-safe channel for sending stats to the buffer
-    pub stat_sender: Option<mpsc::UnboundedSender<AppStat>>,
-
-    /// How long to spend waiting for an rpc that can serve this request
-    pub connect_timeout: Duration,
-    /// How long to spend waiting for an rpc to respond to this request
-    /// TODO: this should start once the connection is established
-    pub expire_timeout: Duration,
-}
-
-impl Display for Web3Request {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}({})",
-            self.inner.method(),
-            serde_json::to_string(self.inner.params()).expect("this should always serialize")
-        )
-    }
-}
-
-impl Serialize for Web3Request {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut state = serializer.serialize_struct("request", 7)?;
-
-        state.serialize_field(
-            "archive_request",
-            &self.archive_request.load(atomic::Ordering::Relaxed),
-        )?;
-
-        state.serialize_field("chain_id", &self.chain_id)?;
-
-        state.serialize_field("head_block", &self.head_block)?;
-        state.serialize_field("request", &self.inner)?;
-
-        state.serialize_field("elapsed", &self.start_instant.elapsed().as_secs_f32())?;
-
-        {
-            let backend_names = self.backend_requests.lock();
-
-            let backend_names = backend_names
-                .iter()
-                .map(|x| x.name.as_str())
-                .collect::<Vec<_>>();
-
-            state.serialize_field("backend_requests", &backend_names)?;
-        }
-
-        state.serialize_field(
-            "response_bytes",
-            &self.response_bytes.load(atomic::Ordering::Relaxed),
-        )?;
-
-        state.end()
-    }
 }
 
 impl Default for Authorization {
@@ -266,7 +142,7 @@ impl RequestOrMethod {
 
     pub fn method(&self) -> &str {
         match self {
-            Self::Request(x) => x.method.as_str(),
+            Self::Request(x) => x.method.as_ref(),
             Self::Method(x, _) => x,
             Self::None => "unknown",
         }
@@ -325,288 +201,6 @@ impl ResponseOrBytes<'_> {
 
                 x.num_bytes() as usize
             }
-        }
-    }
-}
-
-impl Web3Request {
-    #[allow(clippy::too_many_arguments)]
-    async fn new_with_options(
-        app: Option<&Web3ProxyApp>,
-        authorization: Arc<Authorization>,
-        chain_id: u64,
-        head_block: Option<Web3ProxyBlock>,
-        kafka_debug_logger: Option<Arc<KafkaDebugLogger>>,
-        max_wait: Option<Duration>,
-        mut request: RequestOrMethod,
-        stat_sender: Option<mpsc::UnboundedSender<AppStat>>,
-        usd_per_cu: Decimal,
-    ) -> Web3ProxyResult<Arc<Self>> {
-        let start_instant = Instant::now();
-
-        // let request: RequestOrMethod = request.into();
-
-        // we VERY INTENTIONALLY log to kafka BEFORE calculating the cache key
-        // this is because calculating the cache_key may modify the params!
-        // for example, if the request specifies "latest" as the block number, we replace it with the actual latest block number
-        if let Some(ref kafka_debug_logger) = kafka_debug_logger {
-            // TODO: channels might be more ergonomic than spawned futures
-            // spawned things run in parallel easier but generally need more Arcs
-            kafka_debug_logger.log_debug_request(&request);
-        }
-
-        // now that kafka has logged the user's original params, we can calculate the cache key
-
-        // TODO: modify CacheMode::new to wait for a future block if one is requested! be sure to update head_block too!
-        let cache_mode = match &mut request {
-            RequestOrMethod::Request(x) => CacheMode::new(x, head_block.as_ref(), app).await,
-            _ => CacheMode::Never,
-        };
-
-        let connect_timeout = Duration::from_secs(3);
-        let expire_timeout = max_wait.unwrap_or_else(|| Duration::from_secs(295));
-
-        let x = Self {
-            archive_request: false.into(),
-            authorization,
-            backend_requests: Default::default(),
-            cache_mode,
-            chain_id,
-            error_response: false.into(),
-            connect_timeout,
-            expire_timeout,
-            head_block: head_block.clone(),
-            kafka_debug_logger,
-            no_servers: 0.into(),
-            inner: request,
-            response_bytes: 0.into(),
-            response_from_backup_rpc: false.into(),
-            response_millis: 0.into(),
-            response_timestamp: 0.into(),
-            start_instant,
-            stat_sender,
-            usd_per_cu,
-            user_error_response: false.into(),
-        };
-
-        Ok(Arc::new(x))
-    }
-
-    pub async fn new_with_app(
-        app: &Web3ProxyApp,
-        authorization: Arc<Authorization>,
-        max_wait: Option<Duration>,
-        request: RequestOrMethod,
-        head_block: Option<Web3ProxyBlock>,
-    ) -> Web3ProxyResult<Arc<Self>> {
-        // TODO: get this out of tracing instead (where we have a String from Amazon's LB)
-        let request_ulid = Ulid::new();
-
-        let kafka_debug_logger = if matches!(authorization.checks.proxy_mode, ProxyMode::Debug) {
-            KafkaDebugLogger::try_new(
-                app,
-                authorization.clone(),
-                head_block.as_ref().map(|x| x.number()),
-                "web3_proxy:rpc",
-                request_ulid,
-            )
-        } else {
-            None
-        };
-
-        let chain_id = app.config.chain_id;
-
-        let stat_sender = app.stat_sender.clone();
-
-        let usd_per_cu = app.config.usd_per_cu.unwrap_or_default();
-
-        Self::new_with_options(
-            Some(app),
-            authorization,
-            chain_id,
-            head_block,
-            kafka_debug_logger,
-            max_wait,
-            request,
-            stat_sender,
-            usd_per_cu,
-        )
-        .await
-    }
-
-    pub async fn new_internal<P: JsonRpcParams>(
-        method: String,
-        params: &P,
-        head_block: Option<Web3ProxyBlock>,
-        max_wait: Option<Duration>,
-    ) -> Web3ProxyResult<Arc<Self>> {
-        let authorization = Arc::new(Authorization::internal().unwrap());
-
-        // TODO: we need a real id! increment a counter on the app
-        let id = LooseId::Number(1);
-
-        // TODO: this seems inefficient
-        let request = SingleRequest::new(id, method, json!(params)).unwrap();
-
-        if let Some(app) = APP.get() {
-            Self::new_with_app(app, authorization, max_wait, request.into(), head_block).await
-        } else {
-            Self::new_with_options(
-                None,
-                authorization,
-                0,
-                head_block,
-                None,
-                max_wait,
-                request.into(),
-                None,
-                Default::default(),
-            )
-            .await
-        }
-    }
-
-    #[inline]
-    pub fn backend_rpcs_used(&self) -> Vec<Arc<Web3Rpc>> {
-        self.backend_requests.lock().clone()
-    }
-
-    pub fn cache_key(&self) -> Option<u64> {
-        match &self.cache_mode {
-            CacheMode::Never => None,
-            x => {
-                let x = JsonRpcQueryCacheKey::new(x, &self.inner).hash();
-
-                Some(x)
-            }
-        }
-    }
-
-    #[inline]
-    pub fn cache_jsonrpc_errors(&self) -> bool {
-        self.cache_mode.cache_jsonrpc_errors()
-    }
-
-    #[inline]
-    pub fn id(&self) -> Box<RawValue> {
-        self.inner.id()
-    }
-
-    #[inline]
-    pub fn max_block_needed(&self) -> Option<U64> {
-        self.cache_mode.to_block().map(|x| *x.num())
-    }
-
-    pub fn min_block_needed(&self) -> Option<U64> {
-        if self.archive_request.load(atomic::Ordering::Relaxed) {
-            Some(U64::zero())
-        } else {
-            self.cache_mode.from_block().map(|x| *x.num())
-        }
-    }
-
-    #[inline]
-    pub fn connect_timeout_at(&self) -> Instant {
-        // TODO: get from config
-        self.start_instant + Duration::from_secs(3)
-    }
-
-    #[inline]
-    pub fn connect_timeout(&self) -> bool {
-        self.connect_timeout_at() <= Instant::now()
-    }
-
-    #[inline]
-    pub fn expire_at(&self) -> Instant {
-        // TODO: get from config
-        // erigon's timeout is 5 minutes so we want it shorter than that
-        self.start_instant + Duration::from_secs(295)
-    }
-
-    #[inline]
-    pub fn expired(&self) -> bool {
-        self.expire_at() <= Instant::now()
-    }
-
-    pub fn try_send_stat(mut self) -> Web3ProxyResult<()> {
-        if let Some(stat_sender) = self.stat_sender.take() {
-            trace!(?self, "sending stat");
-
-            let stat: AppStat = self.into();
-
-            if let Err(err) = stat_sender.send(stat) {
-                error!(?err, "failed sending stat");
-                // TODO: return it? that seems like it might cause an infinite loop
-                // TODO: but dropping stats is bad... hmm... i guess better to undercharge customers than overcharge
-            };
-
-            trace!("stat sent successfully");
-        }
-
-        Ok(())
-    }
-
-    pub fn add_response<'a, R: Into<ResponseOrBytes<'a>>>(&'a self, response: R) {
-        // TODO: fetch? set? should it be None in a Mutex? or a OnceCell?
-        let response = response.into();
-
-        let num_bytes = response.num_bytes() as u64;
-
-        self.response_bytes
-            .fetch_add(num_bytes, atomic::Ordering::Relaxed);
-
-        self.response_millis.fetch_add(
-            self.start_instant.elapsed().as_millis() as u64,
-            atomic::Ordering::Relaxed,
-        );
-
-        // TODO: record first or last timestamp? really, we need multiple
-        self.response_timestamp
-            .store(Utc::now().timestamp(), atomic::Ordering::Relaxed);
-
-        // TODO: set user_error_response and error_response here instead of outside this function
-
-        if let Some(kafka_debug_logger) = self.kafka_debug_logger.as_ref() {
-            if let ResponseOrBytes::Response(response) = response {
-                match response {
-                    jsonrpc::SingleResponse::Parsed(response) => {
-                        kafka_debug_logger.log_debug_response(response);
-                    }
-                    jsonrpc::SingleResponse::Stream(_) => {
-                        warn!("need to handle streaming response debug logging");
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn try_send_arc_stat(self: Arc<Self>) -> Web3ProxyResult<()> {
-        match Arc::into_inner(self) {
-            Some(x) => x.try_send_stat(),
-            None => {
-                trace!("could not send stat while other arcs are active");
-                Ok(())
-            }
-        }
-    }
-
-    #[inline]
-    pub fn proxy_mode(&self) -> ProxyMode {
-        self.authorization.checks.proxy_mode
-    }
-
-    // TODO: helper function to duplicate? needs to clear request_bytes, and all the atomics tho...
-}
-
-// TODO: is this where the panic comes from?
-impl Drop for Web3Request {
-    fn drop(&mut self) {
-        if self.stat_sender.is_some() {
-            // turn `&mut self` into `self`
-            let x = mem::take(self);
-
-            trace!(?x, "request metadata dropped without stat send");
-            let _ = x.try_send_stat();
         }
     }
 }
@@ -734,6 +328,13 @@ impl Authorization {
         )
     }
 
+    pub async fn permit(&self, app: &App) -> Web3ProxyResult<Option<OwnedSemaphorePermit>> {
+        match self.checks.rpc_secret_key_id {
+            None => app.permit_public_concurrency(&self.ip).await,
+            Some(_) => app.permit_premium_concurrency(self).await,
+        }
+    }
+
     pub fn try_new(
         authorization_checks: AuthorizationChecks,
         ip: &IpAddr,
@@ -801,9 +402,9 @@ impl Authorization {
 
 /// rate limit logins only by ip.
 /// we want all origins and referers and user agents to count together
-pub async fn login_is_authorized(app: &Web3ProxyApp, ip: IpAddr) -> Web3ProxyResult<Authorization> {
+pub async fn login_is_authorized(app: &App, ip: IpAddr) -> Web3ProxyResult<Authorization> {
     let authorization = match app.rate_limit_login(ip, ProxyMode::Best).await? {
-        RateLimitResult::Allowed(authorization, None) => authorization,
+        RateLimitResult::Allowed(authorization) => authorization,
         RateLimitResult::RateLimited(authorization, retry_at) => {
             return Err(Web3ProxyError::RateLimited(authorization, retry_at));
         }
@@ -817,15 +418,15 @@ pub async fn login_is_authorized(app: &Web3ProxyApp, ip: IpAddr) -> Web3ProxyRes
 /// semaphore won't ever be None, but its easier if key auth and ip auth work the same way
 /// keep the semaphore alive until the user's request is entirely complete
 pub async fn ip_is_authorized(
-    app: &Arc<Web3ProxyApp>,
+    app: &Arc<App>,
     ip: &IpAddr,
     origin: Option<&Origin>,
     proxy_mode: ProxyMode,
-) -> Web3ProxyResult<(Authorization, Option<OwnedSemaphorePermit>)> {
+) -> Web3ProxyResult<Authorization> {
     // TODO: i think we could write an `impl From` for this
     // TODO: move this to an AuthorizedUser extrator
-    let (authorization, semaphore) = match app.rate_limit_public(ip, origin, proxy_mode).await? {
-        RateLimitResult::Allowed(authorization, semaphore) => (authorization, semaphore),
+    let authorization = match app.rate_limit_public(ip, origin, proxy_mode).await? {
+        RateLimitResult::Allowed(authorization) => authorization,
         RateLimitResult::RateLimited(authorization, retry_at) => {
             // TODO: in the background, emit a stat (maybe simplest to use a channel?)
             return Err(Web3ProxyError::RateLimited(authorization, retry_at));
@@ -871,27 +472,27 @@ pub async fn ip_is_authorized(
         tokio::spawn(f);
     }
 
-    Ok((authorization, semaphore))
+    Ok(authorization)
 }
 
 /// like app.rate_limit_by_rpc_key but converts to a Web3ProxyError;
 /// keep the semaphore alive until the user's request is entirely complete
 pub async fn key_is_authorized(
-    app: &Arc<Web3ProxyApp>,
+    app: &Arc<App>,
     rpc_key: &RpcSecretKey,
     ip: &IpAddr,
     origin: Option<&Origin>,
     proxy_mode: ProxyMode,
     referer: Option<&Referer>,
     user_agent: Option<&UserAgent>,
-) -> Web3ProxyResult<(Authorization, Option<OwnedSemaphorePermit>)> {
+) -> Web3ProxyResult<Authorization> {
     // check the rate limits. error if over the limit
     // TODO: i think this should be in an "impl From" or "impl Into"
-    let (authorization, semaphore) = match app
+    let authorization = match app
         .rate_limit_premium(ip, origin, proxy_mode, referer, rpc_key, user_agent)
         .await?
     {
-        RateLimitResult::Allowed(authorization, semaphore) => (authorization, semaphore),
+        RateLimitResult::Allowed(authorization) => authorization,
         RateLimitResult::RateLimited(authorization, retry_at) => {
             return Err(Web3ProxyError::RateLimited(authorization, retry_at));
         }
@@ -935,11 +536,12 @@ pub async fn key_is_authorized(
         tokio::spawn(f);
     }
 
-    Ok((authorization, semaphore))
+    Ok(authorization)
 }
 
-impl Web3ProxyApp {
+impl App {
     /// Limit the number of concurrent requests from the given ip address.
+    /// TODO: should this take an Authorization isntead of an IpAddr?
     pub async fn permit_public_concurrency(
         &self,
         ip: &IpAddr,
@@ -976,7 +578,6 @@ impl Web3ProxyApp {
     pub async fn permit_premium_concurrency(
         &self,
         authorization: &Authorization,
-        ip: &IpAddr,
     ) -> Web3ProxyResult<Option<OwnedSemaphorePermit>> {
         let authorization_checks = &authorization.checks;
 
@@ -988,7 +589,7 @@ impl Web3ProxyApp {
 
             let semaphore = self
                 .user_semaphores
-                .get_with_by_ref(&(user_id, *ip), async move {
+                .get_with_by_ref(&(user_id, authorization.ip), async move {
                     let s = Semaphore::new(max_concurrent_requests as usize);
                     Arc::new(s)
                 })
@@ -1078,7 +679,7 @@ impl Web3ProxyApp {
             // TODO: localhost being unlimited should be optional
             let authorization = Authorization::internal()?;
 
-            return Ok(RateLimitResult::Allowed(authorization, None));
+            return Ok(RateLimitResult::Allowed(authorization));
         }
 
         let allowed_origin_requests_per_period = &self.config.allowed_origin_requests_per_period;
@@ -1109,23 +710,16 @@ impl Web3ProxyApp {
                 .await?;
             }
 
-            if let RateLimitResult::Allowed(a, b) = x {
-                debug_assert!(b.is_none());
-
-                let permit = self.permit_public_concurrency(ip).await?;
-
-                x = RateLimitResult::Allowed(a, permit)
+            if let RateLimitResult::Allowed(a) = x {
+                x = RateLimitResult::Allowed(a)
             }
 
             debug_assert!(!matches!(x, RateLimitResult::UnknownKey));
 
             Ok(x)
         } else {
-            // no redis, but we can still check the ip semaphore
-            let permit = self.permit_public_concurrency(ip).await?;
-
             // TODO: if no redis, rate limit with a local cache? "warn!" probably isn't right
-            Ok(RateLimitResult::Allowed(authorization, permit))
+            Ok(RateLimitResult::Allowed(authorization))
         }
     }
 
@@ -1370,13 +964,9 @@ impl Web3ProxyApp {
                     .await?;
                 }
 
-                if let RateLimitResult::Allowed(a, b) = x {
-                    debug_assert!(b.is_none());
-
+                if let RateLimitResult::Allowed(a) = x {
                     // only allow this rpc_key to run a limited amount of concurrent requests
-                    let permit = self.permit_premium_concurrency(&a, ip).await?;
-
-                    x = RateLimitResult::Allowed(a, permit)
+                    x = RateLimitResult::Allowed(a)
                 }
 
                 debug_assert!(!matches!(x, RateLimitResult::UnknownKey));
@@ -1387,20 +977,18 @@ impl Web3ProxyApp {
             }
         }
 
-        let permit = self.permit_premium_concurrency(&authorization, ip).await?;
-
-        Ok(RateLimitResult::Allowed(authorization, permit))
+        Ok(RateLimitResult::Allowed(authorization))
     }
 }
 
 impl Authorization {
     pub async fn check_again(
         &self,
-        app: &Arc<Web3ProxyApp>,
+        app: &Arc<App>,
     ) -> Web3ProxyResult<(Arc<Self>, Option<OwnedSemaphorePermit>)> {
         // TODO: we could probably do this without clones. but this is easy
-        let (a, s) = if let Some(ref rpc_secret_key) = self.checks.rpc_secret_key {
-            key_is_authorized(
+        let (a, p) = if let Some(ref rpc_secret_key) = self.checks.rpc_secret_key {
+            let a = key_is_authorized(
                 app,
                 rpc_secret_key,
                 &self.ip,
@@ -1409,14 +997,25 @@ impl Authorization {
                 self.referer.as_ref(),
                 self.user_agent.as_ref(),
             )
-            .await?
+            .await?;
+
+            let p = app.permit_premium_concurrency(&a).await?;
+
+            (a, p)
         } else {
-            ip_is_authorized(app, &self.ip, self.origin.as_ref(), self.checks.proxy_mode).await?
+            let a = ip_is_authorized(app, &self.ip, self.origin.as_ref(), self.checks.proxy_mode)
+                .await?;
+
+            let p = app.permit_public_concurrency(&self.ip).await?;
+
+            (a, p)
         };
 
         let a = Arc::new(a);
 
-        Ok((a, s))
+        // todo!(semaphore permit)
+
+        Ok((a, p))
     }
 }
 
@@ -1436,7 +1035,7 @@ where
         max_requests_per_period.or(authorization.checks.max_requests_per_period);
 
     let x = match rate_limiter.throttle(key, max_requests_per_period, 1).await {
-        Ok(DeferredRateLimitResult::Allowed) => RateLimitResult::Allowed(authorization, None),
+        Ok(DeferredRateLimitResult::Allowed) => RateLimitResult::Allowed(authorization),
         Ok(DeferredRateLimitResult::RetryAt(retry_at)) => {
             // TODO: set headers so they know when they can retry
             // TODO: debug or trace?
@@ -1455,7 +1054,7 @@ where
             // internal error, not rate limit being hit
             error!(?err, %key, "rate limiter is unhappy. allowing key");
 
-            RateLimitResult::Allowed(authorization, None)
+            RateLimitResult::Allowed(authorization)
         }
     };
 
@@ -1479,7 +1078,7 @@ pub async fn redis_rate_limit(
             .throttle_label(label.unwrap_or_default(), max_requests_per_period, 1)
             .await
         {
-            Ok(RedisRateLimitResult::Allowed(..)) => RateLimitResult::Allowed(authorization, None),
+            Ok(RedisRateLimitResult::Allowed(..)) => RateLimitResult::Allowed(authorization),
             Ok(RedisRateLimitResult::RetryAt(new_retry_at, ..)) => {
                 retry_at = retry_at.min(Some(new_retry_at));
 
@@ -1492,11 +1091,11 @@ pub async fn redis_rate_limit(
                 // this an internal error of some kind, not the rate limit being hit
                 error!("rate limiter is unhappy. allowing ip. err={:?}", err);
 
-                RateLimitResult::Allowed(authorization, None)
+                RateLimitResult::Allowed(authorization)
             }
         }
     } else {
-        RateLimitResult::Allowed(authorization, None)
+        RateLimitResult::Allowed(authorization)
     };
 
     Ok(x)

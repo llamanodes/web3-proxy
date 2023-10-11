@@ -2,8 +2,9 @@ use super::{AppStat, FlushedStats, RpcQueryKey};
 use crate::app::Web3ProxyJoinHandle;
 use crate::caches::{RpcSecretKeyCache, UserBalanceCache};
 use crate::errors::Web3ProxyResult;
-use crate::frontend::authorization::{AuthorizationType, Web3Request};
+use crate::frontend::authorization::AuthorizationType;
 use crate::globals::global_db_conn;
+use crate::jsonrpc::ValidatedRequest;
 use crate::stats::RpcQueryStats;
 use derive_more::From;
 use futures::stream;
@@ -247,7 +248,10 @@ impl StatBuffer {
         }
     }
 
-    async fn _buffer_web3_request(&mut self, web3_request: Web3Request) -> Web3ProxyResult<u64> {
+    async fn _buffer_web3_request(
+        &mut self,
+        web3_request: ValidatedRequest,
+    ) -> Web3ProxyResult<u64> {
         // we convert on this side of the channel so that we don't slow down the request
         let stat = RpcQueryStats::try_from_metadata(web3_request)?;
 

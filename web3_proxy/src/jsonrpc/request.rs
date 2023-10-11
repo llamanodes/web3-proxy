@@ -1,39 +1,43 @@
+use super::LooseId;
+use crate::app::App;
+use crate::errors::Web3ProxyError;
+use crate::frontend::authorization::{Authorization, RequestOrMethod};
+use crate::jsonrpc::ValidatedRequest;
 use axum::response::Response as AxumResponse;
 use derive_more::From;
 use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_inline_default::serde_inline_default;
 use serde_json::value::RawValue;
+use std::borrow::Cow;
 use std::fmt;
 use std::sync::{atomic, Arc};
 use std::time::Duration;
 use tokio::time::sleep;
-
-use crate::app::Web3ProxyApp;
-use crate::errors::Web3ProxyError;
-use crate::frontend::authorization::{Authorization, RequestOrMethod, Web3Request};
-
-use super::LooseId;
 
 // TODO: &str here instead of String should save a lot of allocations
 // TODO: generic type for params?
 #[serde_inline_default]
 #[derive(Clone, Deserialize, Serialize)]
 pub struct SingleRequest {
-    pub jsonrpc: String,
+    pub jsonrpc: Cow<'static, str>,
     /// id could be a stricter type, but many rpcs do things against the spec
     /// TODO: this gets cloned into the response object often. would an Arc be better? That has its own overhead and these are short strings
     pub id: Box<RawValue>,
-    pub method: String,
+    pub method: Cow<'static, str>,
     #[serde_inline_default(serde_json::Value::Null)]
     pub params: serde_json::Value,
 }
 
 impl SingleRequest {
     // TODO: Web3ProxyResult? can this even fail?
-    pub fn new(id: LooseId, method: String, params: serde_json::Value) -> anyhow::Result<Self> {
+    pub fn new(
+        id: LooseId,
+        method: Cow<'static, str>,
+        params: serde_json::Value,
+    ) -> anyhow::Result<Self> {
         let x = Self {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: "2.0".into(),
             id: id.to_raw_value(),
             method,
             params,
@@ -102,7 +106,7 @@ impl JsonRpcRequestEnum {
     /// returns the id of the first invalid result (if any). None is good
     pub async fn tarpit_invalid(
         &self,
-        app: &Arc<Web3ProxyApp>,
+        app: &Arc<App>,
         authorization: &Arc<Authorization>,
         duration: Duration,
     ) -> Result<(), AxumResponse> {
@@ -117,9 +121,11 @@ impl JsonRpcRequestEnum {
 
         // TODO: create a stat so we can penalize
         // TODO: what request size
-        let request = Web3Request::new_with_app(
+        // TODO: this probably needs a permit
+        let request = ValidatedRequest::new_with_app(
             app,
             authorization.clone(),
+            None,
             None,
             RequestOrMethod::Method("invalid_method".into(), size),
             None,
@@ -225,7 +231,7 @@ impl<'de> Deserialize<'de> for JsonRpcRequestEnum {
 
                 // some providers don't follow the spec and dont include the jsonrpc key
                 // i think "2.0" should be a fine default to handle these incompatible clones
-                let jsonrpc = jsonrpc.unwrap_or_else(|| "2.0".to_string());
+                let jsonrpc = jsonrpc.unwrap_or_else(|| "2.0".into());
                 // TODO: Errors returned by the try operator get shown in an ugly way
                 let id = id.ok_or_else(|| de::Error::missing_field("id"))?;
                 let method = method.ok_or_else(|| de::Error::missing_field("method"))?;

@@ -3,7 +3,7 @@ use super::many::Web3Rpcs;
 use super::one::Web3Rpc;
 use super::request::OpenRequestHandle;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
-use crate::frontend::authorization::Web3Request;
+use crate::jsonrpc::ValidatedRequest;
 use crate::rpcs::request::OpenRequestResult;
 use async_stream::stream;
 use base64::engine::general_purpose;
@@ -17,7 +17,7 @@ use hdrhistogram::Histogram;
 use itertools::{Itertools, MinMaxResult};
 use moka::future::Cache;
 use serde::Serialize;
-use std::cmp::{min_by_key, Ordering, Reverse};
+use std::cmp::{Ordering, Reverse};
 use std::sync::{atomic, Arc};
 use std::time::Duration;
 use tokio::select;
@@ -97,7 +97,7 @@ pub struct RankedRpcs {
 // TODO: could these be refs? The owning RankedRpcs lifetime might work. `stream!` might make it complicated
 pub struct RpcsForRequest {
     inner: Vec<Arc<Web3Rpc>>,
-    request: Arc<Web3Request>,
+    request: Arc<ValidatedRequest>,
 }
 
 impl RankedRpcs {
@@ -198,7 +198,7 @@ impl RankedRpcs {
         None
     }
 
-    pub fn for_request(&self, web3_request: &Arc<Web3Request>) -> Option<RpcsForRequest> {
+    pub fn for_request(&self, web3_request: &Arc<ValidatedRequest>) -> Option<RpcsForRequest> {
         if self.num_active_rpcs() == 0 {
             return None;
         }
@@ -846,6 +846,7 @@ impl ConsensusFinder {
     }
 }
 
+/*
 fn best_rpc<'a>(rpc_a: &'a Arc<Web3Rpc>, rpc_b: &'a Arc<Web3Rpc>) -> &'a Arc<Web3Rpc> {
     let now = Instant::now();
 
@@ -857,6 +858,7 @@ fn best_rpc<'a>(rpc_a: &'a Arc<Web3Rpc>, rpc_b: &'a Arc<Web3Rpc>) -> &'a Arc<Web
 
     faster
 }
+*/
 
 impl RpcsForRequest {
     pub fn to_stream(self) -> impl Stream<Item = OpenRequestHandle> {
@@ -915,8 +917,6 @@ impl RpcsForRequest {
 
                 // if we got this far, no inner or outer rpcs are ready. thats suprising since an inner should have been ready. maybe it got rate limited
                 warn!(?earliest_retry_at, num_waits=%wait_for_sync.len(), "no rpcs ready");
-
-                break;
 
                 let min_wait_until = Instant::now() + Duration::from_millis(10);
 

@@ -5,7 +5,7 @@
 
 use super::{ResponseCache, ResponseCacheKey};
 use crate::{
-    app::{Web3ProxyApp, APP_USER_AGENT},
+    app::{App, APP_USER_AGENT},
     errors::Web3ProxyError,
 };
 use axum::{
@@ -37,7 +37,7 @@ static CONTENT_TYPE_PLAIN: &str = "text/plain";
 
 #[debug_handler]
 pub async fn debug_request(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     ip: InsecureClientIp,
     headers: HeaderMap,
 ) -> impl IntoResponse {
@@ -76,7 +76,7 @@ pub async fn debug_request(
 /// Health check page for load balancers to use.
 #[debug_handler]
 pub async fn health(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     Extension(cache): Extension<Arc<ResponseCache>>,
 ) -> Result<impl IntoResponse, Web3ProxyError> {
     let (code, content_type, body) = timeout(
@@ -96,7 +96,7 @@ pub async fn health(
 
 // TODO: _health doesn't need to be async, but _quick_cache_ttl needs an async function
 #[inline]
-async fn _health(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, Bytes) {
+async fn _health(app: Arc<App>) -> (StatusCode, &'static str, Bytes) {
     trace!("health is not cached");
 
     if app.balanced_rpcs.synced() {
@@ -113,7 +113,7 @@ async fn _health(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, Bytes) {
 /// Easy alerting if backup servers are in use.
 #[debug_handler]
 pub async fn backups_needed(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     Extension(cache): Extension<Arc<ResponseCache>>,
 ) -> Result<impl IntoResponse, Web3ProxyError> {
     let (code, content_type, body) = timeout(
@@ -134,7 +134,7 @@ pub async fn backups_needed(
 }
 
 #[inline]
-async fn _backups_needed(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, Bytes) {
+async fn _backups_needed(app: Arc<App>) -> (StatusCode, &'static str, Bytes) {
     trace!("backups_needed is not cached");
 
     let code = {
@@ -164,7 +164,7 @@ async fn _backups_needed(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, B
 /// TODO: replace this with proper stats and monitoring. frontend uses it for their public dashboards though
 #[debug_handler]
 pub async fn status(
-    Extension(app): Extension<Arc<Web3ProxyApp>>,
+    Extension(app): Extension<Arc<App>>,
     Extension(cache): Extension<Arc<ResponseCache>>,
 ) -> Result<impl IntoResponse, Web3ProxyError> {
     let (code, content_type, body) = timeout(
@@ -184,7 +184,7 @@ pub async fn status(
 
 // TODO: _status doesn't need to be async, but _quick_cache_ttl needs an async function
 #[inline]
-async fn _status(app: Arc<Web3ProxyApp>) -> (StatusCode, &'static str, Bytes) {
+async fn _status(app: Arc<App>) -> (StatusCode, &'static str, Bytes) {
     trace!("status is not cached");
 
     // TODO: get out of app.balanced_rpcs instead?

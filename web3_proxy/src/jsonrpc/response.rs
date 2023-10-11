@@ -1,3 +1,7 @@
+use super::JsonRpcErrorData;
+use crate::errors::{Web3ProxyError, Web3ProxyResult};
+use crate::jsonrpc::ValidatedRequest;
+use crate::response_cache::ForwardedResponse;
 use axum::body::StreamBody;
 use axum::response::IntoResponse;
 use axum::Json;
@@ -9,12 +13,6 @@ use serde_json::value::RawValue;
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
-
-use crate::errors::{Web3ProxyError, Web3ProxyResult};
-use crate::frontend::authorization::Web3Request;
-use crate::response_cache::ForwardedResponse;
-
-use super::JsonRpcErrorData;
 
 pub trait JsonRpcParams = fmt::Debug + serde::Serialize + Send + Sync + 'static;
 pub trait JsonRpcResultData = serde::Serialize + serde::de::DeserializeOwned + fmt::Debug + Send;
@@ -207,7 +205,7 @@ pub struct StreamResponse<T> {
     _t: PhantomData<T>,
     buffer: Bytes,
     response: reqwest::Response,
-    web3_request: Arc<Web3Request>,
+    web3_request: Arc<ValidatedRequest>,
 }
 
 impl<T> StreamResponse<T> {
@@ -257,7 +255,7 @@ where
     pub async fn read_if_short(
         mut response: reqwest::Response,
         nbytes: u64,
-        web3_request: &Arc<Web3Request>,
+        web3_request: &Arc<ValidatedRequest>,
     ) -> Web3ProxyResult<SingleResponse<T>> {
         Ok(Self::from_bytes(response.bytes().await?)?)
         /*
