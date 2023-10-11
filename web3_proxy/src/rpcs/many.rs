@@ -637,6 +637,7 @@ impl fmt::Debug for Web3Rpcs {
         // TODO: the default formatter takes forever to write. this is too quiet though
         let consensus_rpcs = self.watch_ranked_rpcs.borrow().is_some();
 
+        // todo!(get names)
         // let names = self.by_name.blocking_read();
         // let names = names.values().map(|x| x.name.as_str()).collect::<Vec<_>>();
         let names = ();
@@ -659,6 +660,7 @@ impl Serialize for Web3Rpcs {
         let mut state = serializer.serialize_struct("Web3Rpcs", 5)?;
 
         {
+            // todo!(get rpcs)
             // let by_name = self.by_name.read().await;
             // let rpcs: Vec<&Arc<Web3Rpc>> = by_name.values().collect();
             // TODO: coordinate with frontend team to rename "conns" to "rpcs"
