@@ -2923,7 +2923,6 @@ checksum = "3f35c735096c0293d313e8f2a641627472b83d01b937177fe76e5e2708d31e0d"
 name = "latency"
 version = "0.1.0"
 dependencies = [
- "log",
  "portable-atomic",
  "serde",
  "tokio",
@@ -6583,7 +6582,6 @@ dependencies = [
  "argh",
  "async-stream",
  "async-stripe",
- "async-trait",
  "axum",
  "axum-client-ip",
  "axum-macros",
@@ -6644,7 +6642,6 @@ dependencies = [
  "tokio-console",
  "tokio-stream",
  "toml 0.8.2",
- "tower",
  "tower-http",
  "tracing",
  "tracing-subscriber",
