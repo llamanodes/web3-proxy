@@ -136,6 +136,10 @@ impl StatBuffer {
         let mut db_save_interval =
             interval(Duration::from_secs(self.db_save_interval_seconds as u64));
 
+        // todo: what behavior?
+        db_save_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        tsdb_save_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
         // TODO: this should be a FlushedStats that we add to
         let mut total_requests = 0;
         let mut tsdb_frontend_requests = 0;

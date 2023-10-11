@@ -409,7 +409,7 @@ impl Web3Rpcs {
             };
 
             if next_try > web3_request.connect_timeout_at() {
-                let retry_in = Instant::now().duration_since(next_try).as_secs();
+                let retry_in = Instant::now().duration_since(next_try).as_secs().min(1);
 
                 // we don't use Web3ProxyError::RateLimited because that is for the user being rate limited
                 return Err(Web3ProxyError::StatusCode(

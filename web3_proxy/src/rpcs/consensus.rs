@@ -872,7 +872,7 @@ impl RpcsForRequest {
                 if self.request.connect_timeout() {
                     break;
                 } else {
-                    yield_now().await;
+                    // yield_now().await;
                 }
 
                 let mut earliest_retry_at = None;
