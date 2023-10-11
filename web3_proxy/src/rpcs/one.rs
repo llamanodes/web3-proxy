@@ -18,7 +18,6 @@ use latency::{EwmaLatency, PeakEwmaLatency, RollingQuantileLatency};
 use migration::sea_orm::DatabaseConnection;
 use nanorand::tls::TlsWyRand;
 use nanorand::Rng;
-use ordered_float::OrderedFloat;
 use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
@@ -293,17 +292,19 @@ impl Web3Rpc {
         &self,
         max_block: Option<U64>,
         start_instant: Instant,
-    ) -> ((Instant, bool, Reverse<U64>, u32), OrderedFloat<f32>) {
+    ) -> ((Instant, bool, Reverse<U64>, u32), Duration) {
         let sort_on = self.sort_on(max_block, start_instant);
 
-        // TODO: i think median is better than weighted at this point. we save checking weighted for the very end
-        let median_latency = self
-            .median_latency
-            .as_ref()
-            .map(|x| x.seconds())
-            .unwrap_or_default();
+        // // TODO: once we do power-of-2 choices, put median_latency back
+        // let median_latency = self
+        //     .median_latency
+        //     .as_ref()
+        //     .map(|x| x.seconds())
+        //     .unwrap_or_default();
 
-        let x = (sort_on, OrderedFloat::from(median_latency));
+        let weighted_latency = self.weighted_peak_latency();
+
+        let x = (sort_on, weighted_latency);
 
         trace!("sort_for_load_balancing {}: {:?}", self, x);
 
