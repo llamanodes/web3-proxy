@@ -298,6 +298,9 @@ impl RankedRpcs {
             }
         }
 
+        // TODO: turn these back on
+        outer.clear();
+
         if inner.is_empty() && outer.is_empty() {
             warn!(?inner, ?outer, %web3_request, %head_block, "no rpcs for request");
             None
@@ -1041,9 +1044,7 @@ impl RpcsForRequest {
                 let mut wait_for_sync = FuturesUnordered::new();
 
                 // first check the inners, then the outers
-                // for rpcs in [&self.inner, &self.outer] {
-                for rpcs in [&self.inner] {
-
+                for rpcs in [&self.inner, &self.outer] {
                     attempted.clear();
 
                     while attempted.len() + completed.len() < rpcs.len() {
