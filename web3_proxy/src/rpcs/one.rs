@@ -1316,8 +1316,11 @@ impl Web3Rpc {
         error_handler: Option<RequestErrorHandler>,
         max_wait: Option<Duration>,
     ) -> Web3ProxyResult<R> {
-        // TODO: think about this more. its hard to do this without being self-referenctial!
-        let web3_request = Web3Request::new_internal(method.into(), params, None, max_wait).await?;
+        // TODO: should this be the app, or this RPC's head block?
+        let head_block = self.head_block_sender.as_ref().unwrap().borrow().clone();
+
+        let web3_request =
+            Web3Request::new_internal(method.into(), params, head_block, max_wait).await?;
 
         // TODO: if we are inside the health checks and we aren't healthy yet. we need some sort of flag to force try_handle to not error
 
