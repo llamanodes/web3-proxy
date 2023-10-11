@@ -18,9 +18,7 @@ use futures_util::future::join_all;
 use hashbrown::HashMap;
 use http::StatusCode;
 use moka::future::CacheBuilder;
-use serde::ser::{SerializeStruct, Serializer};
-use serde::Serialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::borrow::Cow;
 use std::fmt::{self, Display};
 use std::sync::Arc;
@@ -624,6 +622,38 @@ impl Web3Rpcs {
             ProxyMode::Versus => todo!("Versus"),
         }
     }
+
+    /// TODO: this should be called `async_serialize` and take a Serializer, but this is easier
+    pub async fn as_json(&self) -> Value {
+        // TODO: coordinate with frontend team to rename "conns" to "rpcs"
+        let rpcs: Vec<_> = {
+            let by_name = self.by_name.read().await;
+            by_name.values().cloned().collect()
+        };
+
+        let ranked_rpcs = self.watch_ranked_rpcs.borrow().as_ref().cloned();
+
+        let caches = (
+            MokaCacheSerializer(&self.blocks_by_hash),
+            MokaCacheSerializer(&self.blocks_by_number),
+        );
+
+        let watch_consensus_rpcs_receivers = self.watch_ranked_rpcs.receiver_count();
+
+        let watch_consensus_head_receivers = if let Some(ref x) = self.watch_head_block {
+            Some(x.receiver_count())
+        } else {
+            None
+        };
+
+        json!({
+            "conns": rpcs,
+            "synced_connections": ranked_rpcs,
+            "caches": caches,
+            "watch_consensus_rpcs_receivers": watch_consensus_rpcs_receivers,
+            "watch_consensus_head_receivers": watch_consensus_head_receivers,
+        })
+    }
 }
 
 impl Display for Web3Rpcs {
@@ -637,68 +667,16 @@ impl fmt::Debug for Web3Rpcs {
         // TODO: the default formatter takes forever to write. this is too quiet though
         let consensus_rpcs = self.watch_ranked_rpcs.borrow().is_some();
 
-        // todo!(get names)
-        // let names = self.by_name.blocking_read();
-        // let names = names.values().map(|x| x.name.as_str()).collect::<Vec<_>>();
-        let names = ();
+        // let rpcs = self.by_name.blocking_read();
+        // let rpcs = rpcs.values().map(|x| x.name.as_str()).collect::<Vec<_>>();
 
         let head_block = self.head_block();
 
         f.debug_struct("Web3Rpcs")
-            .field("rpcs", &names)
+            // .field("rpcs", &rpcs)
             .field("consensus_rpcs", &consensus_rpcs)
             .field("head_block", &head_block)
             .finish_non_exhaustive()
-    }
-}
-
-impl Serialize for Web3Rpcs {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut state = serializer.serialize_struct("Web3Rpcs", 5)?;
-
-        {
-            // todo!(get rpcs)
-            // let by_name = self.by_name.read().await;
-            // let rpcs: Vec<&Arc<Web3Rpc>> = by_name.values().collect();
-            // TODO: coordinate with frontend team to rename "conns" to "rpcs"
-            let rpcs = ();
-            state.serialize_field("conns", &rpcs)?;
-        }
-
-        {
-            let consensus_rpcs = self.watch_ranked_rpcs.borrow().clone();
-            // TODO: rename synced_connections to consensus_rpcs
-
-            if let Some(consensus_rpcs) = consensus_rpcs.as_ref() {
-                state.serialize_field("synced_connections", consensus_rpcs)?;
-            } else {
-                state.serialize_field("synced_connections", &None::<()>)?;
-            }
-        }
-
-        state.serialize_field(
-            "caches",
-            &(
-                MokaCacheSerializer(&self.blocks_by_hash),
-                MokaCacheSerializer(&self.blocks_by_number),
-            ),
-        )?;
-
-        state.serialize_field(
-            "watch_consensus_rpcs_receivers",
-            &self.watch_ranked_rpcs.receiver_count(),
-        )?;
-
-        if let Some(ref x) = self.watch_head_block {
-            state.serialize_field("watch_consensus_head_receivers", &x.receiver_count())?;
-        } else {
-            state.serialize_field("watch_consensus_head_receivers", &None::<()>)?;
-        }
-
-        state.end()
     }
 }
 
