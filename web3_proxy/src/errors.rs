@@ -1,8 +1,8 @@
 //! Utlities for logging errors for admins and displaying errors to users.
 
 use crate::frontend::authorization::Authorization;
-use crate::jsonrpc::{self, JsonRpcErrorData, JsonRpcForwardedResponse};
-use crate::response_cache::JsonRpcResponseEnum;
+use crate::jsonrpc::{self, JsonRpcErrorData, ParsedResponse};
+use crate::response_cache::ForwardedResponse;
 use crate::rpcs::provider::EthersHttpProvider;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::ws::Message;
@@ -139,11 +139,11 @@ pub enum Web3ProxyError {
     /// make it easy to skip caching large results
     #[error(ignore)]
     #[display(fmt = "{:?}", _0)]
-    JsonRpcResponse(JsonRpcResponseEnum<Arc<RawValue>>),
+    JsonRpcResponse(ForwardedResponse<Arc<RawValue>>),
     /// make it easy to skip caching streaming results
     #[error(ignore)]
     #[display(fmt = "{:?}", _0)]
-    StreamResponse(Mutex<Option<jsonrpc::StreamResponse>>),
+    StreamResponse(Mutex<Option<jsonrpc::StreamResponse<Arc<RawValue>>>>),
     /// make it easy to skip caching null results
     NullJsonRpcResult,
     OriginRequired,
@@ -215,7 +215,7 @@ impl Web3ProxyError {
     /// turn the error into an axum response.
     /// <https://www.jsonrpc.org/specification#error_object>
     /// TODO? change to `to_response_parts(self)`
-    pub fn as_response_parts(&self) -> (StatusCode, JsonRpcResponseEnum<Arc<RawValue>>) {
+    pub fn as_response_parts(&self) -> (StatusCode, ForwardedResponse<Arc<RawValue>>) {
         // TODO: include a unique request id in the data
         let (code, err): (StatusCode, JsonRpcErrorData) = match self {
             Self::Abi(err) => {
@@ -846,7 +846,7 @@ impl Web3ProxyError {
                 unreachable!("stream is pulled out, not used here");
             }
             Self::NullJsonRpcResult => {
-                return (StatusCode::OK, JsonRpcResponseEnum::NullResult);
+                return (StatusCode::OK, ForwardedResponse::NullResult);
             }
             Self::OriginRequired => {
                 trace!("OriginRequired");
@@ -1231,7 +1231,7 @@ impl Web3ProxyError {
             },
         };
 
-        (code, JsonRpcResponseEnum::from(err))
+        (code, ForwardedResponse::from(err))
     }
 
     #[inline]
@@ -1240,7 +1240,7 @@ impl Web3ProxyError {
 
         let id = id.unwrap_or_default();
 
-        let response = JsonRpcForwardedResponse::from_response_data(response_data, id);
+        let response = ParsedResponse::from_response_data(response_data, id);
 
         (status_code, Json(response)).into_response()
     }
@@ -1310,7 +1310,7 @@ impl Web3ProxyError {
 
         let id = id.unwrap_or_default();
 
-        let err = JsonRpcForwardedResponse::from_response_data(err, id);
+        let err = ParsedResponse::from_response_data(err, id);
 
         let msg = serde_json::to_string(&err).expect("errors should always serialize to json");
 

@@ -6,11 +6,11 @@ use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, Web3Request};
 use crate::globals::{global_db_conn, DatabaseError, APP, DB_CONN, DB_REPLICA};
 use crate::jsonrpc::{
-    self, JsonRpcErrorData, JsonRpcId, JsonRpcParams, JsonRpcRequest, JsonRpcRequestEnum,
-    JsonRpcResultData, SingleResponse,
+    self, JsonRpcErrorData, JsonRpcParams, JsonRpcRequestEnum, JsonRpcResultData, LooseId,
+    SingleRequest, SingleResponse,
 };
 use crate::relational_db::{connect_db, migrate_db};
-use crate::response_cache::{JsonRpcResponseCache, JsonRpcResponseEnum, JsonRpcResponseWeigher};
+use crate::response_cache::{ForwardedResponse, JsonRpcResponseCache, JsonRpcResponseWeigher};
 use crate::rpcs::blockchain::Web3ProxyBlock;
 use crate::rpcs::consensus::RankedRpcs;
 use crate::rpcs::many::Web3Rpcs;
@@ -983,14 +983,16 @@ impl Web3ProxyApp {
         authorization: Arc<Authorization>,
     ) -> Web3ProxyResult<R> {
         // TODO: proper ids
-        let request = JsonRpcRequest::new(JsonRpcId::Number(1), method.to_string(), json!(params))?;
+        let request = SingleRequest::new(LooseId::Number(1), method.to_string(), json!(params))?;
 
         let (_, response, _) = self.proxy_request(request, authorization, None).await;
 
         // TODO: error handling?
         match response.parsed().await?.payload {
-            jsonrpc::Payload::Success { result } => Ok(serde_json::from_str(result.get())?),
-            jsonrpc::Payload::Error { error } => Err(Web3ProxyError::JsonRpcErrorData(error)),
+            jsonrpc::ResponsePayload::Success { result } => Ok(serde_json::from_str(result.get())?),
+            jsonrpc::ResponsePayload::Error { error } => {
+                Err(Web3ProxyError::JsonRpcErrorData(error))
+            }
         }
     }
 
@@ -1028,7 +1030,7 @@ impl Web3ProxyApp {
     async fn proxy_web3_rpc_requests(
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
-        requests: Vec<JsonRpcRequest>,
+        requests: Vec<SingleRequest>,
     ) -> Web3ProxyResult<(Vec<jsonrpc::ParsedResponse>, Vec<Arc<Web3Rpc>>)> {
         // TODO: we should probably change ethers-rs to support this directly. they pushed this off to v2 though
         let num_requests = requests.len();
@@ -1109,7 +1111,7 @@ impl Web3ProxyApp {
     /// proxy request with up to 3 tries.
     async fn proxy_request(
         self: &Arc<Self>,
-        request: JsonRpcRequest,
+        request: SingleRequest,
         authorization: Arc<Authorization>,
         head_block: Option<Web3ProxyBlock>,
     ) -> (StatusCode, jsonrpc::SingleResponse, Vec<Arc<Web3Rpc>>) {
@@ -1430,7 +1432,7 @@ impl Web3ProxyApp {
                 // sometimes we get an error that the transaction is already known by our nodes,
                 // that's not really an error. Return the hash like a successful response would.
                 // TODO: move this to a helper function. probably part of try_send_protected
-                if let JsonRpcResponseEnum::RpcError{ error_data, ..} = &response {
+                if let ForwardedResponse::RpcError{ error_data, ..} = &response {
                     if error_data.code == -32000
                         && (error_data.message == "ALREADY_EXISTS: already known"
                             || error_data.message == "INTERNAL_ERROR: existing tx with same hash")
@@ -1466,7 +1468,7 @@ impl Web3ProxyApp {
 
                             trace!("tx_hash: {:#?}", tx_hash);
 
-                            response = JsonRpcResponseEnum::from(tx_hash);
+                            response = ForwardedResponse::from(tx_hash);
                         }
                     }
                 }
@@ -1477,7 +1479,7 @@ impl Web3ProxyApp {
                 // TODO: use this cache to avoid sending duplicate transactions?
                 // TODO: different salt for ips and transactions?
                 if let Some(ref salt) = self.config.public_recent_ips_salt {
-                    if let JsonRpcResponseEnum::Result { value, .. } = &response {
+                    if let ForwardedResponse::Result { value, .. } = &response {
                         let now = Utc::now().timestamp();
                         let app = self.clone();
 
@@ -1671,12 +1673,12 @@ impl Web3ProxyApp {
                                                     Ok(response_data) => {
                                                         if !web3_request.cache_jsonrpc_errors() && let Err(err) = response_data {
                                                             // if we are not supposed to cache jsonrpc errors,
-                                                            // then we must not convert Provider errors into a JsonRpcResponseEnum
+                                                            // then we must not convert Provider errors into a ForwardedResponse
                                                             // return all the errors now. moka will not cache Err results
                                                             Err(err)
                                                         } else {
-                                                            // convert jsonrpc errors into JsonRpcResponseEnum, but leave the rest as errors
-                                                            let response_data: JsonRpcResponseEnum<Arc<RawValue>> = response_data.try_into()?;
+                                                            // convert jsonrpc errors into ForwardedResponse, but leave the rest as errors
+                                                            let response_data: ForwardedResponse<Arc<RawValue>> = response_data.try_into()?;
 
                                                             if response_data.is_null() {
                                                                 // don't ever cache "null" as a success. its too likely to be a problem
@@ -1686,7 +1688,7 @@ impl Web3ProxyApp {
                                                                 // TODO: emit a stat
                                                                 Err(Web3ProxyError::JsonRpcResponse(response_data))
                                                             } else {
-                                                                // TODO: response data should maybe be Arc<JsonRpcResponseEnum<Box<RawValue>>>, but that's more work
+                                                                // TODO: response data should maybe be Arc<ForwardedResponse<Box<RawValue>>>, but that's more work
                                                                 Ok(response_data)
                                                             }
                                                         }

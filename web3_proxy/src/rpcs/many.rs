@@ -490,9 +490,9 @@ impl Web3Rpcs {
         let parsed = response.parsed().await?;
 
         match parsed.payload {
-            jsonrpc::Payload::Success { result } => Ok(result),
+            jsonrpc::ResponsePayload::Success { result } => Ok(result),
             // TODO: confirm this error type is correct
-            jsonrpc::Payload::Error { error } => Err(error.into()),
+            jsonrpc::ResponsePayload::Error { error } => Err(error.into()),
         }
     }
 

@@ -2,7 +2,7 @@ use super::one::Web3Rpc;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, AuthorizationType, Web3Request};
 use crate::globals::{global_db_conn, DB_CONN};
-use crate::jsonrpc::{self, JsonRpcErrorData, JsonRpcResultData, Payload};
+use crate::jsonrpc::{self, JsonRpcErrorData, JsonRpcResultData, ResponsePayload};
 use anyhow::Context;
 use chrono::Utc;
 use derive_more::From;
@@ -339,7 +339,7 @@ impl OpenRequestHandle {
         // TODO: counters for errors vs jsonrpc vs success?
         let response_is_success = match &response {
             Ok(jsonrpc::SingleResponse::Parsed(x)) => {
-                matches!(&x.payload, Payload::Success { .. })
+                matches!(&x.payload, ResponsePayload::Success { .. })
             }
             Ok(jsonrpc::SingleResponse::Stream(..)) => true,
             Err(_) => false,
@@ -367,8 +367,8 @@ impl OpenRequestHandle {
 
             let response_type: ResponseType = match &response {
                 Ok(jsonrpc::SingleResponse::Parsed(x)) => match &x.payload {
-                    Payload::Success { .. } => unreachable!(),
-                    Payload::Error { error } => {
+                    ResponsePayload::Success { .. } => unreachable!(),
+                    ResponsePayload::Error { error } => {
                         trace!(?error, "jsonrpc error data");
 
                         if error.message.starts_with("execution reverted") {

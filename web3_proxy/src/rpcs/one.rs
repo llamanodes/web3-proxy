@@ -1338,8 +1338,8 @@ impl Web3Rpc {
         let response = handle.request().await?;
         let parsed = response.parsed().await?;
         match parsed.payload {
-            jsonrpc::Payload::Success { result } => Ok(result),
-            jsonrpc::Payload::Error { error } => Err(error.into()),
+            jsonrpc::ResponsePayload::Success { result } => Ok(result),
+            jsonrpc::ResponsePayload::Error { error } => Err(error.into()),
         }
     }
 }

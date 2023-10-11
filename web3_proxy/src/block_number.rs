@@ -1,6 +1,6 @@
 //! Helper functions for turning ether's BlockNumber into numbers and updating incoming queries to match.
 use crate::app::Web3ProxyApp;
-use crate::jsonrpc::JsonRpcRequest;
+use crate::jsonrpc::SingleRequest;
 use crate::{
     errors::{Web3ProxyError, Web3ProxyResult},
     rpcs::blockchain::Web3ProxyBlock,
@@ -260,12 +260,12 @@ impl CacheMode {
     /// like `try_new`, but instead of erroring, it will default to caching with the head block
     /// returns None if this request should not be cached
     pub async fn new<'a>(
-        request: &'a mut JsonRpcRequest,
+        request: &'a mut SingleRequest,
         head_block: Option<&'a Web3ProxyBlock>,
         app: Option<&'a Web3ProxyApp>,
     ) -> Self {
         match Self::try_new(request, head_block, app).await {
-            Ok(x) => x,
+            Ok(x) => return x,
             Err(Web3ProxyError::NoBlocksKnown) => {
                 warn!(
                     method = %request.method,
@@ -294,7 +294,7 @@ impl CacheMode {
     }
 
     pub async fn try_new(
-        request: &mut JsonRpcRequest,
+        request: &mut SingleRequest,
         head_block: Option<&Web3ProxyBlock>,
         app: Option<&Web3ProxyApp>,
     ) -> Web3ProxyResult<Self> {
@@ -519,7 +519,7 @@ mod test {
     use super::CacheMode;
     use crate::{
         errors::Web3ProxyError,
-        jsonrpc::{JsonRpcId, JsonRpcRequest},
+        jsonrpc::{LooseId, SingleRequest},
         rpcs::blockchain::Web3ProxyBlock,
     };
     use ethers::types::{Block, H256};
@@ -539,9 +539,9 @@ mod test {
 
         let head_block = Web3ProxyBlock::try_new(Arc::new(head_block)).unwrap();
 
-        let id = JsonRpcId::Number(9);
+        let id = LooseId::Number(9);
 
-        let mut request = JsonRpcRequest::new(id, method.to_string(), params).unwrap();
+        let mut request = SingleRequest::new(id, method.to_string(), params).unwrap();
 
         // TODO: instead of empty, check None?
         let x = CacheMode::try_new(&mut request, Some(&head_block), None)
@@ -574,9 +574,9 @@ mod test {
 
         let head_block = Web3ProxyBlock::try_new(Arc::new(head_block)).unwrap();
 
-        let id = JsonRpcId::Number(99);
+        let id = LooseId::Number(99);
 
-        let mut request = JsonRpcRequest::new(id, method.to_string(), params).unwrap();
+        let mut request = SingleRequest::new(id, method.to_string(), params).unwrap();
 
         let x = CacheMode::try_new(&mut request, Some(&head_block), None)
             .await
@@ -611,7 +611,7 @@ mod test {
 
         let head_block = Web3ProxyBlock::try_new(Arc::new(head_block)).unwrap();
 
-        let mut request = JsonRpcRequest::new(99.into(), method.to_string(), params).unwrap();
+        let mut request = SingleRequest::new(99.into(), method.to_string(), params).unwrap();
 
         let x = CacheMode::try_new(&mut request, Some(&head_block), None)
             .await

@@ -4,7 +4,7 @@ use super::Web3ProxyApp;
 use crate::errors::{Web3ProxyError, Web3ProxyResult};
 use crate::frontend::authorization::{RequestOrMethod, Web3Request};
 use crate::jsonrpc;
-use crate::response_cache::JsonRpcResponseEnum;
+use crate::response_cache::ForwardedResponse;
 use axum::extract::ws::{CloseFrame, Message};
 use deferred_rate_limiter::DeferredRateLimitResult;
 use ethers::types::U64;
@@ -107,7 +107,7 @@ impl Web3ProxyApp {
                                     break;
                                 }
 
-                                // TODO: make a struct for this? using our JsonRpcForwardedResponse won't work because it needs an id
+                                // TODO: make a struct for this? using our SingleForwardedResponse won't work because it needs an id
                                 let response_json = json!({
                                     "jsonrpc": "2.0",
                                     "method":"eth_subscription",
@@ -121,7 +121,7 @@ impl Web3ProxyApp {
                                 let response_str = serde_json::to_string(&response_json)
                                     .expect("this should always be valid json");
 
-                                // we could use JsonRpcForwardedResponseEnum::num_bytes() here, but since we already have the string, this is easier
+                                // we could use SingleForwardedResponseEnum::num_bytes() here, but since we already have the string, this is easier
                                 let response_bytes = response_str.len();
 
                                 // TODO: do clients support binary messages?
@@ -208,7 +208,7 @@ impl Web3ProxyApp {
                                         let response_str = serde_json::to_string(&response_json)
                                             .expect("this should always be valid json");
 
-                                        // we could use JsonRpcForwardedResponseEnum::num_bytes() here, but since we already have the string, this is easier
+                                        // we could use SingleForwardedResponseEnum::num_bytes() here, but since we already have the string, this is easier
                                         let response_bytes = response_str.len();
 
                                         subscription_web3_request.add_response(response_bytes);
@@ -246,7 +246,7 @@ impl Web3ProxyApp {
 
         // TODO: do something with subscription_join_handle?
 
-        let response_data = JsonRpcResponseEnum::from(json!(subscription_id));
+        let response_data = ForwardedResponse::from(json!(subscription_id));
 
         let response =
             jsonrpc::ParsedResponse::from_response_data(response_data, web3_request.id());

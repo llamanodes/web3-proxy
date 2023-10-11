@@ -86,12 +86,12 @@ impl<'a> JsonRpcQueryCacheKey<'a> {
     }
 }
 
-// TODO: i think if we change this to Arc<JsonRpcResponseEnum<Box<RawValue>>>, we can speed things up
-pub type JsonRpcResponseCache = Cache<u64, JsonRpcResponseEnum<Arc<RawValue>>>;
+// TODO: i think if we change this to Arc<ForwardedResponse<Box<RawValue>>>, we can speed things up
+pub type JsonRpcResponseCache = Cache<u64, ForwardedResponse<Arc<RawValue>>>;
 
 /// TODO: we might need one that holds RawValue and one that holds serde_json::Value
 #[derive(Clone, Debug)]
-pub enum JsonRpcResponseEnum<R> {
+pub enum ForwardedResponse<R> {
     NullResult,
     Result {
         value: R,
@@ -104,7 +104,7 @@ pub enum JsonRpcResponseEnum<R> {
 }
 
 // TODO: impl for other inner result types?
-impl<R> JsonRpcResponseEnum<R> {
+impl<R> ForwardedResponse<R> {
     pub fn num_bytes(&self) -> u32 {
         match self {
             Self::NullResult => 1,
@@ -122,13 +122,13 @@ impl<R> JsonRpcResponseEnum<R> {
     }
 }
 
-impl<R> JsonRpcResponseEnum<Option<R>> {
+impl<R> ForwardedResponse<Option<R>> {
     pub fn is_null(&self) -> bool {
         matches!(self, Self::NullResult | Self::Result { value: None, .. })
     }
 }
 
-impl JsonRpcResponseEnum<Arc<RawValue>> {
+impl ForwardedResponse<Arc<RawValue>> {
     pub fn is_null(&self) -> bool {
         match self {
             Self::NullResult => true,
@@ -138,21 +138,21 @@ impl JsonRpcResponseEnum<Arc<RawValue>> {
     }
 }
 
-impl TryFrom<Web3ProxyResult<jsonrpc::SingleResponse>> for JsonRpcResponseEnum<Arc<RawValue>> {
+impl TryFrom<Web3ProxyResult<jsonrpc::SingleResponse>> for ForwardedResponse<Arc<RawValue>> {
     type Error = Web3ProxyError;
     fn try_from(response: Web3ProxyResult<jsonrpc::SingleResponse>) -> Result<Self, Self::Error> {
         match response {
             Ok(jsonrpc::SingleResponse::Parsed(parsed)) => match parsed.payload {
-                jsonrpc::Payload::Success { result } => {
+                jsonrpc::ResponsePayload::Success { result } => {
                     let num_bytes = result.get().len() as u32;
-                    Ok(JsonRpcResponseEnum::Result {
+                    Ok(ForwardedResponse::Result {
                         value: result,
                         num_bytes,
                     })
                 }
-                jsonrpc::Payload::Error { error } => {
+                jsonrpc::ResponsePayload::Error { error } => {
                     let num_bytes = error.num_bytes() as u32;
-                    Ok(JsonRpcResponseEnum::RpcError {
+                    Ok(ForwardedResponse::RpcError {
                         error_data: error,
                         // TODO: this double serializes
                         num_bytes,
@@ -167,7 +167,7 @@ impl TryFrom<Web3ProxyResult<jsonrpc::SingleResponse>> for JsonRpcResponseEnum<A
     }
 }
 
-impl From<serde_json::Value> for JsonRpcResponseEnum<Arc<RawValue>> {
+impl From<serde_json::Value> for ForwardedResponse<Arc<RawValue>> {
     fn from(value: serde_json::Value) -> Self {
         let value = RawValue::from_string(value.to_string()).unwrap();
 
@@ -175,7 +175,7 @@ impl From<serde_json::Value> for JsonRpcResponseEnum<Arc<RawValue>> {
     }
 }
 
-impl From<Arc<RawValue>> for JsonRpcResponseEnum<Arc<RawValue>> {
+impl From<Arc<RawValue>> for ForwardedResponse<Arc<RawValue>> {
     fn from(value: Arc<RawValue>) -> Self {
         let num_bytes = value.get().len();
 
@@ -185,7 +185,7 @@ impl From<Arc<RawValue>> for JsonRpcResponseEnum<Arc<RawValue>> {
     }
 }
 
-impl From<Box<RawValue>> for JsonRpcResponseEnum<Arc<RawValue>> {
+impl From<Box<RawValue>> for ForwardedResponse<Arc<RawValue>> {
     fn from(value: Box<RawValue>) -> Self {
         let num_bytes = value.get().len();
 
@@ -197,7 +197,7 @@ impl From<Box<RawValue>> for JsonRpcResponseEnum<Arc<RawValue>> {
     }
 }
 
-impl TryFrom<Web3ProxyError> for JsonRpcResponseEnum<Arc<RawValue>> {
+impl TryFrom<Web3ProxyError> for ForwardedResponse<Arc<RawValue>> {
     type Error = Web3ProxyError;
 
     fn try_from(value: Web3ProxyError) -> Result<Self, Self::Error> {
@@ -206,7 +206,7 @@ impl TryFrom<Web3ProxyError> for JsonRpcResponseEnum<Arc<RawValue>> {
                 Ok(x) => Ok(x.into()),
                 Err(..) => Err(err.into()),
             },
-            Web3ProxyError::NullJsonRpcResult => Ok(JsonRpcResponseEnum::NullResult),
+            Web3ProxyError::NullJsonRpcResult => Ok(ForwardedResponse::NullResult),
             Web3ProxyError::JsonRpcResponse(x) => Ok(x),
             Web3ProxyError::JsonRpcErrorData(err) => Ok(err.into()),
             err => Err(err),
@@ -214,7 +214,7 @@ impl TryFrom<Web3ProxyError> for JsonRpcResponseEnum<Arc<RawValue>> {
     }
 }
 
-impl TryFrom<Result<Arc<RawValue>, Web3ProxyError>> for JsonRpcResponseEnum<Arc<RawValue>> {
+impl TryFrom<Result<Arc<RawValue>, Web3ProxyError>> for ForwardedResponse<Arc<RawValue>> {
     type Error = Web3ProxyError;
 
     fn try_from(value: Result<Arc<RawValue>, Web3ProxyError>) -> Result<Self, Self::Error> {
@@ -228,7 +228,7 @@ impl TryFrom<Result<Arc<RawValue>, Web3ProxyError>> for JsonRpcResponseEnum<Arc<
         }
     }
 }
-impl TryFrom<Result<Box<RawValue>, Web3ProxyError>> for JsonRpcResponseEnum<Arc<RawValue>> {
+impl TryFrom<Result<Box<RawValue>, Web3ProxyError>> for ForwardedResponse<Arc<RawValue>> {
     type Error = Web3ProxyError;
 
     fn try_from(value: Result<Box<RawValue>, Web3ProxyError>) -> Result<Self, Self::Error> {
@@ -243,7 +243,7 @@ impl TryFrom<Result<Box<RawValue>, Web3ProxyError>> for JsonRpcResponseEnum<Arc<
     }
 }
 
-impl<R> From<JsonRpcErrorData> for JsonRpcResponseEnum<R> {
+impl<R> From<JsonRpcErrorData> for ForwardedResponse<R> {
     fn from(value: JsonRpcErrorData) -> Self {
         // TODO: wrap the error in a complete response?
         let num_bytes = serde_json::to_string(&value).unwrap().len();
@@ -317,7 +317,7 @@ impl<'a> TryFrom<&'a WsClientError> for JsonRpcErrorData {
 pub struct JsonRpcResponseWeigher(pub u32);
 
 impl JsonRpcResponseWeigher {
-    pub fn weigh<K, R>(&self, _key: &K, value: &JsonRpcResponseEnum<R>) -> u32 {
+    pub fn weigh<K, R>(&self, _key: &K, value: &ForwardedResponse<R>) -> u32 {
         let x = value.num_bytes();
 
         if x > self.0 {
@@ -331,7 +331,7 @@ impl JsonRpcResponseWeigher {
 
 #[cfg(test)]
 mod tests {
-    use super::JsonRpcResponseEnum;
+    use super::ForwardedResponse;
     use crate::response_cache::JsonRpcResponseWeigher;
     use moka::future::{Cache, CacheBuilder};
     use serde_json::value::RawValue;
@@ -344,28 +344,28 @@ mod tests {
 
         let weigher = JsonRpcResponseWeigher(max_item_weight);
 
-        let small_data: JsonRpcResponseEnum<Arc<RawValue>> = JsonRpcResponseEnum::Result {
+        let small_data: ForwardedResponse<Arc<RawValue>> = ForwardedResponse::Result {
             value: Box::<RawValue>::default().into(),
             num_bytes: max_item_weight / 2,
         };
 
         assert_eq!(weigher.weigh(&(), &small_data), max_item_weight / 2);
 
-        let max_sized_data: JsonRpcResponseEnum<Arc<RawValue>> = JsonRpcResponseEnum::Result {
+        let max_sized_data: ForwardedResponse<Arc<RawValue>> = ForwardedResponse::Result {
             value: Box::<RawValue>::default().into(),
             num_bytes: max_item_weight,
         };
 
         assert_eq!(weigher.weigh(&(), &max_sized_data), max_item_weight);
 
-        let oversized_data: JsonRpcResponseEnum<Arc<RawValue>> = JsonRpcResponseEnum::Result {
+        let oversized_data: ForwardedResponse<Arc<RawValue>> = ForwardedResponse::Result {
             value: Box::<RawValue>::default().into(),
             num_bytes: max_item_weight * 2,
         };
 
         assert_eq!(weigher.weigh(&(), &oversized_data), u32::MAX);
 
-        let test_cache: Cache<u32, JsonRpcResponseEnum<Arc<RawValue>>> =
+        let test_cache: Cache<u32, ForwardedResponse<Arc<RawValue>>> =
             CacheBuilder::new(weight_capacity)
                 .weigher(move |k, v| weigher.weigh(k, v))
                 .time_to_live(Duration::from_secs(2))

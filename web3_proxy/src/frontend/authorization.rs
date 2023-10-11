@@ -7,7 +7,7 @@ use crate::block_number::CacheMode;
 use crate::caches::RegisteredUserRateLimitKey;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::globals::{global_db_replica_conn, APP};
-use crate::jsonrpc::{self, JsonRpcId, JsonRpcParams, JsonRpcRequest};
+use crate::jsonrpc::{self, JsonRpcParams, LooseId, SingleRequest};
 use crate::kafka::KafkaDebugLogger;
 use crate::response_cache::JsonRpcQueryCacheKey;
 use crate::rpcs::blockchain::Web3ProxyBlock;
@@ -131,7 +131,7 @@ impl Hash for RpcSecretKey {
 
 #[derive(Debug, Default, From, Serialize)]
 pub enum RequestOrMethod {
-    Request(JsonRpcRequest),
+    Request(SingleRequest),
     /// sometimes we don't have a full request. for example, when we are logging a websocket subscription
     Method(Cow<'static, str>, usize),
     #[default]
@@ -281,7 +281,7 @@ impl RequestOrMethod {
         }
     }
 
-    pub fn jsonrpc_request(&self) -> Option<&JsonRpcRequest> {
+    pub fn jsonrpc_request(&self) -> Option<&SingleRequest> {
         match self {
             Self::Request(x) => Some(x),
             _ => None,
@@ -443,10 +443,10 @@ impl Web3Request {
         let authorization = Arc::new(Authorization::internal().unwrap());
 
         // TODO: we need a real id! increment a counter on the app
-        let id = JsonRpcId::Number(1);
+        let id = LooseId::Number(1);
 
         // TODO: this seems inefficient
-        let request = JsonRpcRequest::new(id, method, json!(params)).unwrap();
+        let request = SingleRequest::new(id, method, json!(params)).unwrap();
 
         if let Some(app) = APP.get() {
             Self::new_with_app(app, authorization, max_wait, request.into(), head_block).await

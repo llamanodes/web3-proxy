@@ -4,12 +4,8 @@
 
 use super::authorization::{ip_is_authorized, key_is_authorized, Authorization, Web3Request};
 use crate::errors::{Web3ProxyError, Web3ProxyResponse};
-use crate::jsonrpc;
-use crate::{
-    app::Web3ProxyApp,
-    errors::Web3ProxyResult,
-    jsonrpc::{JsonRpcForwardedResponse, JsonRpcRequest},
-};
+use crate::jsonrpc::{self, ParsedResponse};
+use crate::{app::Web3ProxyApp, errors::Web3ProxyResult, jsonrpc::SingleRequest};
 use axum::headers::{Origin, Referer, UserAgent};
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
@@ -320,7 +316,7 @@ async fn proxy_web3_socket(
 async fn websocket_proxy_web3_rpc(
     app: &Arc<Web3ProxyApp>,
     authorization: Arc<Authorization>,
-    json_request: JsonRpcRequest,
+    json_request: SingleRequest,
     response_sender: &mpsc::Sender<Message>,
     subscription_count: &AtomicU64,
     subscriptions: &AsyncRwLock<HashMap<U64, AbortHandle>>,
@@ -337,7 +333,7 @@ async fn websocket_proxy_web3_rpc(
                 .await
             {
                 Ok((handle, response)) => {
-                    if let jsonrpc::Payload::Success {
+                    if let jsonrpc::ResponsePayload::Success {
                         result: ref subscription_id,
                     } = response.payload
                     {
@@ -417,7 +413,7 @@ async fn handle_socket_payload(
     let (authorization, semaphore) = authorization.check_again(app).await?;
 
     // TODO: handle batched requests
-    let (response_id, response) = match serde_json::from_str::<JsonRpcRequest>(payload) {
+    let (response_id, response) = match serde_json::from_str::<SingleRequest>(payload) {
         Ok(json_request) => {
             let request_id = json_request.id.clone();
 
@@ -442,7 +438,7 @@ async fn handle_socket_payload(
         Err(err) => {
             let (_, response_data) = err.as_response_parts();
 
-            let response = JsonRpcForwardedResponse::from_response_data(response_data, response_id);
+            let response = ParsedResponse::from_response_data(response_data, response_id);
 
             serde_json::to_string(&response).expect("to_string should always work here")
         }
