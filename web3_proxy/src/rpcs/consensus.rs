@@ -1029,18 +1029,20 @@ impl RpcsForRequest {
             let mut completed = HashSet::with_capacity(max_len);
 
             // todo!("be sure to set server_error if we exit without any rpcs!");
+            #[allow(clippy::never_loop)]
             loop {
-                if self.request.connect_timeout() {
-                    break;
-                } else {
-                    yield_now().await;
-                }
+                // if self.request.connect_timeout() {
+                //     break;
+                // } else {
+                //     yield_now().await;
+                // }
 
                 let mut earliest_retry_at = None;
                 let mut wait_for_sync = FuturesUnordered::new();
 
                 // first check the inners, then the outers
-                for rpcs in [&self.inner, &self.outer] {
+                // for rpcs in [&self.inner, &self.outer] {
+                for rpcs in [&self.inner] {
 
                     attempted.clear();
 
@@ -1102,11 +1104,10 @@ impl RpcsForRequest {
 
                         debug_assert!(!(attempted.is_empty() && completed.is_empty()));
                     }
-
-                    yield_now().await;
                 }
 
                 // if we got this far, no inner or outer rpcs are ready. thats suprising since an inner should have been
+                break;
 
                 let min_wait_until = Instant::now() + Duration::from_millis(100);
 
