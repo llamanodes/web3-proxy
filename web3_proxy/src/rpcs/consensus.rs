@@ -21,7 +21,6 @@ use std::cmp::{min_by_key, Ordering, Reverse};
 use std::sync::{atomic, Arc};
 use std::time::Duration;
 use tokio::select;
-use tokio::task::yield_now;
 use tokio::time::{sleep_until, Instant};
 use tracing::{debug, enabled, error, info, trace, warn, Level};
 
@@ -953,14 +952,13 @@ impl ConsensusFinder {
 
                 let parent_hash = block_to_check.parent_hash();
 
-                match web3_rpcs.block(parent_hash, Some(rpc), None).await {
-                    Ok(parent_block) => block_to_check = parent_block,
-                    Err(err) => {
+                match web3_rpcs.blocks_by_hash.get(parent_hash).await {
+                    Some(parent_block) => block_to_check = parent_block,
+                    None => {
                         debug!(
-                            "Problem fetching {:?} (parent of {:?}) during consensus finding: {:#?}",
+                            "Unknown hash {:?} (parent of {:?}) during consensus finding",
                             parent_hash,
                             block_to_check.hash(),
-                            err
                         );
                         break;
                     }
@@ -1032,13 +1030,10 @@ impl RpcsForRequest {
             let mut completed = HashSet::with_capacity(max_len);
 
             // todo!("be sure to set server_error if we exit without any rpcs!");
-            #[allow(clippy::never_loop)]
             loop {
-                // if self.request.connect_timeout() {
-                //     break;
-                // } else {
-                //     yield_now().await;
-                // }
+                if self.request.connect_timeout() {
+                    break;
+                }
 
                 let mut earliest_retry_at = None;
                 let mut wait_for_sync = FuturesUnordered::new();
@@ -1107,10 +1102,10 @@ impl RpcsForRequest {
                     }
                 }
 
-                // if we got this far, no inner or outer rpcs are ready. thats suprising since an inner should have been
-                break;
+                // if we got this far, no inner or outer rpcs are ready. thats suprising since an inner should have been ready. maybe it got rate limited
+                warn!(?earliest_retry_at, num_waits=%wait_for_sync.len(), "no rpcs ready");
 
-                let min_wait_until = Instant::now() + Duration::from_millis(100);
+                let min_wait_until = Instant::now() + Duration::from_millis(10);
 
                 // clear earliest_retry_at if it is too far in the future to help us
                 if let Some(retry_at) = earliest_retry_at {

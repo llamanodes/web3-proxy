@@ -67,7 +67,7 @@ impl From<&Web3ProxyBlock> for BlockNumAndHash {
 }
 
 /// modify params to always have a block hash and not "latest"
-/// TODO: this should replace all block numbers with hashes, not just "latest"
+/// TODO: it would be nice to replace "latest" with the hash, but not all methods support that
 #[async_recursion]
 pub async fn clean_block_number<'a>(
     params: &'a mut serde_json::Value,
@@ -228,6 +228,8 @@ pub enum CacheMode {
     Never,
 }
 
+/// TODO: i don't like this. we should make an enum with all of these methods and their types
+/// TODO: serde tagged enums should work since the tag is the method
 fn get_block_param_id(method: &str) -> Option<usize> {
     match method {
         "debug_traceBlockByHash" => Some(0),
