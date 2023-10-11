@@ -107,6 +107,9 @@ impl ProxydSubCommand {
 
                 // TODO: move this to a helper function
                 thread::spawn(move || loop {
+                    // give the app some time to start before changing configs for the first time
+                    thread::sleep(Duration::from_secs(60));
+
                     match fs::read_to_string(&top_config_path) {
                         Ok(new_top_config) => {
                             match toml::from_str::<TopConfig>(&new_top_config) {
