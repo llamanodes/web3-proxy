@@ -190,6 +190,10 @@ impl Web3Rpcs {
         &self,
         mut block_and_rpc_receiver: mpsc::UnboundedReceiver<BlockAndRpc>,
     ) -> Web3ProxyResult<()> {
+        if self.watch_head_block.is_none() {
+            return Ok(());
+        }
+
         let mut consensus_finder =
             ConsensusFinder::new(Some(self.max_head_block_age), Some(self.max_head_block_lag));
 
