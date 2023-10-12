@@ -76,6 +76,7 @@ where
             return Ok(DeferredRateLimitResult::RetryNever);
         }
 
+        // TODO: i do not like having this in a mutex at all
         let deferred_rate_limit_result = Arc::new(Mutex::new(None));
 
         let redis_key = format!("{}:{}", self.prefix, key);
