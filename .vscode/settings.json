@@ -5,5 +5,8 @@
     "rust-analyzer.checkOnSave.extraArgs": [
         "--target-dir",
         "target/rust-analyzer"
+    ],
+    "rust-analyzer.cargo.features": [
+        "tokio-console"
     ]
 }

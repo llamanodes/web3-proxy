@@ -115,12 +115,7 @@ fn main() -> anyhow::Result<()> {
         });
     }
 
-    // TODO: can we run tokio_console and have our normal logs?
-    #[cfg(feature = "tokio_console")]
-    console_subscriber::init();
-
     // if RUST_LOG isn't set, configure a default
-    #[cfg(not(feature = "tokio_console"))]
     let mut rust_log = match std::env::var("RUST_LOG") {
         Ok(x) => x,
         Err(_) => match std::env::var("WEB3_PROXY_TRACE").map(|x| x == "true") {
@@ -233,19 +228,29 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
-    tracing_subscriber::fmt()
-        // create a subscriber that uses the RUST_LOG env var for filtering levels
-        .with_env_filter(EnvFilter::builder().parse(rust_log)?)
-        // .with_env_filter(EnvFilter::from_default_env())
-        // print a pretty output to the terminal
-        // TODO: this might be too verbose. have a config setting for this, too
+    let env_filter = EnvFilter::builder().parse(&rust_log)?;
+    let fmt_layer = tracing_subscriber::fmt::layer()
         .pretty()
-        // the root subscriber is ready
-        .finish()
-        // attach tracing layer.
-        .with(sentry_tracing::layer())
-        // register as the default global subscriber
-        .init();
+        .with_filter(env_filter);
+
+    let env_filter = EnvFilter::builder().parse(rust_log)?;
+    let sentry_layer = sentry_tracing::layer().with_filter(env_filter);
+
+    // build a `Subscriber` by combining layers
+    let tracing_registry = tracing_subscriber::registry();
+
+    #[cfg(feature = "tokio-console")]
+    {
+        let console_layer = console_subscriber::spawn();
+
+        tracing_registry
+            .with(console_layer)
+            .with(fmt_layer)
+            .with(sentry_layer)
+            .init();
+    }
+    #[cfg(not(feature = "tokio-console"))]
+    tracing_registry.with(fmt_layer).with(sentry_layer).init();
 
     info!(%APP_USER_AGENT);
 

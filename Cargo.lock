@@ -4476,9 +4476,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "0.38.18"
+version = "0.38.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a74ee2d7c2581cd139b42447d7d9389b889bdaad3a73f1ebb16f2a3237bb19c"
+checksum = "745ecfa778e66b2b63c88a61cb36e0eea109e803b0b86bf9879fbc77c70e86ed"
 dependencies = [
  "bitflags 2.4.0",
  "errno",
@@ -6587,7 +6587,6 @@ dependencies = [
  "base64 0.21.4",
  "bytes",
  "chrono",
- "console-subscriber",
  "deduped_broadcast",
  "deferred-rate-limiter",
  "derivative",
@@ -6638,7 +6637,6 @@ dependencies = [
  "test-log",
  "time",
  "tokio",
- "tokio-console",
  "tokio-stream",
  "toml 0.8.2",
  "tower-http",
@@ -6653,6 +6651,7 @@ dependencies = [
 name = "web3_proxy_cli"
 version = "1.43.41"
 dependencies = [
+ "console-subscriber",
  "env_logger",
  "parking_lot",
  "prettytable",
@@ -6660,6 +6659,7 @@ dependencies = [
  "serde_json",
  "test-log",
  "tokio",
+ "tokio-console",
  "tracing",
  "tracing-subscriber",
  "web3_proxy",
