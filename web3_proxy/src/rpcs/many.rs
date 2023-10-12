@@ -519,7 +519,7 @@ impl Web3Rpcs {
         // TODO: limit number of tries
         let rpcs = self.try_rpcs_for_request(web3_request).await?;
 
-        let stream = rpcs.to_stream();
+        let stream = rpcs.to_stream().take(3);
 
         pin!(stream);
 
@@ -640,11 +640,8 @@ impl Web3Rpcs {
 
         let watch_consensus_rpcs_receivers = self.watch_ranked_rpcs.receiver_count();
 
-        let watch_consensus_head_receivers = if let Some(ref x) = self.watch_head_block {
-            Some(x.receiver_count())
-        } else {
-            None
-        };
+        let watch_consensus_head_receivers =
+            self.watch_head_block.as_ref().map(|x| x.receiver_count());
 
         json!({
             "conns": rpcs,
