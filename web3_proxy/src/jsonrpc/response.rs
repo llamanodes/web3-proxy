@@ -262,6 +262,7 @@ where
             Some(len) if len <= nbytes => Ok(Self::from_bytes(response.bytes().await?)?),
             // long
             Some(_) => Ok(Self::Stream(StreamResponse {
+                _t: PhantomData::<T>,
                 buffer: Bytes::new(),
                 response,
                 web3_request: web3_request.clone(),
@@ -284,6 +285,7 @@ where
                 // we've read nbytes of the response, but there is more to come
                 let buffer = buffer.freeze();
                 Ok(Self::Stream(StreamResponse {
+                    _t: PhantomData::<T>,
                     buffer,
                     response,
                     web3_request: web3_request.clone(),
