@@ -349,6 +349,7 @@ impl Web3Rpcs {
     /// subscribe to blocks and transactions from all the backend rpcs.
     /// blocks are processed by all the `Web3Rpc`s and then sent to the `block_receiver`
     /// transaction ids from all the `Web3Rpc`s are deduplicated and forwarded to `pending_tx_sender`
+    /// returns True if the subscription is not needed. False if it exited after starting
     async fn subscribe(
         self: Arc<Self>,
         block_and_rpc_receiver: mpsc::UnboundedReceiver<BlockAndRpc>,
@@ -374,21 +375,13 @@ impl Web3Rpcs {
 
         if futures.is_empty() {
             // no transaction or block subscriptions.
-
-            // TODO: i don't like this. it's a hack to keep the tokio task alive
-            let handle = tokio::task::Builder::default()
-                .name("noop")
-                .spawn(async move {
-                    futures::future::pending::<()>().await;
-
-                    Ok(())
-                })?;
-
-            futures.push(flatten_handle(handle));
+            info!(?self, "no subscriptions needed");
+            return Ok(());
         }
 
         if let Err(e) = try_join_all(futures).await {
             error!(?self, "subscriptions over");
+            // TODO: i think this should maybe be a panic
             return Err(e);
         }
 
