@@ -3,9 +3,8 @@ use std::sync::atomic::AtomicU16;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{fs, thread};
-use tokio::time::sleep;
 use tracing::{error, info, trace, warn};
-use web3_proxy::app::{flatten_handle, flatten_handles, App};
+use web3_proxy::app::{flatten_handle, App};
 use web3_proxy::config::TopConfig;
 use web3_proxy::globals::global_db_conn;
 use web3_proxy::prelude::anyhow;
@@ -193,24 +192,42 @@ impl ProxydSubCommand {
             frontend_shutdown_complete_sender,
         ));
 
-        let frontend_handle = flatten_handle(frontend_handle);
-
         let mut terminate_stream = signal::unix::signal(SignalKind::terminate())?;
 
         // if everything is working, these should all run forever
         let mut exited_with_err = false;
         let mut frontend_exited = false;
         select! {
-            x = flatten_handles(spawned_app.app_handles) => {
+            x = spawned_app.balanced_handle => {
                 match x {
-                    Ok(_) => info!("app_handle exited"),
+                    Ok(_) => info!("balanced_handle exited"),
                     Err(e) => {
-                        error!("app_handle exited: {:#?}", e);
+                        error!("balanced_handle exited: {:#?}", e);
                         exited_with_err = true;
                     }
                 }
             }
-            x = frontend_handle => {
+            // // TODO: this handle always exits right away because it doesn't subscribe to any blocks
+            // x = spawned_app.private_handle => {
+            //     match x {
+            //         Ok(_) => info!("private_handle exited"),
+            //         Err(e) => {
+            //             error!("private_handle exited: {:#?}", e);
+            //             exited_with_err = true;
+            //         }
+            //     }
+            // }
+            // // TODO: this handle always exits right away because it doesn't subscribe to any blocks
+            // x = spawned_app.bundler_4337_rpcs_handle => {
+            //     match x {
+            //         Ok(_) => info!("bundler_4337_rpcs_handle exited"),
+            //         Err(e) => {
+            //             error!("bundler_4337_rpcs_handle exited: {:#?}", e);
+            //             exited_with_err = true;
+            //         }
+            //     }
+            // }
+            x = flatten_handle(frontend_handle) => {
                 frontend_exited = true;
                 match x {
                     Ok(_) => info!("frontend exited"),

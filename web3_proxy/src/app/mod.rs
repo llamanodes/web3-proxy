@@ -162,8 +162,12 @@ pub async fn flatten_handles<T>(
 pub struct Web3ProxyAppSpawn {
     /// the app. probably clone this to use in other groups of handles
     pub app: Arc<App>,
-    /// handles for the balanced and private rpcs
-    pub app_handles: FuturesUnordered<Web3ProxyJoinHandle<()>>,
+    /// handle for some rpcs
+    pub balanced_handle: Web3ProxyJoinHandle<()>,
+    /// handle for some rpcs
+    pub private_handle: Web3ProxyJoinHandle<()>,
+    /// handle for some rpcs
+    pub bundler_4337_rpcs_handle: Web3ProxyJoinHandle<()>,
     /// these are important and must be allowed to finish
     pub background_handles: FuturesUnordered<Web3ProxyJoinHandle<()>>,
     /// config changes are sent here
@@ -207,11 +211,8 @@ impl App {
             );
         }
 
-        // these futures are key parts of the app. if they stop running, the app has encountered an irrecoverable error
-        // TODO: this is a small enough group, that a vec with try_join_all is probably fine
-        let app_handles: FuturesUnordered<Web3ProxyJoinHandle<()>> = FuturesUnordered::new();
-
         // we must wait for these to end on their own (and they need to subscribe to shutdown_sender)
+        // TODO: is FuturesUnordered what we need? I want to return when the first one returns
         let important_background_handles: FuturesUnordered<Web3ProxyJoinHandle<()>> =
             FuturesUnordered::new();
 
@@ -453,8 +454,6 @@ impl App {
         .await
         .web3_context("spawning balanced rpcs")?;
 
-        app_handles.push(balanced_handle);
-
         // prepare a Web3Rpcs to hold all our private connections
         // only some chains have this, so this might be empty
         // TODO: set min_sum_soft_limit > 0 if any private rpcs are configured. this way we don't accidently leak to the public mempool if they are all offline
@@ -475,8 +474,6 @@ impl App {
         .await
         .web3_context("spawning private_rpcs")?;
 
-        app_handles.push(private_handle);
-
         // prepare a Web3Rpcs to hold all our 4337 Abstraction Bundler connections (if any)
         let (bundler_4337_rpcs, bundler_4337_rpcs_handle, _) = Web3Rpcs::spawn(
             chain_id,
@@ -490,8 +487,6 @@ impl App {
         )
         .await
         .web3_context("spawning bundler_4337_rpcs")?;
-
-        app_handles.push(bundler_4337_rpcs_handle);
 
         let hostname = hostname::get()
             .ok()
@@ -609,7 +604,9 @@ impl App {
 
         Ok(Web3ProxyAppSpawn {
             app,
-            app_handles,
+            balanced_handle,
+            private_handle,
+            bundler_4337_rpcs_handle,
             background_handles: important_background_handles,
             new_top_config: Arc::new(new_top_config_sender),
             ranked_rpcs: consensus_connections_watcher,
