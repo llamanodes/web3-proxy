@@ -50,7 +50,7 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     [ -e /app/target/rust-toolchain.toml ] && [ "$(cat /app/target/rust-toolchain.toml)" != "$(cat ./rust-toolchain.toml)" ] && rm -rf /app/target/*; \
     cp ./rust-toolchain.toml /app/target/rust-toolchain.toml
 
-# cargo binstall
+# cargo binstall makes it fast to install binaries
 RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
     set -eux -o pipefail; \
@@ -58,6 +58,15 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh >/tmp/install-binstall.sh; \
     bash /tmp/install-binstall.sh; \
     rm -rf /tmp/*
+
+# flamegraph/tokio-console are used for debugging
+FROM rust as rust_debug
+
+RUN --mount=type=cache,target=/root/.cargo/git \
+    --mount=type=cache,target=/root/.cargo/registry \
+    set -eux -o pipefail; \
+    \
+    cargo binstall -y flamegraph tokio-console
 
 # nextest runs tests in parallel (done its in own FROM so that it can run in parallel)
 # TODO: i'd like to use binaries for these, but i had trouble with arm and binstall
@@ -98,8 +107,8 @@ RUN --mount=type=cache,target=/root/.cargo/git \
 # build tests (done its in own FROM so that it can run in parallel)
 FROM rust_with_env as build_tests
 
-COPY --from=rust_foundry /root/.foundry/bin/anvil /root/.foundry/bin/
-COPY --from=rust_nextest /root/.cargo/bin/cargo-nextest* /root/.cargo/bin/
+COPY --link --from=rust_foundry /root/.foundry/bin/anvil /root/.foundry/bin/
+COPY --link --from=rust_nextest /root/.cargo/bin/cargo-nextest* /root/.cargo/bin/
 
 # test the application with cargo-nextest
 RUN --mount=type=cache,target=/root/.cargo/git \
@@ -141,7 +150,7 @@ RUN --mount=type=cache,target=/root/.cargo/git \
 
 # copy this file so that docker actually creates the build_tests container
 # without this, the runtime container doesn't need build_tests and so docker build skips it
-COPY --from=build_tests /test_success /
+COPY --link --from=build_tests /test_success /
 
 #
 # We do not need the Rust toolchain or any deps to run the binary!
@@ -164,7 +173,8 @@ CMD [ "--config", "/web3-proxy.toml", "proxyd" ]
 ENV RUST_LOG "warn,ethers_providers::rpc=off,web3_proxy=debug,web3_proxy::rpcs::consensus=info,web3_proxy_cli=debug"
 
 # we copy something from build_tests just so that docker actually builds it
-COPY --from=build_app /usr/local/bin/* /usr/local/bin/
+COPY --link --from=rust_debug /root/.cargo/bin/* /root/.cargo/bin/
+COPY --link --from=build_app /usr/local/bin/* /usr/local/bin/
 
 # make sure the app works
 RUN web3_proxy_cli --help
