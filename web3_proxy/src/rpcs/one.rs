@@ -853,11 +853,23 @@ impl Web3Rpc {
             }
         }
 
-        // exit if any of the futures exit
-        // TODO: have an enum for which one exited?
-        let (first_exit, _, _) = select_all(futures).await;
+        if futures.is_empty() {
+            // we didn't have anything to subscribe to. what should happen?
+            let clone = self.clone();
 
-        debug!(?first_exit, "subscriptions on {} exited", self);
+            loop {
+                sleep(Duration::from_secs(60)).await;
+                if self.should_disconnect() {
+                    break;
+                }
+            }
+        } else {
+            // exit if any of the futures exit
+            // TODO: have an enum for which one exited?
+            let (first_exit, _, _) = select_all(futures).await;
+
+            debug!(?first_exit, "subscriptions on {} exited", self);
+        }
 
         // clear the head block
         if let Some(block_and_rpc_sender) = block_and_rpc_sender {
