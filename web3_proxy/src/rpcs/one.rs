@@ -976,6 +976,7 @@ impl Web3Rpc {
         } else if self.http_client.is_some() {
             // there is a "watch_blocks" function, but a lot of public nodes (including llamanodes) do not support the necessary rpc endpoints
             // TODO: is 1/2 the block time okay?
+            // TODO: tokio-console shows this as 1ms, but it should definitely be more than that. block_interval definitely isn't 2ms
             let mut i = interval(self.block_interval / 2);
             i.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
