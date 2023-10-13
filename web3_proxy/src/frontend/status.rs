@@ -193,8 +193,8 @@ async fn _status(app: Arc<App>) -> (StatusCode, &'static str, Bytes) {
     // TODO: what else should we include? uptime, cache hit rates, cpu load, memory used
     // TODO: the hostname is probably not going to change. only get once at the start?
     let body = json!({
-        "balanced_rpcs": app.balanced_rpcs.as_json().await,
-        "bundler_4337_rpcs": app.bundler_4337_rpcs.as_json().await,
+        "balanced_rpcs": app.balanced_rpcs,
+        "bundler_4337_rpcs": app.bundler_4337_rpcs,
         "caches": [
             MokaCacheSerializer(&app.ip_semaphores),
             MokaCacheSerializer(&app.jsonrpc_response_cache),
@@ -208,7 +208,7 @@ async fn _status(app: Arc<App>) -> (StatusCode, &'static str, Bytes) {
         "hostname": app.hostname,
         "payment_factory_address": app.config.deposit_factory_contract,
         "pending_txid_firehose": app.pending_txid_firehose,
-        "private_rpcs": app.protected_rpcs.as_json().await,
+        "private_rpcs": app.protected_rpcs,
         "uptime": app.start.elapsed().as_secs(),
         "version": APP_USER_AGENT,
     });
