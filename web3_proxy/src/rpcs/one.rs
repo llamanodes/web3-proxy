@@ -18,6 +18,7 @@ use latency::{EwmaLatency, PeakEwmaLatency, RollingQuantileLatency};
 use migration::sea_orm::DatabaseConnection;
 use nanorand::tls::TlsWyRand;
 use nanorand::Rng;
+use parking_lot::RwLock;
 use redis_rate_limiter::{RedisPool, RedisRateLimitResult, RedisRateLimiter};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
@@ -29,7 +30,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::atomic::{self, AtomicBool, AtomicU32, AtomicU64, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
 use tokio::select;
-use tokio::sync::{mpsc, watch, RwLock as AsyncRwLock};
+use tokio::sync::{mpsc, watch};
 use tokio::task::yield_now;
 use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
 use tracing::{debug, error, info, trace, warn, Level};
@@ -69,7 +70,8 @@ pub struct Web3Rpc {
     /// head_block is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) head_block_sender: Option<watch::Sender<Option<Web3ProxyBlock>>>,
     /// Track head block latency.
-    pub(super) head_delay: AsyncRwLock<EwmaLatency>,
+    /// TODO: This is in a sync lock, but writes are infrequent and quick. Is this actually okay? Set from a spawned task and read an atomic instead?
+    pub(super) head_delay: RwLock<EwmaLatency>,
     /// Track peak request latency
     /// peak_latency is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) peak_latency: Option<PeakEwmaLatency>,
@@ -1315,8 +1317,7 @@ impl Serialize for Web3Rpc {
     where
         S: Serializer,
     {
-        // 15 if we bring head_delay back
-        let mut state = serializer.serialize_struct("Web3Rpc", 14)?;
+        let mut state = serializer.serialize_struct("Web3Rpc", 15)?;
 
         // the url is excluded because it likely includes private information. just show the name that we use in keys
         state.serialize_field("name", &self.name)?;
@@ -1361,10 +1362,10 @@ impl Serialize for Web3Rpc {
             &self.active_requests.load(atomic::Ordering::Relaxed),
         )?;
 
-        // {
-        //     let head_delay_ms = self.head_delay.read().await.latency().as_secs_f32() * 1000.0;
-        //     state.serialize_field("head_delay_ms", &(head_delay_ms))?;
-        // }
+        {
+            let head_delay_ms = self.head_delay.read().latency().as_secs_f32() * 1000.0;
+            state.serialize_field("head_delay_ms", &(head_delay_ms))?;
+        }
 
         {
             let median_latency_ms = self
