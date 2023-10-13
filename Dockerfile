@@ -90,7 +90,7 @@ RUN --mount=type=cache,target=/root/.cargo/git \
 FROM rust as rust_with_env
 
 # changing our features doesn't change any of the steps above
-ENV WEB3_PROXY_FEATURES "deadlock_detection,stripe,tokio-console"
+ENV WEB3_PROXY_FEATURES "deadlock_detection,stripe"
 
 # copy the app
 COPY . .
