@@ -9,8 +9,8 @@ use async_stream::stream;
 use base64::engine::general_purpose;
 use derive_more::Constructor;
 use ethers::prelude::{H256, U64};
-use futures::stream::FuturesUnordered;
-use futures::{Stream, StreamExt};
+use futures::future::select_all;
+use futures::Stream;
 use hashbrown::{HashMap, HashSet};
 use hdrhistogram::serialization::{Serializer, V2DeflateSerializer};
 use hdrhistogram::Histogram;
@@ -878,7 +878,7 @@ impl RpcsForRequest {
                 }
 
                 let mut earliest_retry_at = None;
-                let mut wait_for_sync = FuturesUnordered::new();
+                let mut wait_for_sync = Vec::new();
 
                 // TODO: we used to do a neat power of 2 random choices here, but it had bugs. bring that back
                 for best_rpc in self.inner.iter() {
@@ -938,26 +938,21 @@ impl RpcsForRequest {
                     sleep_until(retry_at).await;
                 } else {
                     select!{
-                        x = wait_for_sync.next() => {
+                        (x, _, _) = select_all(wait_for_sync) => {
                             match x {
-                                Some(Ok(rpc)) => {
+                                Ok(rpc) => {
                                     trace!(%rpc, "rpc ready. it might be used on the next loop");
 
                                     // TODO: i don't think this sleep should be necessary. but i just want the cpus to cool down
                                     sleep_until(min_wait_until).await;
                                 },
-                                Some(Err(err)) => {
+                                Err(err) => {
                                     error!(?err, "problem while waiting for an rpc for a request");
 
                                     // TODO: break or continue?
                                     // TODO: i don't think this sleep should be necessary. but i just want the cpus to cool down
                                     sleep_until(min_wait_until).await;
                                 },
-                                None => {
-                                    // this would only happen if we got to the end of wait_for_sync. but we stop after the first result
-                                    warn!("wait_for_sync is empty. how'd this happen?");
-                                    break;
-                                }
                             }
                         },
                         _ = sleep_until(retry_at) => {

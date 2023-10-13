@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{fs, thread};
 use tracing::{error, info, trace, warn};
-use web3_proxy::app::{flatten_handle, App};
+use web3_proxy::app::App;
 use web3_proxy::config::TopConfig;
 use web3_proxy::globals::global_db_conn;
 use web3_proxy::prelude::anyhow;
@@ -145,7 +145,7 @@ impl ProxydSubCommand {
 
                     // TODO: wait for SIGHUP instead?
                     // TODO: wait for file to change instead of polling. file notifications are really fragile depending on the system and setup though
-                    thread::sleep(Duration::from_secs(10));
+                    thread::sleep(Duration::from_secs(30));
                 });
             }
         }
@@ -227,22 +227,32 @@ impl ProxydSubCommand {
             //         }
             //     }
             // }
-            x = flatten_handle(frontend_handle) => {
+            x = frontend_handle => {
                 frontend_exited = true;
                 match x {
-                    Ok(_) => info!("frontend exited"),
-                    Err(e) => {
+                    Ok(Ok(_)) => info!("frontend exited"),
+                    Ok(Err(e)) => {
                         error!("frontend exited: {:#?}", e);
                         exited_with_err = true;
                     }
+                    Err(e) => {
+                        error!(?e, "join on frontend failed");
+                        exited_with_err = true;
+
+                    }
                 }
             }
-            x = flatten_handle(prometheus_handle) => {
+            x = prometheus_handle => {
                 match x {
-                    Ok(_) => info!("prometheus exited"),
-                    Err(e) => {
+                    Ok(Ok(_)) => info!("prometheus exited"),
+                    Ok(Err(e)) => {
                         error!("prometheus exited: {:#?}", e);
                         exited_with_err = true;
+                    }
+                    Err(e) => {
+                        error!(?e, "join on prometheus failed");
+                        exited_with_err = true;
+
                     }
                 }
             }

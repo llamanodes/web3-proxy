@@ -27,7 +27,7 @@ use ethers::core::utils::keccak256;
 use ethers::prelude::{Address, Bytes, Transaction, TxHash, H256, U256, U64};
 use ethers::utils::rlp::{Decodable, Rlp};
 use futures::future::join_all;
-use futures::stream::{FuturesUnordered, StreamExt};
+use futures::stream::FuturesUnordered;
 use hashbrown::{HashMap, HashSet};
 use migration::sea_orm::{EntityTrait, PaginatorTrait};
 use moka::future::{Cache, CacheBuilder};
@@ -132,30 +132,6 @@ pub struct App {
     /// Simple way to connect ethers Contracsts to the proxy
     /// TODO: make this more efficient
     internal_provider: OnceCell<Arc<EthersHttpProvider>>,
-}
-
-/// flatten a JoinError into an anyhow error
-/// Useful when joining multiple futures.
-pub async fn flatten_handle<T>(handle: Web3ProxyJoinHandle<T>) -> Web3ProxyResult<T> {
-    match handle.await {
-        Ok(Ok(result)) => Ok(result),
-        Ok(Err(err)) => Err(err),
-        Err(err) => Err(err.into()),
-    }
-}
-
-/// return the first error, or Ok if everything worked
-pub async fn flatten_handles<T>(
-    mut handles: FuturesUnordered<Web3ProxyJoinHandle<T>>,
-) -> Web3ProxyResult<()> {
-    while let Some(x) = handles.next().await {
-        match x {
-            Err(e) => return Err(e.into()),
-            Ok(Err(e)) => return Err(e),
-            Ok(Ok(_)) => continue,
-        }
-    }
-    Ok(())
 }
 
 /// starting an app creates many tasks

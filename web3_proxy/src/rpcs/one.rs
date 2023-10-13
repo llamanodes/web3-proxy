@@ -2,7 +2,7 @@
 use super::blockchain::{ArcBlock, BlocksByHashCache, Web3ProxyBlock};
 use super::provider::{connect_ws, EthersWsProvider};
 use super::request::{OpenRequestHandle, OpenRequestResult};
-use crate::app::{flatten_handle, Web3ProxyJoinHandle};
+use crate::app::Web3ProxyJoinHandle;
 use crate::config::{BlockAndRpc, Web3RpcConfig};
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::jsonrpc::ValidatedRequest;
@@ -12,7 +12,7 @@ use anyhow::{anyhow, Context};
 use arc_swap::ArcSwapOption;
 use deduped_broadcast::DedupedBroadcaster;
 use ethers::prelude::{Address, Bytes, Middleware, Transaction, TxHash, U256, U64};
-use futures::stream::FuturesUnordered;
+use futures::future::select_all;
 use futures::StreamExt;
 use latency::{EwmaLatency, PeakEwmaLatency, RollingQuantileLatency};
 use migration::sea_orm::DatabaseConnection;
@@ -738,7 +738,7 @@ impl Web3Rpc {
             .await
             .web3_context("failed check_provider")?;
 
-        let mut futures = FuturesUnordered::new();
+        let mut futures = Vec::new();
 
         // TODO: use this channel instead of self.disconnect_watch
         let (subscribe_stop_tx, mut subscribe_stop_rx) = watch::channel(false);
@@ -760,7 +760,7 @@ impl Web3Rpc {
                 Ok(())
             };
 
-            futures.push(flatten_handle(tokio::spawn(f)));
+            futures.push(tokio::spawn(f));
         } else {
             unimplemented!("there should always be a disconnect watch!");
         }
@@ -851,7 +851,7 @@ impl Web3Rpc {
 
             self.healthy.store(initial_check, atomic::Ordering::Relaxed);
 
-            futures.push(flatten_handle(tokio::spawn(f)));
+            futures.push(tokio::spawn(f));
         } else {
             self.healthy.store(true, atomic::Ordering::Relaxed);
         }
@@ -876,7 +876,7 @@ impl Web3Rpc {
                     .await
             };
 
-            futures.push(flatten_handle(tokio::spawn(f)));
+            futures.push(tokio::spawn(f));
         }
 
         // subscribe to new transactions
@@ -898,12 +898,12 @@ impl Web3Rpc {
                     .await
             };
 
-            futures.push(flatten_handle(tokio::spawn(f)));
+            futures.push(tokio::spawn(f));
         }
 
         // exit if any of the futures exit
         // TODO: have an enum for which one exited?
-        let first_exit = futures.next().await;
+        let (first_exit, _, _) = select_all(futures).await;
 
         debug!(?first_exit, "subscriptions on {} exited", self);
 
