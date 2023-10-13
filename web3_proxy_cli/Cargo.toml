@@ -1,6 +1,6 @@
 [package]
 name = "web3_proxy_cli"
-version = "1.43.43"
+version = "1.43.44"
 edition = "2021"
 default-run = "web3_proxy_cli"
 
@@ -30,7 +30,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
 env_logger = { version ="0.10", default-features = false, features = ["auto-color"] }
-test-log = { version ="0.2.12", default-features = false, features = ["trace"] }
+test-log = { version ="0.2.13", default-features = false, features = ["trace"] }
 tokio = { version = "1.33.0", default-features = false, features = ["full", "test-util"] }
 tracing = {version = "0.1", default-features = false }
 tracing-subscriber = {version = "0.3", default-features = false, features = ["env-filter", "fmt"] }

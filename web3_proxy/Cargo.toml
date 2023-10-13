@@ -1,6 +1,6 @@
 [package]
 name = "web3_proxy"
-version = "1.43.43"
+version = "1.43.44"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -94,7 +94,7 @@ url = { version = "2.4.1" }
 uuid = { version = "1.4.1", default-features = false, features = ["fast-rng", "v4", "zerocopy"] }
 
 # TODO: why doesn't this work in dev-dependencies. i think because of how we split web3_proxy and web3_proxy_cli. im not sure that is even helping anymore
-test-log = { version = "0.2.12", default-features = false, features = ["trace"] }
+test-log = { version = "0.2.13", default-features = false, features = ["trace"] }
 
 # # TODO: bring this back
 # check-if-email-exists = "0.9.0"
