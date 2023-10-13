@@ -237,20 +237,20 @@ fn main() -> anyhow::Result<()> {
     let sentry_layer = sentry_tracing::layer().with_filter(env_filter);
 
     // build a `Subscriber` by combining layers
-    let tracing_registry = tracing_subscriber::registry();
+    let tracing_registry = tracing_subscriber::registry()
+        .with(fmt_layer)
+        .with(sentry_layer);
 
     #[cfg(feature = "tokio-console")]
-    {
-        let console_layer = console_subscriber::spawn();
+    let tracing_registry = {
+        // TODO: i'm not sure if this env_filter is needed, but it seems like a good idea
+        let env_filter = EnvFilter::builder().parse("tokio=trace,runtime=trace")?;
+        let console_layer = console_subscriber::spawn().with_filter(env_filter);
 
-        tracing_registry
-            .with(console_layer)
-            .with(fmt_layer)
-            .with(sentry_layer)
-            .init();
-    }
-    #[cfg(not(feature = "tokio-console"))]
-    tracing_registry.with(fmt_layer).with(sentry_layer).init();
+        tracing_registry.with(console_layer)
+    };
+
+    tracing_registry.init();
 
     info!(%APP_USER_AGENT);
 
