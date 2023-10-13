@@ -60,13 +60,20 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     rm -rf /tmp/*
 
 # flamegraph/tokio-console are used for debugging
-FROM rust as rust_debug
+FROM rust as rust_flamegraph
 
 RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
     set -eux -o pipefail; \
     \
-    cargo binstall -y flamegraph tokio-console
+    cargo binstall -y flamegraph
+
+# FROM rust as rust_tokio_console
+# RUN --mount=type=cache,target=/root/.cargo/git \
+#     --mount=type=cache,target=/root/.cargo/registry \
+#     set -eux -o pipefail; \
+#     \
+#     cargo binstall -y tokio-console
 
 # nextest runs tests in parallel (done its in own FROM so that it can run in parallel)
 # TODO: i'd like to use binaries for these, but i had trouble with arm and binstall
@@ -175,7 +182,7 @@ ENV PATH "/root/.cargo/bin:${PATH}"
 ENV RUST_LOG "warn,ethers_providers::rpc=off,web3_proxy=debug,web3_proxy::rpcs::consensus=info,web3_proxy_cli=debug"
 
 # we copy something from build_tests just so that docker actually builds it
-COPY --link --from=rust_debug /root/.cargo/bin/* /root/.cargo/bin/
+COPY --link --from=rust_flamegaph /root/.cargo/bin/* /root/.cargo/bin/
 COPY --link --from=build_app /usr/local/bin/* /usr/local/bin/
 
 # make sure the app works
