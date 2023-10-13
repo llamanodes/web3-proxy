@@ -1,6 +1,6 @@
 [package]
 name = "web3_proxy"
-version = "1.43.42"
+version = "1.43.43"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -78,7 +78,7 @@ reqwest = { version = "0.11.22", default-features = false, features = ["json", "
 rust_decimal = { version = "1.32.0" }
 sentry = { version = "0.31.7", default-features = false, features = ["anyhow", "backtrace", "contexts", "panic", "reqwest", "rustls", "serde_json", "tracing"] }
 sentry-tracing = "0.31.7"
-serde = { version = "1.0.188" }
+serde = { version = "1.0.189" }
 serde-inline-default = "0.1.1"
 serde_json = { version = "1.0.107", default-features = false, features = ["raw_value"] }
 serde_prometheus = "0.2.4"
