@@ -160,8 +160,8 @@ impl ProxydSubCommand {
             // give 30 seconds for the db to connect. if it does not connect, it will keep retrying
         }
 
-        info!("waiting up to 30 seconds for a head block");
-        let max_wait_until = Instant::now() + Duration::from_secs(30);
+        info!("waiting up to 60 seconds for a head block");
+        let max_wait_until = Instant::now() + Duration::from_secs(60);
         loop {
             select! {
                 _ = sleep_until(max_wait_until) => {
