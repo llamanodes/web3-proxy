@@ -1076,7 +1076,7 @@ impl App {
         self: &Arc<Self>,
         web3_request: &Arc<ValidatedRequest>,
     ) -> Web3ProxyResult<SingleResponse<Arc<RawValue>>> {
-        if self.protected_rpcs.is_empty().await {
+        if self.protected_rpcs.is_empty() {
             self.balanced_rpcs.request_with_metadata(web3_request).await
         } else {
             self.protected_rpcs

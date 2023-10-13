@@ -319,7 +319,7 @@ async fn websocket_proxy_web3_rpc(
 ) -> Web3ProxyResult<jsonrpc::Response> {
     match &json_request.method[..] {
         "eth_subscribe" => {
-            // TODO: this needs a permit
+            // todo!(this needs a permit)
             let web3_request = ValidatedRequest::new_with_app(
                 app,
                 authorization,
