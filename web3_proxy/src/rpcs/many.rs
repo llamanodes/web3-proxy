@@ -154,6 +154,8 @@ impl Web3Rpcs {
         let handle = {
             let connections = connections.clone();
 
+            // TODO: do we actually want this spawned? i think we already spawned to get here
+            // todo!(this task is waking itself ~50% of the time. that seems bad)
             tokio::spawn(async move {
                 connections
                     .process_incoming_blocks(block_and_rpc_receiver)
