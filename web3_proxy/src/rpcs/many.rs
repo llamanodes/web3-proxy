@@ -462,7 +462,7 @@ impl Web3Rpcs {
         // TODO: limit number of tries
         let rpcs = self.try_rpcs_for_request(web3_request).await?;
 
-        let stream = rpcs.to_stream().take(3);
+        let stream = rpcs.to_stream();
 
         pin!(stream);
 

@@ -103,6 +103,7 @@ pub async fn clean_block_number<'a>(
                         if block_hash == *head_block.hash() {
                             (head_block.into(), false)
                         } else if let Some(app) = app {
+                            // TODO: query for the block
                             let block = app
                                 .balanced_rpcs
                                 .blocks_by_hash
@@ -161,7 +162,7 @@ pub async fn clean_block_number<'a>(
                     let head_block_num = head_block.number();
 
                     if block_num > head_block_num {
-                        // TODO: option to wait for the block
+                        // todo!(option to wait for the block here)
                         return Err(Web3ProxyError::UnknownBlockNumber {
                             known: head_block_num,
                             unknown: block_num,
