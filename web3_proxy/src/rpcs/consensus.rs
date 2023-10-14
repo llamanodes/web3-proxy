@@ -425,7 +425,7 @@ impl ConsensusFinder {
         match old_ranked_rpcs.as_ref() {
             None => {
                 info!(
-                    "first {}/{} {}{}/{}/{} block={:?}, rpc={}",
+                    "first {}/{} {}{}/{}/{} block={}, rpc={}",
                     best_tier,
                     worst_tier,
                     backups_voted_str,
