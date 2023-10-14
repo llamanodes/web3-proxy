@@ -82,22 +82,27 @@ async fn it_starts_and_stops() {
 
     for _ in 0..10 {
         // TODO: we currently give a 502 here when we should give a `None`
-        if let Ok(x) = proxy_provider
+        match proxy_provider
             .request::<_, Option<ArcBlock>>("eth_getBlockByNumber", ("latest", false))
             .await
         {
-            proxy_result = x;
+            Ok(x) => {
+                proxy_result = x;
 
-            if let Some(ref proxy_result) = proxy_result {
-                if proxy_result.number == Some(second_block_num) {
-                    break;
+                if let Some(ref proxy_result) = proxy_result {
+                    if proxy_result.number == Some(second_block_num) {
+                        break;
+                    }
                 }
+
+                warn!(?proxy_result, ?second_block_num);
+
+                sleep(Duration::from_millis(100)).await;
+            }
+            Err(err) => {
+                panic!("{:?}", err);
             }
         }
-
-        warn!(?proxy_result, ?second_block_num);
-
-        sleep(Duration::from_millis(100)).await;
     }
 
     assert_eq!(Some(anvil_result), proxy_result);
