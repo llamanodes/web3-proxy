@@ -737,11 +737,6 @@ impl Web3Rpc {
 
         trace!("starting subscriptions on {}", self);
 
-        // start optimistically
-        // we need healthy to start at "true" or else check_provider and other things will not send requests
-        // self.healthy.store(true, atomic::Ordering::Relaxed);
-
-        // TODO: this should set healthy to false. its not strictly necessary since block checks will fail, but this is a faster check
         if let Err(err) = self
             .check_provider(chain_id)
             .await
