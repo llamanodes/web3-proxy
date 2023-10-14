@@ -10,4 +10,4 @@ redis-rate-limiter = { path = "../redis-rate-limiter" }
 anyhow = "1.0.75"
 moka = { version = "0.12.1", features = ["future"] }
 tokio = "1.33.0"
-tracing = "0.1.37"
+tracing = "0.1.39"
