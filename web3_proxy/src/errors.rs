@@ -269,16 +269,7 @@ impl Web3ProxyError {
                 )
             }
             Self::Arc(err) => {
-                // recurse somehow. Web3ProxyError isn't clone and we can't moe out of it
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonRpcErrorData {
-                        // TODO: is it safe to expose all of our anyhow strings?
-                        message: "INTERNAL SERVER ERROR".into(),
-                        code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
-                    },
-                )
+                return err.as_response_parts();
             }
             Self::BadRequest(err) => {
                 trace!(?err, "BAD_REQUEST");

@@ -403,17 +403,18 @@ impl Web3Rpcs {
                 ranked_rpcs
             } else if self.watch_head_block.is_some() {
                 // if we are here, this set of rpcs is subscribed to newHeads. But we didn't get a RankedRpcs. that means something is wrong
+                trace!("watch_head_block is some");
                 return Err(Web3ProxyError::NoServersSynced);
             } else {
+                trace!("watch_head_block is none");
+
                 // no RankedRpcs, but also no newHeads subscription. This is probably a set of "protected" rpcs or similar
-                // TODO: return a future that resolves once we do have something?
                 let rpcs = self.by_name.read().values().cloned().collect();
 
                 if let Some(x) = RankedRpcs::from_rpcs(rpcs, web3_request.head_block.clone()) {
                     Arc::new(x)
                 } else {
                     // i doubt we will ever get here
-                    // TODO: return a future that resolves once we do have something?
                     return Err(Web3ProxyError::NoServersSynced);
                 }
             };
@@ -611,7 +612,13 @@ impl Serialize for Web3Rpcs {
             // TODO: rename synced_connections to consensus_rpcs
 
             if let Some(consensus_rpcs) = consensus_rpcs.as_ref() {
-                state.serialize_field("synced_connections", consensus_rpcs)?;
+                let names: Vec<_> = consensus_rpcs
+                    .inner
+                    .iter()
+                    .map(|x| x.name.as_str())
+                    .collect();
+
+                state.serialize_field("synced_connections", &names)?;
             } else {
                 state.serialize_field("synced_connections", &None::<()>)?;
             }

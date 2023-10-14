@@ -309,7 +309,7 @@ impl ValidatedRequest {
         app: Option<&App>,
         authorization: Arc<Authorization>,
         chain_id: u64,
-        head_block: Option<Web3ProxyBlock>,
+        mut head_block: Option<Web3ProxyBlock>,
         kafka_debug_logger: Option<Arc<KafkaDebugLogger>>,
         max_wait: Option<Duration>,
         permit: Option<OwnedSemaphorePermit>,
@@ -329,6 +329,12 @@ impl ValidatedRequest {
             // TODO: channels might be more ergonomic than spawned futures
             // spawned things run in parallel easier but generally need more Arcs
             kafka_debug_logger.log_debug_request(&request);
+        }
+
+        if head_block.is_none() {
+            if let Some(app) = app {
+                head_block = app.head_block_receiver().borrow().clone();
+            }
         }
 
         // now that kafka has logged the user's original params, we can calculate the cache key
@@ -589,7 +595,7 @@ impl Drop for ValidatedRequest {
             // turn `&mut self` into `self`
             let x = mem::take(self);
 
-            trace!(?x, "request metadata dropped without stat send");
+            // trace!(?x, "request metadata dropped without stat send");
             let _ = x.try_send_stat();
         }
     }

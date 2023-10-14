@@ -466,6 +466,7 @@ impl CacheMode {
                     cache_errors: false,
                 })
             }
+            "eth_sendRawTransaction" => Ok(CacheMode::Never),
             "net_listening" => Ok(CacheMode::SuccessForever),
             "net_version" => Ok(CacheMode::SuccessForever),
             method => match get_block_param_id(method) {
@@ -495,7 +496,7 @@ impl CacheMode {
         match self {
             Self::SuccessForever => None,
             Self::Never => None,
-            Self::Standard { block, .. } => Some(block),
+            Self::Standard { .. } => None,
             Self::Range { from_block, .. } => Some(from_block),
         }
     }

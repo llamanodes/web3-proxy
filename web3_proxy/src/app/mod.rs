@@ -1079,7 +1079,6 @@ impl App {
         if self.protected_rpcs.is_empty() {
             self.balanced_rpcs.request_with_metadata(web3_request).await
         } else {
-            todo!("its not empty")
             self.protected_rpcs
                 .request_with_metadata(web3_request)
                 .await

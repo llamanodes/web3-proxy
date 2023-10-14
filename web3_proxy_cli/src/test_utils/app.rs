@@ -106,7 +106,14 @@ impl TestApp {
                 },
             )]),
             // influxdb_client: influx.map(|x| x.client),
-            private_rpcs: Default::default(),
+            private_rpcs: HashMap::from([(
+                "anvil_private".to_string(),
+                Web3RpcConfig {
+                    http_url: Some(anvil.instance.endpoint()),
+                    ws_url: Some(anvil.instance.ws_endpoint()),
+                    ..Default::default()
+                },
+            )]),
             bundler_4337_rpcs: Default::default(),
             extra: Default::default(),
         };

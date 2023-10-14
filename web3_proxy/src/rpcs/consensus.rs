@@ -23,7 +23,7 @@ use std::time::Duration;
 use tokio::select;
 use tokio::task::yield_now;
 use tokio::time::{sleep_until, Instant};
-use tracing::{debug, enabled, error, info, trace, warn, Level};
+use tracing::{debug, enabled, error, info, instrument, trace, warn, Level};
 
 #[derive(Constructor, Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 pub struct RpcRanking {
@@ -89,12 +89,13 @@ pub struct RankedRpcs {
     pub num_synced: usize,
     pub backups_needed: bool,
 
-    inner: Vec<Arc<Web3Rpc>>,
+    pub(crate) inner: Vec<Arc<Web3Rpc>>,
 
     sort_mode: SortMethod,
 }
 
 // TODO: could these be refs? The owning RankedRpcs lifetime might work. `stream!` might make it complicated
+#[derive(Debug)]
 pub struct RpcsForRequest {
     inner: Vec<Arc<Web3Rpc>>,
     outer: Vec<Arc<Web3Rpc>>,
@@ -106,7 +107,8 @@ impl RankedRpcs {
         // we don't need to sort the rpcs now. we will sort them when a request neds them
         // TODO: the shame about this is that we lose just being able to compare 2 random servers
 
-        let head_block = head_block?;
+        // TODO: why is head_block not set here?! it should always be set!
+        let head_block = head_block.unwrap_or_default();
 
         let backups_needed = rpcs.iter().any(|x| x.backup);
 
@@ -219,6 +221,7 @@ impl RankedRpcs {
 
         // TODO: max lag was already handled
         for rpc in self.inner.iter().cloned() {
+            // if web3_request.head_block.is_some() {
             if let Some(block_needed) = min_block_needed {
                 if !rpc.has_block_data(block_needed) {
                     outer_for_request.push(rpc);
@@ -231,6 +234,7 @@ impl RankedRpcs {
                     continue;
                 }
             }
+            // }
 
             inner_for_request.push(rpc);
         }
@@ -421,7 +425,7 @@ impl ConsensusFinder {
         match old_ranked_rpcs.as_ref() {
             None => {
                 info!(
-                    "first {}/{} {}{}/{}/{} block={}, rpc={}",
+                    "first {}/{} {}{}/{}/{} block={:?}, rpc={}",
                     best_tier,
                     worst_tier,
                     backups_voted_str,
@@ -870,6 +874,7 @@ fn best_rpc<'a>(rpc_a: &'a Arc<Web3Rpc>, rpc_b: &'a Arc<Web3Rpc>) -> &'a Arc<Web
 */
 
 impl RpcsForRequest {
+    #[instrument]
     pub fn to_stream(self) -> impl Stream<Item = OpenRequestHandle> {
         stream! {
             trace!("entered stream");
@@ -919,9 +924,8 @@ impl RpcsForRequest {
                                 trace!("No request handle for {}. err={:?}", best_rpc, err);
                             }
                         }
-
-                        yield_now().await;
                     }
+                    yield_now().await;
                 }
 
                 // if we got this far, no inner or outer rpcs are ready. thats suprising since an inner should have been ready. maybe it got rate limited
