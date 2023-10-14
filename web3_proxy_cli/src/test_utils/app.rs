@@ -158,7 +158,7 @@ impl TestApp {
         let start = Instant::now();
         while frontend_port == 0 {
             // we have to give it some time because it might have to do migrations
-            if start.elapsed() > Duration::from_secs(10) {
+            if start.elapsed() > Duration::from_secs(30) {
                 panic!("took too long to start!");
             }
 
