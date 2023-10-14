@@ -8,7 +8,7 @@
 
 use migration::sea_orm::prelude::Decimal;
 use std::{ops::Add, str::FromStr};
-use tracing::{instrument, trace, warn};
+use tracing::{trace, warn};
 
 /// TODO: i don't like how we use this inside the config and also have it available publicly. we should only getting this value from the config
 pub fn default_usd_per_cu(chain_id: u64) -> Decimal {
@@ -42,7 +42,6 @@ where
 
 impl ComputeUnit {
     /// costs can vary widely depending on method and chain
-    #[instrument(level = "trace")]
     pub fn new(method: &str, chain_id: u64, response_bytes: u64) -> Self {
         // TODO: this works, but this is fragile. think of a better way to check the method is a subscription
         if method.ends_with(')') {
@@ -180,7 +179,6 @@ impl ComputeUnit {
     }
 
     /// notifications and subscription responses cost per-byte
-    #[instrument(level = "trace")]
     pub fn variable_price<D: Into<Decimal> + std::fmt::Debug>(
         chain_id: u64,
         method: &str,
@@ -199,7 +197,6 @@ impl ComputeUnit {
     /// Compute cost per request
     /// All methods cost the same
     /// The number of bytes are based on input, and output bytes
-    #[instrument(level = "trace")]
     pub fn cost(
         &self,
         archive_request: bool,

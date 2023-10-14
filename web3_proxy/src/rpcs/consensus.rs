@@ -23,7 +23,7 @@ use std::time::Duration;
 use tokio::select;
 use tokio::task::yield_now;
 use tokio::time::{sleep_until, Instant};
-use tracing::{debug, enabled, error, info, instrument, trace, warn, Level};
+use tracing::{debug, enabled, error, info, trace, warn, Level};
 
 #[derive(Constructor, Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 pub struct RpcRanking {
@@ -874,7 +874,6 @@ fn best_rpc<'a>(rpc_a: &'a Arc<Web3Rpc>, rpc_b: &'a Arc<Web3Rpc>) -> &'a Arc<Web
 */
 
 impl RpcsForRequest {
-    #[instrument]
     pub fn to_stream(self) -> impl Stream<Item = OpenRequestHandle> {
         stream! {
             trace!("entered stream");
