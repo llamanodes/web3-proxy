@@ -34,14 +34,14 @@ use tracing::{debug, error, info, trace, warn};
 pub struct Web3Rpcs {
     pub(crate) name: Cow<'static, str>,
     pub(crate) chain_id: u64,
-    /// if watch_consensus_head_sender is some, Web3Rpc inside self will send blocks here when they get them
+    /// if watch_head_block is some, Web3Rpc inside self will send blocks here when they get them
     pub(crate) block_sender: mpsc::UnboundedSender<(Option<Web3ProxyBlock>, Arc<Web3Rpc>)>,
     /// any requests will be forwarded to one (or more) of these connections
     /// TODO: hopefully this not being an async lock will be okay. if you need it across awaits, clone the arc
     pub(crate) by_name: RwLock<HashMap<String, Arc<Web3Rpc>>>,
-    /// all providers with the same consensus head block. won't update if there is no `self.watch_consensus_head_sender`
+    /// all providers with the same consensus head block. won't update if there is no `self.watch_head_block`
     /// TODO: document that this is a watch sender and not a broadcast! if things get busy, blocks might get missed
-    /// TODO: why is watch_consensus_head_sender in an Option, but this one isn't?
+    /// TODO: why is watch_head_block in an Option, but this one isn't?
     /// Geth's subscriptions have the same potential for skipping blocks.
     pub(crate) watch_ranked_rpcs: watch::Sender<Option<Arc<RankedRpcs>>>,
     /// this head receiver makes it easy to wait until there is a new block
