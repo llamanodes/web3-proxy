@@ -54,7 +54,7 @@ impl Default for EwmaLatency {
         let span = 10.0;
 
         // TODO: what should the defautt start be?
-        let start = 1.0;
+        let start = 60.0;
 
         Self::new(span, start)
     }
