@@ -97,6 +97,7 @@ RUN --mount=type=cache,target=/root/.cargo/git \
 FROM rust as rust_with_env
 
 # changing our features doesn't change any of the steps above
+# TODO: i think this should be an ARG
 ENV WEB3_PROXY_FEATURES "stripe"
 
 # copy the app
