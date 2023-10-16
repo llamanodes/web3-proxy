@@ -72,10 +72,10 @@ pub enum Web3ProxyError {
     EthersHttpClient(ethers::providers::HttpClientError),
     EthersProvider(ethers::prelude::ProviderError),
     EthersWsClient(ethers::prelude::WsClientError),
-    #[display(fmt = "{} < {}", head, requested)]
+    #[display(fmt = "{:?} < {}", head, requested)]
     #[from(ignore)]
     FarFutureBlock {
-        head: U64,
+        head: Option<U64>,
         requested: U64,
     },
     GasEstimateNotU256,
