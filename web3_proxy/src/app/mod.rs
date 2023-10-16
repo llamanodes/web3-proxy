@@ -326,9 +326,13 @@ impl App {
         // make a http shared client
         // TODO: can we configure the connection pool? should we?
         // TODO: timeouts from config. defaults are hopefully good
+        // TODO: is always disabling compression a good idea?
         let http_client = Some(
             reqwest::ClientBuilder::new()
                 .connect_timeout(Duration::from_secs(5))
+                .no_brotli()
+                .no_deflate()
+                .no_gzip()
                 .timeout(Duration::from_secs(5 * 60))
                 .user_agent(APP_USER_AGENT)
                 .build()?,
