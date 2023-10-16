@@ -333,7 +333,7 @@ impl App {
                 .no_brotli()
                 .no_deflate()
                 .no_gzip()
-                .timeout(Duration::from_secs(5 * 60))
+                .timeout(Duration::from_secs(5 * 60 - 2))
                 .user_agent(APP_USER_AGENT)
                 .build()?,
         );
