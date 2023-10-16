@@ -78,6 +78,7 @@ enum SubCommand {
     PopularityContest(sub_commands::PopularityContestSubCommand),
     Proxyd(sub_commands::ProxydSubCommand),
     RpcAccounting(sub_commands::RpcAccountingSubCommand),
+    #[cfg(feature = "rdkafka")]
     SearchKafka(sub_commands::SearchKafkaSubCommand),
     Sentryd(sub_commands::SentrydSubCommand),
     TransferKey(sub_commands::TransferKeySubCommand),
@@ -285,7 +286,11 @@ fn main() -> anyhow::Result<()> {
     // set up tokio's async runtime
     let mut rt_builder = runtime::Builder::new_multi_thread();
 
-    rt_builder.enable_all();
+    rt_builder.enable_io();
+    rt_builder.enable_time();
+
+    // TODO: debug option to enable and expose this
+    // rt_builder.enable_metrics_poll_count_histogram();
 
     if cli_config.workers > 0 {
         rt_builder.worker_threads(cli_config.workers);
@@ -449,6 +454,7 @@ fn main() -> anyhow::Result<()> {
                 x.main(pagerduty_async, top_config).await
             }
             SubCommand::PopularityContest(x) => x.main().await,
+            #[cfg(feature = "rdkafka")]
             SubCommand::SearchKafka(x) => x.main(top_config.unwrap()).await,
             SubCommand::Sentryd(x) => {
                 if cli_config.sentry_url.is_none() {

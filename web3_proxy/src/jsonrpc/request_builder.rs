@@ -1,3 +1,4 @@
+use super::{JsonRpcParams, LooseId, SingleRequest};
 use crate::{
     app::App,
     block_number::CacheMode,
@@ -7,8 +8,6 @@ use crate::{
         rpc_proxy_ws::ProxyMode,
     },
     globals::APP,
-    jsonrpc,
-    kafka::KafkaDebugLogger,
     response_cache::JsonRpcQueryCacheKey,
     rpcs::{blockchain::Web3ProxyBlock, one::Web3Rpc},
     secrets::RpcSecretKey,
@@ -36,10 +35,14 @@ use tokio::{
     sync::{mpsc, OwnedSemaphorePermit},
     time::Instant,
 };
-use tracing::{error, trace, warn};
-use ulid::Ulid;
+use tracing::{error, trace};
 
-use super::{JsonRpcParams, LooseId, SingleRequest};
+#[cfg(feature = "rdkafka")]
+use {
+    crate::{jsonrpc, kafka::KafkaDebugLogger},
+    tracing::warn,
+    ulid::Ulid,
+};
 
 #[derive(Derivative)]
 #[derivative(Default)]
@@ -235,9 +238,13 @@ pub struct ValidatedRequest {
     /// If the request is invalid or received a jsonrpc error response (excluding reverts)
     pub user_error_response: AtomicBool,
 
+    #[cfg(feature = "rdkafka")]
     /// ProxyMode::Debug logs requests and responses with Kafka
     /// TODO: maybe this shouldn't be determined by ProxyMode. A request param should probably enable this
     pub kafka_debug_logger: Option<Arc<KafkaDebugLogger>>,
+
+    #[cfg(not(feature = "rdkafka"))]
+    pub kafka_debug_logger: Option<()>,
 
     /// Cancel-safe channel for sending stats to the buffer
     pub stat_sender: Option<mpsc::UnboundedSender<AppStat>>,
@@ -310,7 +317,7 @@ impl ValidatedRequest {
         authorization: Arc<Authorization>,
         chain_id: u64,
         mut head_block: Option<Web3ProxyBlock>,
-        kafka_debug_logger: Option<Arc<KafkaDebugLogger>>,
+        #[cfg(feature = "rdkafka")] kafka_debug_logger: Option<Arc<KafkaDebugLogger>>,
         max_wait: Option<Duration>,
         permit: Option<OwnedSemaphorePermit>,
         mut request: RequestOrMethod,
@@ -325,11 +332,14 @@ impl ValidatedRequest {
         // we VERY INTENTIONALLY log to kafka BEFORE calculating the cache key
         // this is because calculating the cache_key may modify the params!
         // for example, if the request specifies "latest" as the block number, we replace it with the actual latest block number
+        #[cfg(feature = "rdkafka")]
         if let Some(ref kafka_debug_logger) = kafka_debug_logger {
             // TODO: channels might be more ergonomic than spawned futures
             // spawned things run in parallel easier but generally need more Arcs
             kafka_debug_logger.log_debug_request(&request);
         }
+        #[cfg(not(feature = "rdkafka"))]
+        let kafka_debug_logger = None;
 
         if head_block.is_none() {
             if let Some(app) = app {
@@ -384,10 +394,11 @@ impl ValidatedRequest {
         request: RequestOrMethod,
         head_block: Option<Web3ProxyBlock>,
     ) -> Web3ProxyResult<Arc<Self>> {
-        // TODO: get this out of tracing instead (where we have a String from Amazon's LB)
-        let request_ulid = Ulid::new();
-
+        #[cfg(feature = "rdkafka")]
         let kafka_debug_logger = if matches!(authorization.checks.proxy_mode, ProxyMode::Debug) {
+            // TODO: get this out of tracing instead (where we have a String from Amazon's LB)
+            let request_ulid = Ulid::new();
+
             KafkaDebugLogger::try_new(
                 app,
                 authorization.clone(),
@@ -408,6 +419,7 @@ impl ValidatedRequest {
             authorization,
             chain_id,
             head_block,
+            #[cfg(feature = "rdkafka")]
             kafka_debug_logger,
             max_wait,
             permit,
@@ -447,6 +459,7 @@ impl ValidatedRequest {
                 authorization,
                 0,
                 head_block,
+                #[cfg(feature = "rdkafka")]
                 None,
                 max_wait,
                 None,
@@ -557,6 +570,7 @@ impl ValidatedRequest {
 
         // TODO: set user_error_response and error_response here instead of outside this function
 
+        #[cfg(feature = "rdkafka")]
         if let Some(kafka_debug_logger) = self.kafka_debug_logger.as_ref() {
             if let ResponseOrBytes::Response(response) = response {
                 match response {

@@ -103,6 +103,7 @@ pub struct App {
     /// give some bonus capacity to public users
     pub bonus_ip_concurrency: Arc<Semaphore>,
     /// the /debug/ rpc endpoints send detailed logging to kafka
+    #[cfg(feature = "rdkafka")]
     pub kafka_producer: Option<rdkafka::producer::FutureProducer>,
     /// rate limit the login endpoint
     /// we do this because each pending login is a row in the database
@@ -194,7 +195,10 @@ impl App {
 
         // connect to kafka for logging requests from the /debug/ urls
 
+        #[cfg(feature = "rdkafka")]
         let mut kafka_producer: Option<rdkafka::producer::FutureProducer> = None;
+
+        #[cfg(feature = "rdkafka")]
         if let Some(kafka_brokers) = top_config.app.kafka_urls.clone() {
             info!("Connecting to kafka");
 
@@ -505,6 +509,7 @@ impl App {
             jsonrpc_response_cache,
             jsonrpc_response_failed_cache_keys,
             jsonrpc_response_semaphores,
+            #[cfg(feature = "rdkafka")]
             kafka_producer,
             login_rate_limiter,
             pending_txid_firehose: deduped_txid_firehose,

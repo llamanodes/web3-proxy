@@ -16,7 +16,6 @@ pub mod frontend;
 pub mod globals;
 pub mod http_params;
 pub mod jsonrpc;
-pub mod kafka;
 pub mod pagerduty;
 pub mod prelude;
 pub mod premium;
@@ -29,3 +28,6 @@ pub mod secrets;
 pub mod stats;
 pub mod test_utils;
 pub mod user_token;
+
+#[cfg(feature = "rdkafka")]
+pub mod kafka;

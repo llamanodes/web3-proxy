@@ -17,7 +17,6 @@ pub use num;
 pub use ordered_float;
 pub use pagerduty_rs;
 pub use parking_lot;
-pub use rdkafka;
 pub use reqwest;
 pub use rust_decimal;
 pub use sentry;
@@ -31,3 +30,6 @@ pub use tracing;
 pub use ulid;
 pub use url;
 pub use uuid;
+
+#[cfg(feature = "rdkafka")]
+pub use rdkafka;

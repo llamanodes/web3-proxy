@@ -16,11 +16,13 @@ mod pagerduty;
 mod popularity_contest;
 mod proxyd;
 mod rpc_accounting;
-mod search_kafka;
 mod sentryd;
 mod transfer_key;
 mod user_export;
 mod user_import;
+
+#[cfg(feature = "rdkafka")]
+mod search_kafka;
 
 pub use self::change_admin_status::ChangeAdminStatusSubCommand;
 pub use self::change_user_address::ChangeUserAddressSubCommand;
@@ -40,8 +42,10 @@ pub use self::pagerduty::PagerdutySubCommand;
 pub use self::popularity_contest::PopularityContestSubCommand;
 pub use self::proxyd::ProxydSubCommand;
 pub use self::rpc_accounting::RpcAccountingSubCommand;
-pub use self::search_kafka::SearchKafkaSubCommand;
 pub use self::sentryd::SentrydSubCommand;
 pub use self::transfer_key::TransferKeySubCommand;
 pub use self::user_export::UserExportSubCommand;
 pub use self::user_import::UserImportSubCommand;
+
+#[cfg(feature = "rdkafka")]
+pub use self::search_kafka::SearchKafkaSubCommand;
