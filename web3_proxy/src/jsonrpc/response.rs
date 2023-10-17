@@ -39,11 +39,6 @@ impl ParsedResponse {
 impl ParsedResponse<Arc<RawValue>> {
     pub fn from_response_data(data: ForwardedResponse<Arc<RawValue>>, id: Box<RawValue>) -> Self {
         match data {
-            ForwardedResponse::NullResult => {
-                let x: Box<RawValue> = Default::default();
-                // TODO: how can we make this generic if this always wants to be a Box<RawValue>?. Do we even want to keep NullResult?
-                Self::from_result(Arc::from(x), id)
-            }
             ForwardedResponse::RpcError { error_data, .. } => Self::from_error(error_data, id),
             ForwardedResponse::Result { value, .. } => Self::from_result(value, id),
         }
@@ -311,7 +306,7 @@ where
         Ok(Self::Parsed(val))
     }
 
-    // TODO: error handling
+    /// TODO: rewrite this to go to a refactored version of ForwardedResponse. (And then rename ForwardedResponse to ParsedResponse cuz its a better name?)
     pub async fn parsed(self) -> Web3ProxyResult<ParsedResponse<T>> {
         match self {
             Self::Parsed(resp, ..) => Ok(resp),
