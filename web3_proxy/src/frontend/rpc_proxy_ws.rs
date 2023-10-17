@@ -397,8 +397,8 @@ async fn websocket_proxy_web3_rpc(
             let response =
                 jsonrpc::ParsedResponse::from_value(json!(partial_response), web3_request.id());
 
-            // TODO: better way of passing in ParsedResponse
             let response = jsonrpc::SingleResponse::Parsed(response);
+
             web3_request.add_response(&response);
             let response = response.parsed().await.expect("Response already parsed");
 

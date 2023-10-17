@@ -7,7 +7,7 @@ use crate::frontend::authorization::Authorization;
 use crate::globals::{global_db_conn, DatabaseError, APP, DB_CONN, DB_REPLICA};
 use crate::jsonrpc::{
     self, JsonRpcErrorData, JsonRpcParams, JsonRpcRequestEnum, JsonRpcResultData, LooseId,
-    SingleRequest, SingleResponse, ValidatedRequest,
+    ParsedResponse, SingleRequest, SingleResponse, ValidatedRequest,
 };
 use crate::relational_db::{connect_db, migrate_db};
 use crate::response_cache::{ForwardedResponse, JsonRpcResponseCache, JsonRpcResponseWeigher};
@@ -47,7 +47,7 @@ use std::time::Duration;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc, oneshot, watch, Semaphore};
 use tokio::task::{yield_now, JoinHandle};
-use tokio::time::{sleep, sleep_until, timeout, timeout_at, Instant};
+use tokio::time::{sleep, sleep_until, timeout_at, Instant};
 use tracing::{error, info, trace, warn};
 
 // TODO: make this customizable?
@@ -1168,29 +1168,13 @@ impl App {
         let (code, response) = match last_response {
             Ok(response_data) => {
                 web3_request.error_response.store(false, Ordering::Relaxed);
+
+                // TODO: is it true that all jsonrpc errors are user errors?
                 web3_request
                     .user_error_response
-                    .store(false, Ordering::Relaxed);
+                    .store(response_data.is_jsonrpc_err(), Ordering::Relaxed);
 
                 (StatusCode::OK, response_data)
-            }
-            Err(err @ Web3ProxyError::NullJsonRpcResult) => {
-                web3_request.error_response.store(false, Ordering::Relaxed);
-                web3_request
-                    .user_error_response
-                    .store(false, Ordering::Relaxed);
-
-                err.as_json_response_parts(web3_request.id())
-            }
-            Err(Web3ProxyError::JsonRpcResponse(response_data)) => {
-                web3_request.error_response.store(false, Ordering::Relaxed);
-                web3_request
-                    .user_error_response
-                    .store(response_data.is_error(), Ordering::Relaxed);
-
-                let response =
-                    jsonrpc::ParsedResponse::from_response_data(response_data, web3_request.id());
-                (StatusCode::OK, response.into())
             }
             Err(err) => {
                 // max tries exceeded. return the error
@@ -1628,11 +1612,11 @@ impl App {
 
                     let x: SingleResponse = if let Some(data) = self.jsonrpc_response_cache.get(&cache_key).await {
                         // it was cached! easy!
-                        // TODO: wait. this currently panics. why?
                         jsonrpc::ParsedResponse::from_response_data(data, web3_request.id()).into()
                     } else if self.jsonrpc_response_failed_cache_keys.contains_key(&cache_key) {
-                        // this is a cache_key that we know won't cache
-                        // NOTICE! We do **NOT** use get which means the key's hotness is not updated. we don't use time-to-idler here so thats fine. but be careful if that changes
+                        // this is a request that we have previously failed to cache. don't try the cache again
+                        // TODO: is "contains_key" okay, or do we need "get($cache_key).await"?
+                        // TODO: DRY. we do this timeout and try_proxy_connection below, too.
                         timeout_at(
                             web3_request.expire_at(),
                             self.balanced_rpcs
@@ -1641,109 +1625,59 @@ impl App {
                             )
                         ).await??
                     } else {
-                        // TODO: acquire a semaphore from a map with the cache key as the key
-                        // TODO: try it, if that fails, then we are already running. wait until the semaphore completes and then run on. they will all go only one at a time though
-                        // TODO: if we got the semaphore, do the try_get_with
-                        // TODO: if the response is too big to cache mark the cache_key as not cacheable. maybe CacheMode can check that cache?
+                        // we used to have a semaphore here, but its faster to just allow duplicate requests while the first is still in flight
+                        // we might do some duplicate requests here, but it seems worth it to get rid of the Arc errors.
+                        let response_data = timeout_at(
+                            web3_request.expire_at(),
+                            self.balanced_rpcs
+                            .try_proxy_connection::<Arc<RawValue>>(
+                                web3_request,
+                            )
+                        ).await?;
 
-                        let s = self.jsonrpc_response_semaphores.get_with(cache_key, async move {
-                            Arc::new(Semaphore::new(1))
-                        }).await;
+                        match response_data {
+                            Ok(mut x) => {
+                                match &x {
+                                    SingleResponse::Parsed(x) => {
+                                        // TODO: don't serialize here! we should already know the size!
+                                        let len = serde_json::to_string(&x).unwrap().len();
 
-                        // TODO: don't always do 1 second. use the median request latency instead
-                        let mut x = match timeout(Duration::from_secs(1), s.acquire_owned()).await {
-                            Err(_) => {
-                                // TODO: should we try to cache this? whatever has the semaphore //should// handle that for us
-                                timeout_at(
-                                    web3_request.expire_at(),
-                                    self.balanced_rpcs
-                                    .try_proxy_connection::<Arc<RawValue>>(
-                                        web3_request,
-                                    )
-                                ).await??
-                            }
-                            Ok(_p) => {
-                                // we got the permit! we are either first, or we were waiting a short time to get it in which case this response should be cached
-                                // TODO: clone less? its spawned so i don't think we can
-                                let f = {
-                                    let app = self.clone();
-                                    let web3_request = web3_request.clone();
+                                        if len <= max_response_cache_bytes {
+                                            let cached = ForwardedResponse::from(x.payload.clone());
 
-                                    async move {
-                                        app
-                                            .jsonrpc_response_cache
-                                            .try_get_with::<_, Web3ProxyError>(cache_key, async {
-                                                // TODO: dynamic timeout based on whats left on web3_request
-                                                let response_data = timeout_at(web3_request.expire_at(), app.balanced_rpcs
-                                                    .try_proxy_connection::<Arc<RawValue>>(
-                                                        &web3_request,
-                                                )).await;
-
-                                                match response_data {
-                                                    Ok(response_data) => {
-                                                        if !web3_request.cache_jsonrpc_errors() && let Err(err) = response_data {
-                                                            // if we are not supposed to cache jsonrpc errors,
-                                                            // then we must not convert Provider errors into a ForwardedResponse
-                                                            // return all the errors now. moka will not cache Err results
-                                                            Err(err)
-                                                        } else {
-                                                            // convert jsonrpc errors into ForwardedResponse, but leave the rest as errors
-                                                            let response_data: ForwardedResponse<Arc<RawValue>> = response_data.try_into()?;
-
-                                                            if response_data.is_null() {
-                                                                // don't ever cache "null" as a success. its too likely to be a problem
-                                                                Err(Web3ProxyError::NullJsonRpcResult)
-                                                            } else if response_data.num_bytes() > max_response_cache_bytes {
-                                                                // don't cache really large requests
-                                                                // TODO: emit a stat
-                                                                Err(Web3ProxyError::JsonRpcResponse(response_data))
-                                                            } else {
-                                                                // TODO: response data should maybe be Arc<ForwardedResponse<Box<RawValue>>>, but that's more work
-                                                                Ok(response_data)
-                                                            }
-                                                        }
-                                                    }
-                                                    Err(err) => Err(Web3ProxyError::from(err)),
-                                                }
-                                            }).await
-                                    }
-                                };
-
-                                // this is spawned so that if the client disconnects, the app keeps polling the future with a lock inside the moka cache
-                                // TODO: is this expect actually safe!? could there be a background process that still has the arc?
-                                let x = match tokio::spawn(f).await? {
-                                    Ok(response_data) => Ok(jsonrpc::ParsedResponse::from_response_data(response_data, Default::default()).into()),
-                                    Err(err) => {
-                                        self.jsonrpc_response_failed_cache_keys.insert(cache_key, ()).await;
-
-                                        if let Web3ProxyError::StreamResponse(x) = err.as_ref() {
-                                            if let Some(x) = x.lock().take() {
-                                                Ok(jsonrpc::SingleResponse::Stream(x))
-                                            } else {
-                                                let method = web3_request.inner.method();
-                                                let params = web3_request.inner.params();
-                                                let err: Web3ProxyError = anyhow::anyhow!("stream was already taken. please report this in Discord. method={:?} params={:?}", method, params).into();
-
-                                                Err(Arc::new(err))
-                                            }
+                                            self.jsonrpc_response_cache.insert(cache_key, cached).await;
                                         } else {
-                                            Err(err)
+                                            self.jsonrpc_response_failed_cache_keys.insert(cache_key, ()).await;
                                         }
-                                    },
-                                };
+                                    }
+                                    SingleResponse::Stream(..) => {
+                                        self.jsonrpc_response_failed_cache_keys.insert(cache_key, ()).await;
+                                    }
+                                }
 
-                                let mut x = x?;
-
-                                // clear the id. theres no point including it in our cached response
-                                x.set_id(Default::default());
+                                x.set_id(web3_request.id());
 
                                 x
                             }
-                        };
+                            Err(err) => {
+                                if web3_request.cache_jsonrpc_errors() {
+                                    // we got an error, but we are supposed to cache jsonrpc errors. 
+                                    let x: Result<ForwardedResponse<Arc<RawValue>>, Web3ProxyError> = err.try_into();
 
-                        x.set_id(web3_request.id());
+                                    if x.is_err() {
+                                        // we still have an Err. it must not have been a jsonrpc error
+                                        self.jsonrpc_response_failed_cache_keys.insert(cache_key, ()).await;
+                                    }
 
-                        x
+                                    // TODO: needing multiple into/try_into/from must be inefficient. investigate this
+                                    ParsedResponse::from_response_data(x?, web3_request.id()).into()
+                                } else {
+                                    // we got an error, and we are not supposed to cache jsonrpc errors. exit early
+                                    self.jsonrpc_response_failed_cache_keys.insert(cache_key, ()).await;
+                                    return Err(err);
+                                }
+                            }
+                        }
                     };
 
                     x

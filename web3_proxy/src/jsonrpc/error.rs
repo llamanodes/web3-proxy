@@ -3,7 +3,7 @@ use std::borrow::Cow;
 
 // TODO: impl Error on this?
 /// All jsonrpc errors use this structure
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct JsonRpcErrorData {
     /// The error code
     pub code: i64,
@@ -15,16 +15,16 @@ pub struct JsonRpcErrorData {
 }
 
 impl JsonRpcErrorData {
-    pub fn num_bytes(&self) -> usize {
+    pub fn num_bytes(&self) -> u64 {
         serde_json::to_string(self)
             .expect("should always serialize")
-            .len()
+            .len() as u64
     }
 
-    pub fn is_retryable(&self) -> bool {
-        // TODO: move stuff from request to here
-        todo!()
-    }
+    // pub fn is_retryable(&self) -> bool {
+    //     // TODO: move stuff from request to here
+    //     todo!()
+    // }
 }
 
 impl From<&'static str> for JsonRpcErrorData {

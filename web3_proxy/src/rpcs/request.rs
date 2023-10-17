@@ -340,7 +340,7 @@ impl OpenRequestHandle {
         // true if we got a jsonrpc result. a jsonrpc error or other error is false.
         // TODO: counters for errors vs jsonrpc vs success?
         let response_is_success = match &response {
-            Ok(jsonrpc::SingleResponse::Parsed(x)) => {
+            Ok(jsonrpc::SingleResponse::Parsed(x, ..)) => {
                 matches!(&x.payload, ResponsePayload::Success { .. })
             }
             Ok(jsonrpc::SingleResponse::Stream(..)) => true,
@@ -368,7 +368,7 @@ impl OpenRequestHandle {
             }
 
             let response_type: ResponseType = match &response {
-                Ok(jsonrpc::SingleResponse::Parsed(x)) => match &x.payload {
+                Ok(jsonrpc::SingleResponse::Parsed(x, ..)) => match &x.payload {
                     ResponsePayload::Success { .. } => unreachable!(),
                     ResponsePayload::Error { error } => {
                         trace!(?error, "jsonrpc error data");

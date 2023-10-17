@@ -179,27 +179,21 @@ pub enum ResponseOrBytes<'a> {
     Json(&'a serde_json::Value),
     Response(&'a jsonrpc::SingleResponse),
     Error(&'a Web3ProxyError),
-    Bytes(usize),
-}
-
-impl<'a> From<u64> for ResponseOrBytes<'a> {
-    fn from(value: u64) -> Self {
-        Self::Bytes(value as usize)
-    }
+    Bytes(u64),
 }
 
 impl ResponseOrBytes<'_> {
-    pub fn num_bytes(&self) -> usize {
+    pub fn num_bytes(&self) -> u64 {
         match self {
             Self::Json(x) => serde_json::to_string(x)
                 .expect("this should always serialize")
-                .len(),
+                .len() as u64,
             Self::Response(x) => x.num_bytes(),
             Self::Bytes(num_bytes) => *num_bytes,
             Self::Error(x) => {
                 let (_, x) = x.as_response_parts();
 
-                x.num_bytes() as usize
+                x.num_bytes()
             }
         }
     }

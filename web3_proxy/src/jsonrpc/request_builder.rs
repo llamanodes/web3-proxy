@@ -554,7 +554,7 @@ impl ValidatedRequest {
         // TODO: fetch? set? should it be None in a Mutex? or a OnceCell?
         let response = response.into();
 
-        let num_bytes = response.num_bytes() as u64;
+        let num_bytes = response.num_bytes();
 
         self.response_bytes
             .fetch_add(num_bytes, atomic::Ordering::Relaxed);

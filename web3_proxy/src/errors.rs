@@ -1,7 +1,7 @@
 //! Utlities for logging errors for admins and displaying errors to users.
 
 use crate::frontend::authorization::Authorization;
-use crate::jsonrpc::{self, JsonRpcErrorData, ParsedResponse};
+use crate::jsonrpc::{self, JsonRpcErrorData, ParsedResponse, StreamResponse};
 use crate::response_cache::ForwardedResponse;
 use crate::rpcs::provider::EthersHttpProvider;
 use axum::extract::rejection::JsonRejection;
@@ -19,7 +19,6 @@ use http::header::InvalidHeaderValue;
 use http::uri::InvalidUri;
 use ipnet::AddrParseError;
 use migration::sea_orm::DbErr;
-use parking_lot::Mutex;
 use redis_rate_limiter::redis::RedisError;
 use redis_rate_limiter::RedisPoolError;
 use reqwest::header::ToStrError;
@@ -136,16 +135,6 @@ pub enum Web3ProxyError {
     #[from(ignore)]
     MethodNotFound(Cow<'static, str>),
     NoVolatileRedisDatabase,
-    /// make it easy to skip caching large results
-    #[error(ignore)]
-    #[display(fmt = "{:?}", _0)]
-    JsonRpcResponse(ForwardedResponse<Arc<RawValue>>),
-    /// make it easy to skip caching streaming results
-    #[error(ignore)]
-    #[display(fmt = "{:?}", _0)]
-    StreamResponse(Mutex<Option<jsonrpc::StreamResponse<Arc<RawValue>>>>),
-    /// make it easy to skip caching null results
-    NullJsonRpcResult,
     OriginRequired,
     #[error(ignore)]
     #[from(ignore)]
@@ -171,6 +160,9 @@ pub enum Web3ProxyError {
     /// simple way to return an error message to the user and an anyhow to our logs
     #[display(fmt = "{}, {}, {:?}", _0, _1, _2)]
     StatusCode(StatusCode, Cow<'static, str>, Option<serde_json::Value>),
+    #[display(fmt = "streaming response")]
+    #[error(ignore)]
+    StreamResponse(StreamResponse<Arc<RawValue>>),
     #[cfg(feature = "stripe")]
     StripeWebhookError(stripe::WebhookError),
     /// TODO: what should be attached to the timout?
@@ -828,17 +820,6 @@ impl Web3ProxyError {
                     },
                 )
             }
-            Self::JsonRpcResponse(response_enum) => {
-                // TODO: shame we have to clone, but its an Arc so its not terrible
-                return (StatusCode::OK, response_enum.clone());
-            }
-            Self::StreamResponse(_resp) => {
-                // TODO: better way of doing this?
-                unreachable!("stream is pulled out, not used here");
-            }
-            Self::NullJsonRpcResult => {
-                return (StatusCode::OK, ForwardedResponse::NullResult);
-            }
             Self::OriginRequired => {
                 trace!("OriginRequired");
                 (
@@ -1045,6 +1026,10 @@ impl Web3ProxyError {
                         data: data.clone(),
                     },
                 )
+            }
+            Self::StreamResponse(..) => {
+                // TODO: should it really?
+                unimplemented!("streaming should be handled elsewhere");
             }
             #[cfg(feature = "stripe")]
             Self::StripeWebhookError(err) => {

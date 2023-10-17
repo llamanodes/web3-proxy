@@ -6,6 +6,7 @@ use axum::body::StreamBody;
 use axum::response::IntoResponse;
 use axum::Json;
 use bytes::{Bytes, BytesMut};
+use derivative::Derivative;
 use futures_util::stream::{self, StreamExt};
 use futures_util::TryStreamExt;
 use serde::{de, Deserialize, Serialize};
@@ -19,7 +20,7 @@ pub trait JsonRpcResultData = serde::Serialize + serde::de::DeserializeOwned + f
 
 /// TODO: borrow values to avoid allocs if possible
 /// TODO: lots of overlap with `SingleForwardedResponse`
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct ParsedResponse<T = Arc<RawValue>> {
     pub jsonrpc: String,
     pub id: Box<RawValue>,
@@ -193,30 +194,32 @@ where
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum ResponsePayload<T> {
     Success { result: T },
     Error { error: JsonRpcErrorData },
 }
 
-#[derive(Debug)]
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub struct StreamResponse<T> {
     _t: PhantomData<T>,
     buffer: Bytes,
+    num_bytes: Option<u64>,
+    #[derivative(Debug = "ignore")]
     response: reqwest::Response,
     web3_request: Arc<ValidatedRequest>,
 }
 
 impl<T> StreamResponse<T> {
-    // TODO: error handing
     pub async fn read(self) -> Web3ProxyResult<ParsedResponse<T>>
     where
         T: de::DeserializeOwned,
     {
         let mut buffer = BytesMut::with_capacity(self.buffer.len());
-        buffer.extend_from_slice(&self.buffer);
-        buffer.extend_from_slice(&self.response.bytes().await?);
+        buffer.extend(self.buffer);
+        buffer.extend(self.response.bytes().await?);
         let parsed = serde_json::from_slice(&buffer)?;
         Ok(parsed)
     }
@@ -227,7 +230,7 @@ impl<T> IntoResponse for StreamResponse<T> {
         let stream = stream::once(async { Ok::<_, reqwest::Error>(self.buffer) })
             .chain(self.response.bytes_stream())
             .map_ok(move |x| {
-                let len = x.len();
+                let len = x.len() as u64;
 
                 self.web3_request.add_response(len);
 
@@ -241,6 +244,8 @@ impl<T> IntoResponse for StreamResponse<T> {
 #[derive(Debug)]
 pub enum SingleResponse<T = Arc<RawValue>> {
     /// TODO: save the size here so we don't have to serialize again
+    /// TODO: before doing that, make sure we don't swap back and forth between parsed and stream and single and forwarded and end up serializing too many times
+    /// TODO: should this be a ForwardedResponse instead of ParsedResponse
     Parsed(ParsedResponse<T>),
     Stream(StreamResponse<T>),
 }
@@ -249,6 +254,13 @@ impl<T> SingleResponse<T>
 where
     T: de::DeserializeOwned + Serialize,
 {
+    pub fn is_jsonrpc_err(&self) -> bool {
+        match self {
+            Self::Parsed(resp, ..) => matches!(resp.payload, ResponsePayload::Error { .. }),
+            Self::Stream(..) => false,
+        }
+    }
+
     // TODO: threshold from configs
     // TODO: error handling
     // TODO: if a large stream's response's initial chunk "error" then we should buffer it
@@ -261,19 +273,21 @@ where
             // short
             Some(len) if len <= nbytes => Ok(Self::from_bytes(response.bytes().await?)?),
             // long
-            Some(_) => Ok(Self::Stream(StreamResponse {
+            Some(len) => Ok(Self::Stream(StreamResponse {
                 _t: PhantomData::<T>,
                 buffer: Bytes::new(),
+                num_bytes: Some(len),
                 response,
                 web3_request: web3_request.clone(),
             })),
             // unknown length. maybe compressed. maybe streaming. maybe both
             None => {
-                let mut buffer = BytesMut::new();
+                // todo: this might over-allocate, but it's probably fine
+                let mut buffer = BytesMut::with_capacity(nbytes as usize);
                 while (buffer.len() as u64) < nbytes {
                     match response.chunk().await? {
                         Some(chunk) => {
-                            buffer.extend_from_slice(&chunk);
+                            buffer.extend(chunk);
                         }
                         None => {
                             // it was short
@@ -287,6 +301,7 @@ where
                 Ok(Self::Stream(StreamResponse {
                     _t: PhantomData::<T>,
                     buffer,
+                    num_bytes: None,
                     response,
                     web3_request: web3_request.clone(),
                 }))
@@ -302,26 +317,23 @@ where
     // TODO: error handling
     pub async fn parsed(self) -> Web3ProxyResult<ParsedResponse<T>> {
         match self {
-            Self::Parsed(resp) => Ok(resp),
-            Self::Stream(resp) => resp.read().await,
+            Self::Parsed(resp, ..) => Ok(resp),
+            Self::Stream(resp, ..) => resp.read().await,
         }
     }
 
-    pub fn num_bytes(&self) -> usize {
+    pub fn num_bytes(&self) -> u64 {
         match self {
             Self::Parsed(response) => serde_json::to_string(response)
                 .expect("this should always serialize")
-                .len(),
-            Self::Stream(response) => match response.response.content_length() {
-                Some(len) => len as usize,
-                None => 0,
-            },
+                .len() as u64,
+            Self::Stream(response) => response.num_bytes.unwrap_or(0),
         }
     }
 
     pub fn set_id(&mut self, id: Box<RawValue>) {
         match self {
-            SingleResponse::Parsed(x) => {
+            SingleResponse::Parsed(x, ..) => {
                 x.id = id;
             }
             SingleResponse::Stream(..) => {
@@ -343,8 +355,8 @@ where
 {
     fn into_response(self) -> axum::response::Response {
         match self {
-            Self::Parsed(resp) => Json(resp).into_response(),
-            Self::Stream(resp) => resp.into_response(),
+            Self::Parsed(resp, ..) => Json(resp).into_response(),
+            Self::Stream(resp, ..) => resp.into_response(),
         }
     }
 }

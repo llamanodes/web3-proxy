@@ -123,8 +123,8 @@ impl App {
                                 let response_str = serde_json::to_string(&response_json)
                                     .expect("this should always be valid json");
 
-                                // we could use SingleForwardedResponseEnum::num_bytes() here, but since we already have the string, this is easier
-                                let response_bytes = response_str.len();
+                                // we could use ForwardedResponse::num_bytes() here, but since we already have the string, this is easier
+                                let response_bytes = response_str.len() as u64;
 
                                 // TODO: do clients support binary messages?
                                 // TODO: can we check a content type header?
@@ -212,8 +212,8 @@ impl App {
                                         let response_str = serde_json::to_string(&response_json)
                                             .expect("this should always be valid json");
 
-                                        // we could use SingleForwardedResponseEnum::num_bytes() here, but since we already have the string, this is easier
-                                        let response_bytes = response_str.len();
+                                        // we could use ForwardedResponse::num_bytes() here, but since we already have the string, this is easier
+                                        let response_bytes = response_str.len() as u64;
 
                                         subscription_web3_request.add_response(response_bytes);
 
