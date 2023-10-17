@@ -1427,9 +1427,14 @@ impl App {
                 // that's not really an error. Return the hash like a successful response would.
                 // TODO: move this to a helper function. probably part of try_send_protected
                 if let ForwardedResponse::RpcError{ error_data, ..} = &response {
-                    if error_data.code == -32000
-                        && (error_data.message == "ALREADY_EXISTS: already known"
-                            || error_data.message == "INTERNAL_ERROR: existing tx with same hash")
+                    let acceptable_error_messages = [
+                        "already known",
+                        "ALREADY_EXISTS: already known",
+                        "INTERNAL_ERROR: existing tx with same hash",
+                        "",
+                    ];
+
+                    if acceptable_error_messages.contains(&error_data.message.as_ref())
                     {
                         let params = web3_request.inner.params()
                             .as_array()
