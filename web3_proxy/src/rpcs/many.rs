@@ -475,6 +475,7 @@ impl Web3Rpcs {
 
             match active_request_handle.request::<R>().await {
                 Ok(response) => {
+                    // TODO: some jsonrpc errors should probably be retried. maybe save in errors
                     return Ok(response);
                 }
                 Err(error) => {
@@ -486,6 +487,7 @@ impl Web3Rpcs {
             }
         }
 
+        // TODO: find the most common error
         if let Some(err) = errors.into_iter().next() {
             return Err(err);
         }
