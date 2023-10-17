@@ -90,7 +90,6 @@ pub type JsonRpcResponseCache = Cache<u64, ForwardedResponse<Arc<RawValue>>>;
 /// TODO: think about this more. there is a lot of overlap with ParsedResponse
 #[derive(Clone, Debug)]
 pub enum ForwardedResponse<T> {
-    NullResult,
     Result {
         value: T,
         num_bytes: u64,
@@ -105,7 +104,6 @@ pub enum ForwardedResponse<T> {
 impl<R> ForwardedResponse<R> {
     pub fn num_bytes(&self) -> u64 {
         match self {
-            Self::NullResult => 1,
             Self::Result { num_bytes, .. } => *num_bytes,
             Self::RpcError { num_bytes, .. } => *num_bytes,
         }
@@ -113,7 +111,6 @@ impl<R> ForwardedResponse<R> {
 
     pub fn is_error(&self) -> bool {
         match self {
-            Self::NullResult => false,
             Self::Result { .. } => false,
             Self::RpcError { .. } => true,
         }
@@ -122,14 +119,13 @@ impl<R> ForwardedResponse<R> {
 
 impl<R> ForwardedResponse<Option<R>> {
     pub fn is_null(&self) -> bool {
-        matches!(self, Self::NullResult | Self::Result { value: None, .. })
+        matches!(self, Self::Result { value: None, .. })
     }
 }
 
 impl ForwardedResponse<Arc<RawValue>> {
     pub fn is_null(&self) -> bool {
         match self {
-            Self::NullResult => true,
             Self::Result { value, .. } => value.get() == "null",
             _ => false,
         }

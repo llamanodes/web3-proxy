@@ -6,7 +6,6 @@ use axum::body::StreamBody;
 use axum::response::IntoResponse;
 use axum::Json;
 use bytes::{Bytes, BytesMut};
-use derivative::Derivative;
 use futures_util::stream::{self, StreamExt};
 use futures_util::TryStreamExt;
 use serde::{de, Deserialize, Serialize};
@@ -20,7 +19,7 @@ pub trait JsonRpcResultData = serde::Serialize + serde::de::DeserializeOwned + f
 
 /// TODO: borrow values to avoid allocs if possible
 /// TODO: lots of overlap with `SingleForwardedResponse`
-#[derive(Clone, Debug, Serialize)]
+#[derive(Debug, Serialize)]
 pub struct ParsedResponse<T = Arc<RawValue>> {
     pub jsonrpc: String,
     pub id: Box<RawValue>,
@@ -201,13 +200,11 @@ pub enum ResponsePayload<T> {
     Error { error: JsonRpcErrorData },
 }
 
-#[derive(Derivative)]
-#[derivative(Debug)]
+#[derive(Debug)]
 pub struct StreamResponse<T> {
     _t: PhantomData<T>,
     buffer: Bytes,
     num_bytes: Option<u64>,
-    #[derivative(Debug = "ignore")]
     response: reqwest::Response,
     web3_request: Arc<ValidatedRequest>,
 }
