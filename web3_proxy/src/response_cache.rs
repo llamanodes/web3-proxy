@@ -11,7 +11,7 @@ use ethers::{
 };
 use hashbrown::hash_map::DefaultHashBuilder;
 use moka::future::Cache;
-use serde_json::value::RawValue;
+use serde_json::value::{to_raw_value, RawValue};
 use std::{
     hash::{BuildHasher, Hash, Hasher},
     sync::Arc,
@@ -184,7 +184,7 @@ impl TryFrom<Web3ProxyResult<jsonrpc::SingleResponse>> for ForwardedResponse<Arc
 
 impl From<serde_json::Value> for ForwardedResponse<Arc<RawValue>> {
     fn from(value: serde_json::Value) -> Self {
-        let value = RawValue::from_string(value.to_string()).unwrap();
+        let value = to_raw_value(&value).unwrap();
 
         value.into()
     }
