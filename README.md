@@ -106,6 +106,12 @@ Compare 3 RPCs:
 web3_proxy_cli health_compass https://eth.llamarpc.com https://eth-ski.llamarpc.com https://rpc.ankr.com/eth
 ```
 
+Manually process a deposit:
+
+```
+curl -X POST http://127.0.0.1:8544/user/balance/0xYOURTXID
+```
+
 ### Run migrations
 
 Generally it is simplest to just run the app to run migrations. It runs migrations on start.
