@@ -426,27 +426,13 @@ impl CacheMode {
                     cache_errors: true,
                 })
             }
-            "eth_getTransactionByHash" => {
-                // TODO: not sure how best to look these up
-                // try full nodes first. retry will use archive
-                Ok(CacheMode::Standard {
-                    block: head_block.into(),
-                    cache_errors: true,
-                })
-            }
             "eth_getTransactionByBlockHashAndIndex" => {
                 // TODO: check a Cache of recent hashes
                 // try full nodes first. retry will use archive
                 Ok(CacheMode::SuccessForever)
             }
-            "eth_getTransactionReceipt" => {
-                // TODO: not sure how best to look these up
-                // try full nodes first. retry will use archive
-                Ok(CacheMode::Standard {
-                    block: head_block.into(),
-                    cache_errors: true,
-                })
-            }
+            "eth_getTransactionByHash" => Ok(CacheMode::Never),
+            "eth_getTransactionReceipt" => Ok(CacheMode::Never),
             "eth_getUncleByBlockHashAndIndex" => {
                 // TODO: check a Cache of recent hashes
                 // try full nodes first. retry will use archive
