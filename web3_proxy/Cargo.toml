@@ -1,6 +1,6 @@
 [package]
 name = "web3_proxy"
-version = "1.43.55"
+version = "1.43.56"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -91,7 +91,7 @@ tower-http = { version = "0.4.4", features = ["cors", "normalize-path", "sensiti
 tracing = "0.1"
 ulid = { version = "1.1.0", features = ["rand", "uuid", "serde"] }
 url = { version = "2.4.1" }
-uuid = { version = "1.5.0", default-features = false, features = ["fast-rng", "v4", "zerocopy"] }
+uuid = { version = "1.5.0", default-features = false }
 
 # TODO: why doesn't this work in dev-dependencies. i think because of how we split web3_proxy and web3_proxy_cli. im not sure that is even helping anymore
 test-log = { version = "0.2.13", default-features = false, features = ["trace"] }

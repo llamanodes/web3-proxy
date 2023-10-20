@@ -42,6 +42,7 @@ use url::Url;
 pub struct Web3Rpc {
     pub name: String,
     pub chain_id: u64,
+    pub client_version: RwLock<Option<String>>,
     pub block_interval: Duration,
     pub display_name: Option<String>,
     pub db_conn: Option<DatabaseConnection>,
@@ -492,6 +493,34 @@ impl Web3Rpc {
     /// query the web3 provider to confirm it is on the expected chain with the expected data available
     /// TODO: this currently checks only the http if both http and ws are set. it should check both and make sure they match
     async fn check_provider(self: &Arc<Self>, chain_id: u64) -> Web3ProxyResult<()> {
+        // TODO: different handlers for backup vs primary
+        let error_handler = Some(Level::TRACE.into());
+
+        match self
+            .internal_request::<_, String>(
+                "web3_clientVersion".into(),
+                &(),
+                error_handler,
+                Some(Duration::from_secs(5)),
+            )
+            .await
+        {
+            Ok(client_version) => {
+                // this is a sync lock, but we only keep it open for a short time
+                // TODO: something more friendly to async that also works with serde's Serialize
+                let mut lock = self.client_version.write();
+
+                *lock = Some(client_version);
+            }
+            Err(err) => {
+                let mut lock = self.client_version.write();
+
+                *lock = Some(format!("error: {}", err));
+
+                error!(?err, "failed fetching client version of {}", self);
+            }
+        }
+
         // check the server's chain_id here
         // TODO: some public rpcs (on bsc and fantom) do not return an id and so this ends up being an error
         // TODO: what should the timeout be? should there be a request timeout?
@@ -500,7 +529,7 @@ impl Web3Rpc {
             .internal_request(
                 "eth_chainId".into(),
                 &[(); 0],
-                Some(Level::TRACE.into()),
+                error_handler,
                 Some(Duration::from_secs(5)),
             )
             .await?;
@@ -1337,7 +1366,7 @@ impl Serialize for Web3Rpc {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("Web3Rpc", 15)?;
+        let mut state = serializer.serialize_struct("Web3Rpc", 16)?;
 
         // the url is excluded because it likely includes private information. just show the name that we use in keys
         state.serialize_field("name", &self.name)?;
@@ -1345,6 +1374,8 @@ impl Serialize for Web3Rpc {
         state.serialize_field("display_name", &self.display_name)?;
 
         state.serialize_field("backup", &self.backup)?;
+
+        state.serialize_field("web3_clientVersion", &self.client_version.read().as_ref())?;
 
         match self.block_data_limit.load(atomic::Ordering::Acquire) {
             u64::MAX => {

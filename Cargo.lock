@@ -6412,9 +6412,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "88ad59a7560b41a70d191093a945f0b87bc1deeda46fb237479708a1d6b6cdfc"
 dependencies = [
  "getrandom 0.2.10",
- "rand 0.8.5",
  "serde",
- "zerocopy",
 ]
 
 [[package]]
@@ -6575,7 +6573,7 @@ dependencies = [
 
 [[package]]
 name = "web3_proxy"
-version = "1.43.55"
+version = "1.43.56"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -6650,7 +6648,7 @@ dependencies = [
 
 [[package]]
 name = "web3_proxy_cli"
-version = "1.43.55"
+version = "1.43.56"
 dependencies = [
  "console-subscriber",
  "env_logger",
@@ -6845,27 +6843,6 @@ name = "yansi"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09041cd90cf85f7f8b2df60c646f853b7f535ce68f85244eb6731cf89fa498ec"
-
-[[package]]
-name = "zerocopy"
-version = "0.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96f8f25c15a0edc9b07eb66e7e6e97d124c0505435c382fde1ab7ceb188aa956"
-dependencies = [
- "byteorder",
- "zerocopy-derive",
-]
-
-[[package]]
-name = "zerocopy-derive"
-version = "0.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "855e0f6af9cd72b87d8a6c586f3cb583f5cdcc62c2c80869d8cd7e96fdf7ee20"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.38",
-]
 
 [[package]]
 name = "zeroize"
