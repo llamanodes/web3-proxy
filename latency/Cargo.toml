@@ -9,7 +9,7 @@ edition = "2021"
 portable-atomic = { version = "1.4.3", features = ["float"] }
 serde = { version = "1.0.189", features = [] }
 tokio = { version = "1.33.0", features = ["full"] }
-tracing = "0.1.39"
+tracing = "0.1.40"
 watermill = "0.1.1"
 
 [dev-dependencies]
