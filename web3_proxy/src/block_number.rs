@@ -469,6 +469,7 @@ impl CacheMode {
         }
     }
 
+    #[inline]
     pub fn cache_jsonrpc_errors(&self) -> bool {
         match self {
             Self::Never => false,
@@ -478,6 +479,7 @@ impl CacheMode {
         }
     }
 
+    #[inline]
     pub fn from_block(&self) -> Option<&BlockNumAndHash> {
         match self {
             Self::SuccessForever => None,
@@ -492,6 +494,7 @@ impl CacheMode {
         !matches!(self, Self::Never)
     }
 
+    #[inline]
     pub fn to_block(&self) -> Option<&BlockNumAndHash> {
         match self {
             Self::SuccessForever => None,

@@ -501,6 +501,7 @@ impl ValidatedRequest {
         self.cache_mode.to_block().map(|x| *x.num())
     }
 
+    #[inline]
     pub fn min_block_needed(&self) -> Option<U64> {
         if self.archive_request.load(atomic::Ordering::Relaxed) {
             Some(U64::zero())

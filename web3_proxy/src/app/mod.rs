@@ -1633,6 +1633,16 @@ impl App {
                         method
                     )).into());
                 }
+                if method.starts_with("debug_") {
+                    // make sure its premium
+                    if !(self.config.free_subscriptions
+                        || web3_request.authorization.active_premium().await)
+                    {
+                        return Err(Web3ProxyError::AccessDenied(
+                            "debug methods require an active premium account".into(),
+                        ));
+                    }            
+                }
 
                 if web3_request.cache_mode.is_some() {
                     // don't cache anything larger than 16 MiB
