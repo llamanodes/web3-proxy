@@ -1103,6 +1103,10 @@ impl App {
         let bytes = Bytes::from_str(params)
             .map_err(|_| Web3ProxyError::BadRequest("Unable to parse params as bytes".into()))?;
 
+        if bytes.is_empty() {
+            return Err(Web3ProxyError::BadRequest("empty bytes".into()));
+        }
+
         let rlp = Rlp::new(bytes.as_ref());
 
         let tx = Transaction::decode(&rlp).map_err(|_| {
