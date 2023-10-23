@@ -1,6 +1,6 @@
 [package]
 name = "web3_proxy"
-version = "1.43.56"
+version = "1.43.57"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -44,7 +44,7 @@ async-stripe = { version = "0.25.2", default-features = false, features = ["bill
 axum = { version = "0.6.20", features = ["headers", "tracing", "ws"] }
 axum-client-ip = "0.4.2"
 axum-macros = "0.3.8"
-base64 = "0.21.4"
+base64 = "0.21.5"
 bytes = "1.5.0"
 chrono = { version = "0.4.31" }
 derivative = "2.2.0"
@@ -61,7 +61,7 @@ hdrhistogram = "7.5.2"
 hostname = "0.3.1"
 http = "0.2.9"
 hyper = { version = "0.14.27", features = ["full", "nightly"] }
-ipnet = { version = "2.8.0" }
+ipnet = { version = "2.9.0" }
 itertools = "0.11.0"
 listenfd = { version = "1.0.1", optional = true }
 mimalloc = { version = "0.1.39", optional = true }
@@ -86,7 +86,7 @@ strum = { version = "0.25.0", features = ["derive"] }
 time = { version = "0.3" }
 tokio = { version = "1.33.0", features = ["full", "tracing"] }
 tokio-stream = { version = "0.1.14", features = ["sync"] }
-toml = "0.8.2"
+toml = "0.8.4"
 tower-http = { version = "0.4.4", features = ["cors", "normalize-path", "sensitive-headers", "trace"] }
 tracing = "0.1"
 ulid = { version = "1.1.0", features = ["rand", "uuid", "serde"] }
