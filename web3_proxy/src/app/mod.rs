@@ -1289,7 +1289,16 @@ impl App {
         }
 
         let last_response = if let Some(last_success) = last_success {
-            Ok(last_success)
+            if matches!(last_success, SingleResponse::Stream(..))
+                && !(self.config.free_subscriptions
+                    || web3_request.authorization.active_premium().await)
+            {
+                Err(Web3ProxyError::AccessDenied(
+                    "streaming responses require an active premium account".into(),
+                ))
+            } else {
+                Ok(last_success)
+            }
         } else {
             Err(last_error.unwrap_or(anyhow::anyhow!("no success or error").into()))
         };
@@ -1632,16 +1641,6 @@ impl App {
                         "the method {} does not exist/is not available",
                         method
                     )).into());
-                }
-                if method.starts_with("debug_") {
-                    // make sure its premium
-                    if !(self.config.free_subscriptions
-                        || web3_request.authorization.active_premium().await)
-                    {
-                        return Err(Web3ProxyError::AccessDenied(
-                            "debug methods require an active premium account".into(),
-                        ));
-                    }            
                 }
 
                 if web3_request.cache_mode.is_some() {
