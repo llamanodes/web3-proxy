@@ -10,6 +10,7 @@ use futures_util::stream::{self, StreamExt};
 use futures_util::TryStreamExt;
 use serde::{de, Deserialize, Serialize};
 use serde_json::value::RawValue;
+use std::borrow::Cow;
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -21,13 +22,14 @@ pub trait JsonRpcResultData = serde::Serialize + serde::de::DeserializeOwned + f
 /// TODO: lots of overlap with `SingleForwardedResponse`
 #[derive(Debug, Serialize)]
 pub struct ParsedResponse<T = Arc<RawValue>> {
-    pub jsonrpc: String,
+    pub jsonrpc: Cow<'static, str>,
     pub id: Box<RawValue>,
     #[serde(flatten)]
     pub payload: ResponsePayload<T>,
 }
 
 impl ParsedResponse {
+    #[inline]
     pub fn from_value(value: serde_json::Value, id: Box<RawValue>) -> Self {
         let result = serde_json::value::to_raw_value(&value)
             .expect("this should not fail")
@@ -37,6 +39,7 @@ impl ParsedResponse {
 }
 
 impl ParsedResponse<Arc<RawValue>> {
+    #[inline]
     pub fn from_response_data(data: ForwardedResponse<Arc<RawValue>>, id: Box<RawValue>) -> Self {
         match data {
             ForwardedResponse::RpcError { error_data, .. } => Self::from_error(error_data, id),
@@ -46,22 +49,25 @@ impl ParsedResponse<Arc<RawValue>> {
 }
 
 impl<T> ParsedResponse<T> {
+    #[inline]
     pub fn from_result(result: T, id: Box<RawValue>) -> Self {
         Self {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: "2.0".into(),
             id,
             payload: ResponsePayload::Success { result },
         }
     }
 
+    #[inline]
     pub fn from_error(error: JsonRpcErrorData, id: Box<RawValue>) -> Self {
         Self {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: "2.0".into(),
             id,
             payload: ResponsePayload::Error { error },
         }
     }
 
+    #[inline]
     pub fn result(&self) -> Option<&T> {
         match &self.payload {
             ResponsePayload::Success { result } => Some(result),
@@ -69,6 +75,7 @@ impl<T> ParsedResponse<T> {
         }
     }
 
+    #[inline]
     pub fn into_result(self) -> Web3ProxyResult<T> {
         match self.payload {
             ResponsePayload::Success { result } => Ok(result),
@@ -164,7 +171,8 @@ where
                 // jsonrpc version must be present in all responses
                 let jsonrpc = jsonrpc
                     .ok_or_else(|| de::Error::missing_field("jsonrpc"))?
-                    .to_string();
+                    .to_string()
+                    .into();
 
                 let payload = match (result, error) {
                     (Some(result), None) => ResponsePayload::Success { result },

@@ -32,7 +32,7 @@ mod tests {
     #[test]
     fn serialize_response() {
         let obj = ParsedResponse {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: "2.0".into(),
             id: Default::default(),
             payload: ResponsePayload::Success {
                 result: serde_json::value::RawValue::from_string("100".to_string()).unwrap(),
