@@ -218,7 +218,8 @@ impl OpenRequestHandle {
 
             let response = response.error_for_status()?;
 
-            jsonrpc::SingleResponse::read_if_short(response, 1024, &self.web3_request).await
+            // cache 128kb responses
+            jsonrpc::SingleResponse::read_if_short(response, 131_072, &self.web3_request).await
         } else if let Some(p) = self.rpc.ws_provider.load().as_ref() {
             // use the websocket provider if no http provider is available
             let method = self.web3_request.inner.method();
