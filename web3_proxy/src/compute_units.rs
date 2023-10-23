@@ -20,6 +20,10 @@ pub fn default_usd_per_cu(chain_id: u64) -> Decimal {
 }
 
 pub fn default_cu_per_byte(_chain_id: u64, method: &str) -> Decimal {
+    if method.starts_with("debug_") {
+        return Decimal::new(15245, 6);
+    }
+
     match method {
         "eth_subscribe(newPendingTransactions)" => Decimal::new(16, 2),
         _ => Decimal::new(4, 2),
@@ -67,10 +71,18 @@ impl ComputeUnit {
                 (137, "bor_getCurrentValidators") => 10,
                 (137, "bor_getRootHash") => 10,
                 (137, "bor_getSignersAtHash") => 10,
-                (_, "debug_traceBlockByHash") => 497,
-                (_, "debug_traceBlockByNumber") => 497,
-                (_, "debug_traceCall") => 309,
-                (_, "debug_traceTransaction") => 309,
+                (_, "debug_traceBlockByHash") => {
+                    return Self::variable_price(chain_id, method, response_bytes) + 497
+                }
+                (_, "debug_traceBlockByNumber") => {
+                    return Self::variable_price(chain_id, method, response_bytes) + 497
+                }
+                (_, "debug_traceCall") => {
+                    return Self::variable_price(chain_id, method, response_bytes) + 309
+                }
+                (_, "debug_traceTransaction") => {
+                    return Self::variable_price(chain_id, method, response_bytes) + 309
+                }
                 (_, "erigon_forks") => 24,
                 (_, "erigon_getHeaderByHash") => 24,
                 (_, "erigon_getHeaderByNumber") => 24,
@@ -151,22 +163,40 @@ impl ComputeUnit {
                 (_, "web3_clientVersion") => 15,
                 (_, "web3_bundlerVersion") => 15,
                 (_, "web3_sha3") => 15,
-                (_, "ots_getInternalOperations") => 1000,
-                (_, "ots_hasCode") => 1000,
-                (_, "ots_getTransactionError") => 1000,
-                (_, "ots_traceTransaction") => 1000,
-                (_, "ots_getBlockDetails") => 1000,
-                (_, "ots_getBlockDetailsByHash") => 1000,
-                (_, "ots_getBlockTransactions") => 1000,
-                (_, "ots_searchTransactionsBefore") => 1000,
-                (_, "ots_searchTransactionsAfter") => 1000,
+                (_, "ots_getInternalOperations") => {
+                    return Self::variable_price(chain_id, method, response_bytes) + 100
+                }
+                (_, "ots_hasCode") => {
+                    return Self::variable_price(chain_id, method, response_bytes) + 100
+                }
+                (_, "ots_getTransactionError") => {
+                    return Self::variable_price(chain_id, method, response_bytes) + 100
+                }
+                (_, "ots_traceTransaction") => {
+                    return Self::variable_price(chain_id, method, response_bytes) + 100
+                }
+                (_, "ots_getBlockDetails") => {
+                    return Self::variable_price(chain_id, method, response_bytes) + 100
+                }
+                (_, "ots_getBlockDetailsByHash") => {
+                    return Self::variable_price(chain_id, method, response_bytes) + 100
+                }
+                (_, "ots_getBlockTransactions") => {
+                    return Self::variable_price(chain_id, method, response_bytes) + 100
+                }
+                (_, "ots_searchTransactionsBefore") => {
+                    return Self::variable_price(chain_id, method, response_bytes) + 100
+                }
+                (_, "ots_searchTransactionsAfter") => {
+                    return Self::variable_price(chain_id, method, response_bytes) + 100
+                }
                 (_, "ots_getTransactionBySenderAndNonce") => 1000,
                 (_, "ots_getContractCreator") => 1000,
                 (_, method) => {
                     // TODO: emit a stat
-                    // TODO: do some filtering on these to tarpit peers that are trying to do silly things like sql/influx inject
                     warn!("unknown method {}", method);
-                    return Self::unimplemented();
+                    return Self::unimplemented()
+                        + Self::variable_price(chain_id, method, response_bytes).0;
                 }
             }
         };
