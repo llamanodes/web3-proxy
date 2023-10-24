@@ -1340,6 +1340,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "diff"
+version = "0.1.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2889,14 +2895,16 @@ dependencies = [
 
 [[package]]
 name = "lalrpop"
-version = "0.20.1"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83be602e051ada38d90c7841092adabeb585197afe9dabb20e4f8375cc87846e"
+checksum = "da4081d44f4611b66c6dd725e6de3169f9f63905421e8626fcb86b6a898998b8"
 dependencies = [
  "ascii-canvas",
  "bit-set",
+ "diff",
  "ena",
- "itertools 0.11.0",
+ "is-terminal",
+ "itertools 0.10.5",
  "lalrpop-util",
  "petgraph",
  "regex",
@@ -2909,9 +2917,9 @@ dependencies = [
 
 [[package]]
 name = "lalrpop-util"
-version = "0.20.1"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "365d88f9d803538a06641e6736f21d95ecf9226dc1693421212e62c405cdd199"
+checksum = "3f35c735096c0293d313e8f2a641627472b83d01b937177fe76e5e2708d31e0d"
 
 [[package]]
 name = "latency"
@@ -6566,7 +6574,7 @@ dependencies = [
 
 [[package]]
 name = "web3_proxy"
-version = "1.43.59"
+version = "1.43.60"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -6641,7 +6649,7 @@ dependencies = [
 
 [[package]]
 name = "web3_proxy_cli"
-version = "1.43.59"
+version = "1.43.60"
 dependencies = [
  "console-subscriber",
  "env_logger",
