@@ -779,10 +779,9 @@ impl Web3Rpc {
         let mut abort_handles = vec![];
 
         // health check that runs if there haven't been any recent requests
-        let health_handle = if let Some(block_and_rpc_sender) = block_and_rpc_sender.clone() {
+        let health_handle = if block_and_rpc_sender.is_some() {
             // TODO: move this into a proper function
             let rpc = self.clone();
-            let block_map = block_map.clone();
 
             // TODO: how often? different depending on the chain?
             // TODO: reset this timeout when a new block is seen? we need to keep median_request_latency updated though
@@ -812,10 +811,6 @@ impl Web3Rpc {
                         } else {
                             error!(?err, "health check on {} failed", rpc);
                         }
-
-                        // clear the head block since we are unhealthy and shouldn't serve any requests
-                        rpc.send_head_block_result(Ok(None), &block_and_rpc_sender, &block_map)
-                            .await?;
                     } else {
                         rpc.healthy.store(true, atomic::Ordering::Relaxed);
                     }
@@ -881,7 +876,7 @@ impl Web3Rpc {
 
             let f = async move {
                 clone
-                    .subscribe_new_heads(block_and_rpc_sender.clone(), block_map)
+                    .subscribe_new_heads(block_and_rpc_sender, block_map)
                     .await
             };
 
@@ -915,6 +910,9 @@ impl Web3Rpc {
         // exit if any of the futures exit
         let (first_exit, _, _) = select_all(futures).await;
 
+        // mark unhealthy
+        self.healthy.store(false, atomic::Ordering::Relaxed);
+
         debug!(?first_exit, "subscriptions on {} exited", self);
 
         // clear the head block
@@ -928,7 +926,7 @@ impl Web3Rpc {
             a.abort();
         }
 
-        // TODO: tell ethers to disconnect?
+        // TODO: tell ethers to disconnect? i think dropping will do that
         self.ws_provider.store(None);
 
         Ok(())

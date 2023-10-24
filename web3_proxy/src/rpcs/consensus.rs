@@ -624,13 +624,6 @@ impl ConsensusFinder {
                     .await
                     .web3_context("failed caching block")?;
 
-                if let Some(max_age) = self.max_head_block_age {
-                    if rpc_head_block.age() > max_age {
-                        warn!("rpc_head_block from {} is too old! {}", rpc, rpc_head_block);
-                        return Ok(self.remove(&rpc).is_some());
-                    }
-                }
-
                 if let Some(prev_block) = self.insert(rpc, rpc_head_block.clone()).await {
                     // false if this block was already sent by this rpc
                     // true if new block for this rpc
@@ -749,7 +742,25 @@ impl ConsensusFinder {
     ) -> Web3ProxyResult<Option<RankedRpcs>> {
         self.update_tiers().await?;
 
-        let minmax_block = self.rpc_heads.values().minmax_by_key(|&x| x.number());
+        let minmax_block = self
+            .rpc_heads
+            .iter()
+            .filter(|(rpc, x)| {
+                if !rpc.healthy.load(atomic::Ordering::Relaxed) {
+                    // TODO: we might go backwards if this happens. make sure we hold on to highest block from a previous run
+                    return false;
+                }
+
+                if let Some(max_block_age) = self.max_head_block_age {
+                    if x.age() > max_block_age {
+                        return false;
+                    }
+                }
+
+                true
+            })
+            .map(|(_, x)| x)
+            .minmax_by_key(|x| x.number());
 
         let (lowest_block, highest_block) = match minmax_block {
             MinMaxResult::NoElements => return Ok(None),
@@ -764,6 +775,7 @@ impl ConsensusFinder {
         trace!("lowest_block_number: {}", lowest_block.number());
 
         // TODO: move this default. should be in config, not here
+        // TODO: arbitrum needs more slack
         let max_lag_block_number = highest_block_number
             .saturating_sub(self.max_head_block_lag.unwrap_or_else(|| U64::from(5)));
 

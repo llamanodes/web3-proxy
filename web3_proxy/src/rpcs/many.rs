@@ -35,7 +35,7 @@ pub struct Web3Rpcs {
     pub(crate) name: Cow<'static, str>,
     pub(crate) chain_id: u64,
     /// if watch_head_block is some, Web3Rpc inside self will send blocks here when they get them
-    pub(crate) block_sender: mpsc::UnboundedSender<(Option<Web3ProxyBlock>, Arc<Web3Rpc>)>,
+    pub(crate) block_and_rpc_sender: mpsc::UnboundedSender<(Option<Web3ProxyBlock>, Arc<Web3Rpc>)>,
     /// any requests will be forwarded to one (or more) of these connections
     /// TODO: hopefully this not being an async lock will be okay. if you need it across awaits, clone the arc
     pub(crate) by_name: RwLock<HashMap<String, Arc<Web3Rpc>>>,
@@ -139,7 +139,7 @@ impl Web3Rpcs {
             average_block_interval(chain_id).mul_f32((max_head_block_lag.as_u64() * 10) as f32);
 
         let connections = Arc::new(Self {
-            block_sender: block_and_rpc_sender,
+            block_and_rpc_sender,
             blocks_by_hash,
             blocks_by_number,
             by_name,
@@ -220,7 +220,7 @@ impl Web3Rpcs {
                 let vredis_pool = app.vredis_pool.clone();
 
                 let block_and_rpc_sender = if self.watch_head_block.is_some() {
-                    Some(self.block_sender.clone())
+                    Some(self.block_and_rpc_sender.clone())
                 } else {
                     None
                 };
