@@ -642,9 +642,9 @@ impl Web3Rpc {
         let head_block = self.head_block_sender.as_ref().unwrap().borrow().clone();
 
         if let Some(head_block) = head_block {
-            // TODO: if head block is very old and not expected to be syncing, emit warning
             if head_block.age() > self.max_head_block_age {
-                return Err(anyhow::anyhow!("head_block is too old!").into());
+                // TODO: if the server is expected to be syncing, make a way to quiet this error
+                return Err(Web3ProxyError::OldHead(self.clone(), head_block));
             }
 
             if detailed_healthcheck {

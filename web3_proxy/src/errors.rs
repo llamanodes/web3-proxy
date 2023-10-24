@@ -3,6 +3,8 @@
 use crate::frontend::authorization::Authorization;
 use crate::jsonrpc::{self, JsonRpcErrorData, ParsedResponse, StreamResponse};
 use crate::response_cache::ForwardedResponse;
+use crate::rpcs::blockchain::Web3ProxyBlock;
+use crate::rpcs::one::Web3Rpc;
 use crate::rpcs::provider::EthersHttpProvider;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::ws::Message;
@@ -135,6 +137,10 @@ pub enum Web3ProxyError {
     #[from(ignore)]
     MethodNotFound(Cow<'static, str>),
     NoVolatileRedisDatabase,
+    #[error(ignore)]
+    #[from(ignore)]
+    #[display(fmt = "{} @ {}", _0, _1)]
+    OldHead(Arc<Web3Rpc>, Web3ProxyBlock),
     OriginRequired,
     #[error(ignore)]
     #[from(ignore)]
@@ -817,6 +823,20 @@ impl Web3ProxyError {
                         message: "not found!".into(),
                         code: StatusCode::NOT_FOUND.as_u16().into(),
                         data: None,
+                    },
+                )
+            }
+            Self::OldHead(rpc, old_head) => {
+                warn!(?old_head, "{} is lagged", rpc);
+                (
+                    StatusCode::BAD_GATEWAY,
+                    JsonRpcErrorData {
+                        message: "RPC is lagged".into(),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: Some(json!({
+                            "rpc": rpc.name,
+                            "head": old_head,
+                        })),
                     },
                 )
             }
