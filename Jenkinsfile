@@ -21,15 +21,7 @@ pipeline {
         stage('Check and Cancel Old Builds') {
             steps {
                 script {
-                    def jobName = env.JOB_NAME
-                    def buildNumber = env.BUILD_NUMBER.toInteger()
-                    
-                    // Get all running builds of the current job
-                    def job = Jenkins.instance.getItemByFullName(jobName)
-                    def runningBuilds = job.builds.findAll { it.isBuilding() && it.number < buildNumber }
-                    
-                    // Cancel running builds
-                    runningBuilds.each { it.doStop() }
+                    myCancelRunning.cancelRunning()
                 }
             }
         }
