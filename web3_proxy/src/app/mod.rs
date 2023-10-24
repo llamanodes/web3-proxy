@@ -44,10 +44,10 @@ use std::str::FromStr;
 use std::sync::atomic::{self, AtomicU16, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::select;
 use tokio::sync::{broadcast, mpsc, oneshot, watch, Semaphore};
 use tokio::task::{yield_now, JoinHandle};
 use tokio::time::{sleep, sleep_until, timeout_at, Instant};
+use tokio::{pin, select};
 use tracing::{error, info, trace, warn};
 
 // TODO: make this customizable?
@@ -1240,7 +1240,8 @@ impl App {
         // TODO: think more about how to handle retries without hammering our servers with errors
         let mut ranked_rpcs = self.balanced_rpcs.watch_ranked_rpcs.subscribe();
 
-        let latest_start = Instant::now() + Duration::from_secs(3);
+        let latest_start = sleep_until(Instant::now() + Duration::from_secs(3));
+        pin!(latest_start);
 
         // TODO: how many retries?
         loop {
@@ -1281,7 +1282,7 @@ impl App {
                     // TODO: pass these RankedRpcs to ValidatedRequest::new_with_app
                     ranked_rpcs.borrow_and_update();
                 }
-                _ = sleep_until(latest_start) => {
+                _ = &mut latest_start => {
                     // do not retry if we've already been trying for 3 seconds
                     break;
                 }

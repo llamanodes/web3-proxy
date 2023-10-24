@@ -956,10 +956,10 @@ impl RpcsForRequest {
                     earliest_retry_at = Some(self.request.connect_timeout_at());
                 }
 
-                let retry_at = earliest_retry_at.expect("retry_at should always be set by now");
+                let retry_until = sleep_until(earliest_retry_at.expect("retry_at should always be set by now"));
 
                 if wait_for_sync.is_empty() {
-                    sleep_until(retry_at).await;
+                    retry_until.await;
                 } else {
                     select!{
                         (x, _, _) = select_all(wait_for_sync) => {
@@ -979,7 +979,7 @@ impl RpcsForRequest {
                                 },
                             }
                         },
-                        _ = sleep_until(retry_at) => {
+                        _ = retry_until => {
                             // we've waited long enough that trying again might work
                         },
                     }

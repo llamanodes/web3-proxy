@@ -310,6 +310,7 @@ impl ProxydSubCommand {
         }
 
         // now that the frontend is complete, tell all the other futures to finish
+        // TODO: can we use tokio::spawn Handle's abort?
         if let Err(err) = app_shutdown_sender.send(()) {
             warn!(?err, "backend sender");
         };

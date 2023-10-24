@@ -1044,6 +1044,9 @@ impl Web3Rpc {
         error_handler: Option<RequestErrorHandler>,
         allow_unhealthy: bool,
     ) -> Web3ProxyResult<OpenRequestHandle> {
+        let connect_timeout_at = sleep_until(web3_request.connect_timeout_at());
+        tokio::pin!(connect_timeout_at);
+
         loop {
             match self
                 .try_request_handle(web3_request, error_handler, allow_unhealthy)
@@ -1076,7 +1079,7 @@ impl Web3Rpc {
                 Ok(OpenRequestResult::Lagged(now_synced_f)) => {
                     select! {
                         _ = now_synced_f => {}
-                        _ = sleep_until(web3_request.connect_timeout_at()) => {
+                        _ = &mut connect_timeout_at => {
                             break;
                         }
                     }
