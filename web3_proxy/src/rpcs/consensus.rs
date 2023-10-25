@@ -759,11 +759,6 @@ impl ConsensusFinder {
             .rpc_heads
             .iter()
             .filter(|(rpc, x)| {
-                if !rpc.healthy.load(atomic::Ordering::Relaxed) {
-                    // TODO: we might go backwards if this happens. make sure we hold on to highest block from a previous run
-                    return false;
-                }
-
                 if let Some(max_block_age) = self.max_head_block_age {
                     if x.age() > max_block_age {
                         return false;
@@ -809,6 +804,11 @@ impl ConsensusFinder {
             HashMap::with_capacity(num_known);
 
         for (rpc, rpc_head) in self.rpc_heads.iter() {
+            if !rpc.healthy.load(atomic::Ordering::Relaxed) {
+                // TODO: should unhealthy servers get a vote? they were included in minmax_block. i think that is enough
+                continue;
+            }
+
             let mut block_to_check = rpc_head.clone();
 
             while block_to_check.number() >= lowest_block_number {
