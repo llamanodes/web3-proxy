@@ -647,6 +647,10 @@ impl Web3Rpc {
                 return Err(Web3ProxyError::OldHead(self.clone(), head_block));
             }
 
+            if self.should_disconnect() {
+                return Err(anyhow::anyhow!("rpc should disconnect").into());
+            }
+
             if detailed_healthcheck {
                 let block_number = head_block.number();
 
