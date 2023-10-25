@@ -629,7 +629,13 @@ impl Serialize for Web3Rpcs {
                 let names: Vec<_> = consensus_rpcs
                     .inner
                     .iter()
-                    .map(|x| x.name.as_str())
+                    .map(|x| {
+                        format!(
+                            "{} ({}s)",
+                            x.name,
+                            x.created_at.unwrap().elapsed().as_secs_f32()
+                        )
+                    })
                     .collect();
 
                 state.serialize_field("synced_connections", &names)?;
