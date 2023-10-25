@@ -89,7 +89,7 @@ pub struct RankedRpcs {
     pub num_synced: usize,
     pub backups_needed: bool,
 
-    pub(crate) inner: Vec<Arc<Web3Rpc>>,
+    pub(crate) inner: HashSet<Arc<Web3Rpc>>,
 
     sort_mode: SortMethod,
 }
@@ -109,6 +109,8 @@ impl RankedRpcs {
 
         // TODO: why is head_block not set here?! it should always be set!
         let head_block = head_block.unwrap_or_default();
+
+        let rpcs: HashSet<_> = rpcs.into_iter().collect();
 
         let backups_needed = rpcs.iter().any(|x| x.backup);
 
@@ -161,14 +163,15 @@ impl RankedRpcs {
 
         // return the first result that exceededs confgured minimums (if any)
         if let Some((best_block, _, best_rpcs)) = votes.into_iter().next() {
-            let mut ranked_rpcs: Vec<_> = best_rpcs.into_iter().map(Arc::clone).collect();
+            let mut best_rpcs: HashSet<_> = best_rpcs.into_iter().map(Arc::clone).collect();
 
-            let backups_needed = ranked_rpcs.iter().any(|x| x.backup);
-            let num_synced = ranked_rpcs.len();
+            let backups_needed = best_rpcs.iter().any(|x| x.backup);
+            let num_synced = best_rpcs.len();
 
             // add all the rpcs that are behind the ranked rpcs. these might be needed for serving archive requests
             for (x, x_head) in heads.iter() {
-                if ranked_rpcs.contains(x) {
+                // TODO: do we care about this "contains" when a set won't add more than once anyways?
+                if best_rpcs.contains(x) {
                     continue;
                 }
 
@@ -185,11 +188,11 @@ impl RankedRpcs {
 
                 // TODO: max age here too?
 
-                ranked_rpcs.push(x.clone());
+                best_rpcs.insert(x.clone());
             }
 
             // consensus found!
-            trace!(?ranked_rpcs);
+            trace!(?best_rpcs);
 
             let sort_mode = SortMethod::Sort;
 
@@ -197,7 +200,7 @@ impl RankedRpcs {
                 backups_needed,
                 head_block: best_block,
                 sort_mode,
-                inner: ranked_rpcs,
+                inner: best_rpcs,
                 num_synced,
             };
 
@@ -290,8 +293,8 @@ impl RankedRpcs {
         }
     }
 
-    pub fn all(&self) -> &[Arc<Web3Rpc>] {
-        &self.inner
+    pub fn all(&self) -> hashbrown::hash_set::Iter<Arc<Web3Rpc>> {
+        self.inner.iter()
     }
 
     pub fn is_empty(&self) -> bool {
