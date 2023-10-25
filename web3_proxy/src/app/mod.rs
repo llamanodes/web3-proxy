@@ -1177,9 +1177,16 @@ impl App {
             // no idea how we got an array here, but lets force this to just the txid
             // TODO: think about this more
             if value.get().starts_with('[') {
+                let backend_rpcs = web3_request
+                    .backend_rpcs_used()
+                    .iter()
+                    .map(|x| x.name.as_str())
+                    .collect::<Vec<_>>();
+
                 error!(
                     ?value,
                     ?txid,
+                    ?backend_rpcs,
                     "unexpected array response from sendRawTransaction"
                 );
                 response = ForwardedResponse::from(json!(txid));
