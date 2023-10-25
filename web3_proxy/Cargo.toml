@@ -1,6 +1,6 @@
 [package]
 name = "web3_proxy"
-version = "1.43.64"
+version = "1.43.65"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
