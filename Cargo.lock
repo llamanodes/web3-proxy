@@ -51,9 +51,9 @@ dependencies = [
 
 [[package]]
 name = "ahash"
-version = "0.8.5"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd7d5a2cecb58716e47d67d5703a249964b14c7be1ec3cad3affc295b2d1c35d"
+checksum = "91429305e9f0a25f6205c5b8e0d2db09e0708a7a6df0f42212bb56c32c8ac97a"
 dependencies = [
  "cfg-if",
  "getrandom 0.2.10",
@@ -2337,7 +2337,7 @@ version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
 dependencies = [
- "ahash 0.8.5",
+ "ahash 0.8.6",
 ]
 
 [[package]]
@@ -2346,7 +2346,7 @@ version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f93e7192158dbcda357bdec5fb5788eebf8bbac027f3f33e719d29135ae84156"
 dependencies = [
- "ahash 0.8.5",
+ "ahash 0.8.6",
  "allocator-api2",
  "serde",
 ]
@@ -5392,7 +5392,7 @@ version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d6753e460c998bbd4cd8c6f0ed9a64346fcca0723d6e75e52fdc351c5d2169d"
 dependencies = [
- "ahash 0.8.5",
+ "ahash 0.8.6",
  "atoi",
  "bigdecimal",
  "byteorder",
@@ -6594,7 +6594,7 @@ dependencies = [
 
 [[package]]
 name = "web3_proxy"
-version = "1.43.61"
+version = "1.43.62"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -6669,7 +6669,7 @@ dependencies = [
 
 [[package]]
 name = "web3_proxy_cli"
-version = "1.43.61"
+version = "1.43.62"
 dependencies = [
  "console-subscriber",
  "env_logger",
