@@ -103,4 +103,4 @@ test-log = { version = "0.2.13", default-features = false, features = ["trace"] 
 env_logger = { version ="0.10", default-features = true, features = ["auto-color"] }
 tokio = { version = "1.33.0", default-features = false, features = ["full", "test-util"] }
 tracing = {version = "0.1", default-features = false}
-tracing-subscriber = {version = "0.3", default-features = false, features = ["env-filter", "fmt"]}
+tracing-subscriber = {version = "0.3", features = ["env-filter"]}
