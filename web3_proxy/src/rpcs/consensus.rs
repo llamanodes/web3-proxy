@@ -211,7 +211,7 @@ impl RankedRpcs {
         let num_active = self.num_active_rpcs();
 
         // these are bigger than we need, but how much does that matter?
-        let mut inner_for_request = Vec::<Arc<Web3Rpc>>::with_capacity(num_active);
+        let mut inner_for_request = Vec::with_capacity(num_active);
         let mut outer_for_request = Vec::with_capacity(num_active);
 
         // TODO: what if min is set to some future block?
@@ -221,7 +221,10 @@ impl RankedRpcs {
 
         // TODO: max lag was already handled
         for rpc in self.inner.iter().cloned() {
-            // if web3_request.head_block.is_some() {
+            if rpc.backup && !self.backups_needed {
+                continue;
+            }
+
             if let Some(block_needed) = min_block_needed {
                 if !rpc.has_block_data(block_needed) {
                     outer_for_request.push(rpc);
@@ -234,7 +237,6 @@ impl RankedRpcs {
                     continue;
                 }
             }
-            // }
 
             inner_for_request.push(rpc);
         }
