@@ -757,8 +757,8 @@ impl ConsensusFinder {
 
         let minmax_block = self
             .rpc_heads
-            .iter()
-            .filter(|(rpc, x)| {
+            .values()
+            .filter(|x| {
                 if let Some(max_block_age) = self.max_head_block_age {
                     if x.age() > max_block_age {
                         return false;
@@ -767,7 +767,6 @@ impl ConsensusFinder {
 
                 true
             })
-            .map(|(_, x)| x)
             .minmax_by_key(|x| x.number());
 
         let (lowest_block, highest_block) = match minmax_block {

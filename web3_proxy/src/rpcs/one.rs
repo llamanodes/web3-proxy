@@ -630,6 +630,7 @@ impl Web3Rpc {
         Ok(())
     }
 
+    #[inline(always)]
     fn should_disconnect(&self) -> bool {
         *self.disconnect_watch.as_ref().unwrap().borrow()
     }
@@ -645,10 +646,6 @@ impl Web3Rpc {
             if head_block.age() > self.max_head_block_age {
                 // TODO: if the server is expected to be syncing, make a way to quiet this error
                 return Err(Web3ProxyError::OldHead(self.clone(), head_block));
-            }
-
-            if self.should_disconnect() {
-                return Err(anyhow::anyhow!("rpc should disconnect").into());
             }
 
             if detailed_healthcheck {
@@ -799,6 +796,10 @@ impl Web3Rpc {
 
                 // errors here should not cause the loop to exit! only mark unhealthy
                 loop {
+                    if rpc.should_disconnect() {
+                        break;
+                    }
+
                     new_total_requests = rpc.internal_requests.load(atomic::Ordering::Relaxed)
                         + rpc.external_requests.load(atomic::Ordering::Relaxed);
 
@@ -824,6 +825,8 @@ impl Web3Rpc {
 
                     sleep(Duration::from_secs(health_sleep_seconds)).await;
                 }
+
+                Ok(())
             };
 
             // TODO: log quick_check lik
@@ -849,6 +852,10 @@ impl Web3Rpc {
             let f = async move {
                 // errors here should not cause the loop to exit! only mark unhealthy
                 loop {
+                    if rpc.should_disconnect() {
+                        break;
+                    }
+
                     // TODO: if this fails too many times, reset the connection
                     if let Err(err) = rpc.check_provider(chain_id).await {
                         rpc.healthy.store(false, atomic::Ordering::Relaxed);
@@ -865,6 +872,8 @@ impl Web3Rpc {
 
                     sleep(Duration::from_secs(health_sleep_seconds)).await;
                 }
+
+                Ok(())
             };
 
             tokio::spawn(f)
