@@ -166,9 +166,15 @@ impl RankedRpcs {
             let backups_needed = ranked_rpcs.iter().any(|x| x.backup);
             let num_synced = ranked_rpcs.len();
 
-            // TODO: add all the unsynced rpcs
+            // add all the rpcs that are behind the ranked rpcs. these might be needed for serving archive requests
             for (x, x_head) in heads.iter() {
                 if ranked_rpcs.contains(x) {
+                    continue;
+                }
+
+                // we only want to include backups if they voted for the head block
+                // TODO: think more about this. maybe have a config option about how easily to use backup rpcs
+                if x.backup && !backups_needed {
                     continue;
                 }
 
@@ -219,9 +225,11 @@ impl RankedRpcs {
         let min_block_needed = web3_request.min_block_needed();
         let max_block_needed = web3_request.max_block_needed();
 
-        // TODO: max lag was already handled
+        // max lag was already handled
         for rpc in self.inner.iter().cloned() {
             if rpc.backup && !self.backups_needed {
+                // this backup check was already done, but
+                // TODO: push these into `backup_for_request` Vec?
                 continue;
             }
 
