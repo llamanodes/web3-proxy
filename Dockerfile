@@ -44,11 +44,14 @@ COPY rust-toolchain.toml ./
 RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/app/target \
+    --mount=type=cache,target=/app/target_test \
     set -eux -o pipefail; \
     \
     cargo check || [ "$?" -eq 101 ]; \
     [ -e /app/target/rust-toolchain.toml ] && [ "$(cat /app/target/rust-toolchain.toml)" != "$(cat ./rust-toolchain.toml)" ] && rm -rf /app/target/*; \
-    cp ./rust-toolchain.toml /app/target/rust-toolchain.toml
+    [ -e /app/target_test/rust-toolchain.toml ] && [ "$(cat /app/target_test/rust-toolchain.toml)" != "$(cat ./rust-toolchain.toml)" ] && rm -rf /app/target_test/*; \
+    cp ./rust-toolchain.toml /app/target/rust-toolchain.toml; \
+    cp ./rust-toolchain.toml /app/target_test/rust-toolchain.toml
 
 # cargo binstall makes it fast to install binaries
 RUN --mount=type=cache,target=/root/.cargo/git \
