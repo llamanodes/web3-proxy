@@ -194,6 +194,7 @@ impl Web3Rpcs {
             return Ok(());
         }
 
+        // TODO: should this be spawned and then we just hold onto the handle here?
         let mut consensus_finder =
             ConsensusFinder::new(Some(self.max_head_block_age), Some(self.max_head_block_lag));
 
