@@ -3,6 +3,7 @@ use std::time::Duration;
 use tracing::info;
 use web3_proxy::prelude::migration::sea_orm::prelude::Decimal;
 use web3_proxy::prelude::reqwest;
+use web3_proxy::prelude::tokio;
 use web3_proxy::test_utils::mysql::TestMysql;
 use web3_proxy::test_utils::TestAnvil;
 use web3_proxy_cli::test_utils::admin_increases_balance::admin_increase_balance;

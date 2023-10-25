@@ -133,10 +133,15 @@ impl Web3Rpcs {
         // by_name starts empty. self.apply_server_configs will add to it
         let by_name = RwLock::new(HashMap::new());
 
-        let max_head_block_lag = max_head_block_lag.unwrap_or(5.into());
+        let block_interval = average_block_interval(chain_id);
 
-        let max_head_block_age =
-            average_block_interval(chain_id).mul_f32((max_head_block_lag.as_u64() * 10) as f32);
+        // TODO: think about the max more for long block interval chains
+        let max_head_block_lag = max_head_block_lag.unwrap_or_else(|| {
+            U64::from(5.max((60f32 / block_interval.as_secs_f32()).round() as u64))
+        });
+
+        // TODO: think about the max more for long block interval chains
+        let max_head_block_age = block_interval.mul_f32((max_head_block_lag.as_u64() * 10) as f32);
 
         let connections = Arc::new(Self {
             block_and_rpc_sender,
@@ -600,7 +605,7 @@ impl Serialize for Web3Rpcs {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("Web3Rpcs", 5)?;
+        let mut state = serializer.serialize_struct("Web3Rpcs", 7)?;
 
         {
             let by_name = self.by_name.read();
@@ -608,6 +613,13 @@ impl Serialize for Web3Rpcs {
             // TODO: coordinate with frontend team to rename "conns" to "rpcs"
             state.serialize_field("conns", &rpcs)?;
         }
+
+        state.serialize_field(
+            "max_head_block_age_ms",
+            &self.max_head_block_age.as_millis(),
+        )?;
+
+        state.serialize_field("max_head_block_lag", &self.max_head_block_lag)?;
 
         {
             let consensus_rpcs = self.watch_ranked_rpcs.borrow().clone();

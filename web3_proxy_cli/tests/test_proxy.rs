@@ -1,6 +1,5 @@
 use serde_json::Value;
 use std::{str::FromStr, time::Duration};
-use tokio::{task::yield_now, time::sleep};
 use tracing::{info, warn};
 use web3_proxy::prelude::ethers::{
     prelude::{Block, Transaction, TxHash, H256, U256, U64},
@@ -9,6 +8,7 @@ use web3_proxy::prelude::ethers::{
 };
 use web3_proxy::prelude::http::StatusCode;
 use web3_proxy::prelude::reqwest;
+use web3_proxy::prelude::tokio::{self, task::yield_now, time::sleep};
 use web3_proxy::rpcs::blockchain::ArcBlock;
 use web3_proxy_cli::test_utils::{TestAnvil, TestApp, TestMysql};
 

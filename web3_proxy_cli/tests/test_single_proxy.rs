@@ -5,6 +5,7 @@ use tracing::{info, warn};
 use web3_proxy::prelude::futures::future::try_join_all;
 use web3_proxy::prelude::reqwest;
 use web3_proxy::prelude::rust_decimal::{Decimal, RoundingStrategy};
+use web3_proxy::prelude::tokio;
 use web3_proxy::rpcs::blockchain::ArcBlock;
 use web3_proxy_cli::test_utils::create_provider_with_rpc_key::create_provider_for_user;
 use web3_proxy_cli::test_utils::rpc_key::user_get_first_rpc_key;

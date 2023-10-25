@@ -26,11 +26,8 @@ serde = { version = "1.0.189" }
 serde_json = { version = "1.0.107", default-features = false, features = ["raw_value"] }
 tokio-console = { version = "0.1.10", optional = true }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt"] }
 
 [dev-dependencies]
 env_logger = { version ="0.10", default-features = false, features = ["auto-color"] }
 test-log = { version ="0.2.13", default-features = false, features = ["trace"] }
-tokio = { version = "1.33.0", default-features = false, features = ["full", "test-util"] }
-tracing = {version = "0.1", default-features = false }
-tracing-subscriber = {version = "0.3", default-features = false, features = ["env-filter", "fmt"] }

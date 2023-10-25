@@ -4,6 +4,7 @@ use web3_proxy::balance::Balance;
 use web3_proxy::prelude::ethers::prelude::U64;
 use web3_proxy::prelude::migration::sea_orm::prelude::Decimal;
 use web3_proxy::prelude::reqwest;
+use web3_proxy::prelude::tokio;
 use web3_proxy_cli::test_utils::{
     admin_increases_balance::admin_increase_balance,
     create_admin::create_user_as_admin,

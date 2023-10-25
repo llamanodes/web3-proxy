@@ -6678,7 +6678,6 @@ dependencies = [
  "serde",
  "serde_json",
  "test-log",
- "tokio",
  "tokio-console",
  "tracing",
  "tracing-subscriber",

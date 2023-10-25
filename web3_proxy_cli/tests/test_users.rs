@@ -7,6 +7,7 @@ use web3_proxy::prelude::ethers::prelude::{Http, Provider};
 use web3_proxy::prelude::ethers::{signers::Signer, types::Signature};
 use web3_proxy::prelude::migration::sea_orm::prelude::Decimal;
 use web3_proxy::prelude::reqwest;
+use web3_proxy::prelude::tokio;
 use web3_proxy::prelude::ulid::Ulid;
 use web3_proxy::rpcs::blockchain::ArcBlock;
 use web3_proxy_cli::test_utils::admin_deposits::get_admin_deposits;
