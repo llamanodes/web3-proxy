@@ -7,7 +7,7 @@
 //! TODO: script that queries influx and calculates observed relative costs
 
 use migration::sea_orm::prelude::Decimal;
-use std::{ops::Add, str::FromStr};
+use std::{ops::Add, ops::Mul, str::FromStr};
 use tracing::{trace, warn};
 
 /// TODO: i don't like how we use this inside the config and also have it available publicly. we should only getting this value from the config
@@ -41,6 +41,17 @@ where
 
     fn add(self, rhs: T) -> Self::Output {
         Self(self.0 + rhs.into())
+    }
+}
+
+impl<T> Mul<T> for ComputeUnit
+where
+    T: Into<Decimal>,
+{
+    type Output = Self;
+
+    fn mul(self, rhs: T) -> Self::Output {
+        Self(self.0 * rhs.into())
     }
 }
 
@@ -155,31 +166,31 @@ impl ComputeUnit {
             (_, "web3_bundlerVersion") => 15,
             (_, "web3_sha3") => 15,
             (_, "ots_getInternalOperations") => {
-                return Self::variable_price(chain_id, method, response_bytes) + 100
+                return Self::variable_price(chain_id, method, response_bytes) + 100;
             }
             (_, "ots_hasCode") => {
-                return Self::variable_price(chain_id, method, response_bytes) + 100
+                return Self::variable_price(chain_id, method, response_bytes) + 100;
             }
             (_, "ots_getTransactionError") => {
-                return Self::variable_price(chain_id, method, response_bytes) + 100
+                return Self::variable_price(chain_id, method, response_bytes) + 100;
             }
             (_, "ots_traceTransaction") => {
-                return Self::variable_price(chain_id, method, response_bytes) + 100
+                return Self::variable_price(chain_id, method, response_bytes) + 100;
             }
             (_, "ots_getBlockDetails") => {
-                return Self::variable_price(chain_id, method, response_bytes) + 100
+                return Self::variable_price(chain_id, method, response_bytes) + 100;
             }
             (_, "ots_getBlockDetailsByHash") => {
-                return Self::variable_price(chain_id, method, response_bytes) + 100
+                return Self::variable_price(chain_id, method, response_bytes) + 100;
             }
             (_, "ots_getBlockTransactions") => {
-                return Self::variable_price(chain_id, method, response_bytes) + 100
+                return Self::variable_price(chain_id, method, response_bytes) + 100;
             }
             (_, "ots_searchTransactionsBefore") => {
-                return Self::variable_price(chain_id, method, response_bytes) + 100
+                return Self::variable_price(chain_id, method, response_bytes) + 100;
             }
             (_, "ots_searchTransactionsAfter") => {
-                return Self::variable_price(chain_id, method, response_bytes) + 100
+                return Self::variable_price(chain_id, method, response_bytes) + 100;
             }
             (_, "ots_getTransactionBySenderAndNonce") => 1000,
             (_, "ots_getContractCreator") => 1000,
@@ -204,11 +215,11 @@ impl ComputeUnit {
                 {
                     // maybe charge extra since they are doing things they aren't supposed to
                     return Self::unimplemented();
-
-                    warn!(%response_bytes, "unknown method {}", method);
-                    return Self::unimplemented()
-                        + Self::variable_price(chain_id, method, response_bytes).0;
                 }
+
+                warn!(%response_bytes, "unknown method {}", method);
+                return Self::unimplemented()
+                    + Self::variable_price(chain_id, method, response_bytes).0;
             }
         };
 

@@ -1093,7 +1093,7 @@ impl App {
             .params()
             .as_array()
             .ok_or_else(|| Web3ProxyError::BadRequest("Unable to get array from params".into()))?
-            .get(0)
+            .first()
             .ok_or_else(|| Web3ProxyError::BadRequest("Unable to get item 0 from params".into()))?
             .as_str()
             .ok_or_else(|| {
@@ -1177,8 +1177,9 @@ impl App {
             // no idea how we got an array here, but lets force this to just the txid
             // TODO: think about this more
             if value.get().starts_with('[') {
-                let backend_rpcs = web3_request
-                    .backend_rpcs_used()
+                let backend_rpcs = web3_request.backend_rpcs_used();
+
+                let backend_rpcs = backend_rpcs
                     .iter()
                     .map(|x| x.name.as_str())
                     .collect::<Vec<_>>();
@@ -1584,7 +1585,7 @@ impl App {
                     serde_json::Value::Array(params) => {
                         // TODO: make a struct and use serde conversion to clean this up
                         if params.len() != 1
-                            || !params.get(0).map(|x| x.is_string()).unwrap_or(false)
+                            || !params.first().map(|x| x.is_string()).unwrap_or(false)
                         {
                             // TODO: what error code?
                             // TODO: use Web3ProxyError::BadRequest
