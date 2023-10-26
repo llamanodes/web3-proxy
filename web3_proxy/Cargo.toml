@@ -1,6 +1,6 @@
 [package]
 name = "web3_proxy"
-version = "1.43.67"
+version = "1.43.68"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -52,8 +52,8 @@ derive_more = { version = "0.99.17", features = ["nightly"] }
 ethers = { version = "2.0.10", default-features = false, features = ["rustls", "ws"] }
 fdlimit = "0.2.1"
 fstrings = "0.2"
-futures = { version = "0.3.28" }
-futures-util = "0.3.28"
+futures = { version = "0.3.29" }
+futures-util = "0.3.29"
 glob = "0.3.1"
 handlebars = "4.4.0"
 hashbrown = { version = "0.14.2", features = ["serde", "nightly"] }
@@ -78,7 +78,7 @@ reqwest = { version = "0.11.22", default-features = false, features = ["json", "
 rust_decimal = { version = "1.32.0" }
 sentry = { version = "0.31.7", default-features = false, features = ["anyhow", "backtrace", "contexts", "panic", "reqwest", "rustls", "serde_json", "tracing"] }
 sentry-tracing = "0.31.7"
-serde = { version = "1.0.189" }
+serde = { version = "1.0.190" }
 serde-inline-default = "0.1.1"
 serde_json = { version = "1.0.107", default-features = false, features = ["raw_value"] }
 serde_prometheus = "0.2.4"
@@ -86,7 +86,7 @@ strum = { version = "0.25.0", features = ["derive"] }
 time = { version = "0.3" }
 tokio = { version = "1.33.0", features = ["full", "tracing"] }
 tokio-stream = { version = "0.1.14", features = ["sync"] }
-toml = "0.8.4"
+toml = "0.8.5"
 tower-http = { version = "0.4.4", features = ["cors", "normalize-path", "sensitive-headers", "trace"] }
 tracing = "0.1"
 ulid = { version = "1.1.0", features = ["rand", "uuid", "serde"] }
