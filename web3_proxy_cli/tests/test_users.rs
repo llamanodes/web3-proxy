@@ -325,7 +325,7 @@ async fn test_referral_bonus_non_concurrent() {
         shared_referral_code
             .clone()
             .referrals
-            .get(0)
+            .first()
             .unwrap()
             .referred_address
             .clone()
@@ -336,7 +336,7 @@ async fn test_referral_bonus_non_concurrent() {
         used_referral_code
             .clone()
             .referrals
-            .get(0)
+            .first()
             .unwrap()
             .used_referral_code
             .clone()
@@ -369,7 +369,7 @@ async fn test_referral_bonus_non_concurrent() {
     // Check that at least something was earned:
     let shared_referral_code: UserSharedReferralInfo =
         get_shared_referral_codes(&x, &r, &referrer_login_response).await;
-    info!(referrals=?shared_referral_code.referrals.get(0).unwrap(), "Referral code");
+    info!(referrals=?shared_referral_code.referrals.first().unwrap(), "Referral code");
 
     let user_balance = user_get_balance(&x, &r, &user_login_response).await;
 
@@ -476,7 +476,7 @@ async fn test_referral_bonus_concurrent_referrer_only() {
         shared_referral_code
             .clone()
             .referrals
-            .get(0)
+            .first()
             .unwrap()
             .referred_address
             .clone()
@@ -487,7 +487,7 @@ async fn test_referral_bonus_concurrent_referrer_only() {
         used_referral_code
             .clone()
             .referrals
-            .get(0)
+            .first()
             .unwrap()
             .used_referral_code
             .clone()
@@ -534,7 +534,7 @@ async fn test_referral_bonus_concurrent_referrer_only() {
     let shared_referral_code: UserSharedReferralInfo =
         get_shared_referral_codes(&x, &r, &referrer_login_response).await;
     info!("Referral code");
-    info!("{:?}", shared_referral_code.referrals.get(0).unwrap());
+    info!("{:?}", shared_referral_code.referrals.first().unwrap());
 
     // We make sure that the referrer has $10 + 10% of the used balance
     // The admin provides credits for both
@@ -640,7 +640,7 @@ async fn test_referral_bonus_concurrent_referrer_and_user() {
         shared_referral_code
             .clone()
             .referrals
-            .get(0)
+            .first()
             .unwrap()
             .referred_address
             .clone()
@@ -651,7 +651,7 @@ async fn test_referral_bonus_concurrent_referrer_and_user() {
         used_referral_code
             .clone()
             .referrals
-            .get(0)
+            .first()
             .unwrap()
             .used_referral_code
             .clone()
@@ -719,7 +719,7 @@ async fn test_referral_bonus_concurrent_referrer_and_user() {
     let shared_referral_code: UserSharedReferralInfo =
         get_shared_referral_codes(&x, &r, &referrer_login_response).await;
     info!("Referral code");
-    info!("{:?}", shared_referral_code.referrals.get(0).unwrap());
+    info!("{:?}", shared_referral_code.referrals.first().unwrap());
 
     // We make sure that the referrer has $10 + 10% of the used balance
     // The admin provides credits for both
