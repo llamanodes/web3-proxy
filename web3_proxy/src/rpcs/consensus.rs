@@ -21,7 +21,6 @@ use std::cmp::{Ordering, Reverse};
 use std::sync::{atomic, Arc};
 use std::time::Duration;
 use tokio::select;
-use tokio::task::yield_now;
 use tokio::time::{sleep_until, Instant};
 use tracing::{debug, enabled, error, info, trace, warn, Level};
 
@@ -913,17 +912,22 @@ impl RpcsForRequest {
                 }
 
                 let mut earliest_retry_at = None;
+                let mut opened = 0;
+                let mut tried = 0;
                 let mut wait_for_sync = Vec::new();
 
                 // TODO: we used to do a neat power of 2 random choices here, but it had bugs. bring that back
                 for rpcs in [self.inner.iter(), self.outer.iter()] {
                     for best_rpc in rpcs {
+                        tried += 1;
+
                         match best_rpc
                             .try_request_handle(&self.request, error_handler, false)
                             .await
                         {
                             Ok(OpenRequestResult::Handle(handle)) => {
                                 trace!("opened handle: {}", best_rpc);
+                                opened += 1;
                                 yield handle;
                             }
                             Ok(OpenRequestResult::RetryAt(retry_at)) => {
@@ -948,11 +952,10 @@ impl RpcsForRequest {
                             }
                         }
                     }
-                    yield_now().await;
                 }
 
                 // if we got this far, no inner or outer rpcs are ready. thats suprising since an inner should have been ready. maybe it got rate limited
-                warn!(?earliest_retry_at, num_waits=%wait_for_sync.len(), "no rpcs ready");
+                warn!(?earliest_retry_at, num_waits=%wait_for_sync.len(), %tried, %opened, "no rpcs ready");
 
                 let min_wait_until = Instant::now() + Duration::from_millis(10);
 
