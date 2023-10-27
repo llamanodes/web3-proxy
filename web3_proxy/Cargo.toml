@@ -86,7 +86,7 @@ strum = { version = "0.25.0", features = ["derive"] }
 time = { version = "0.3" }
 tokio = { version = "1.33.0", features = ["full", "tracing"] }
 tokio-stream = { version = "0.1.14", features = ["sync"] }
-toml = "0.8.5"
+toml = "0.8.6"
 tower-http = { version = "0.4.4", features = ["cors", "normalize-path", "sensitive-headers", "trace"] }
 tracing = "0.1"
 ulid = { version = "1.1.0", features = ["rand", "uuid", "serde"] }

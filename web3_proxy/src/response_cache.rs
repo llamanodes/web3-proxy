@@ -1,5 +1,5 @@
 use crate::{
-    block_number::{BlockNumAndHash, CacheMode},
+    block_number::{BlockNumAndHash, BlockNumOrHash, CacheMode},
     errors::{Web3ProxyError, Web3ProxyResult},
     frontend::authorization::RequestOrMethod,
     jsonrpc::{self, JsonRpcErrorData, ResponsePayload},
@@ -19,23 +19,28 @@ use std::{
 
 #[derive(Clone, Debug, Eq, From)]
 pub struct JsonRpcQueryCacheKey<'a> {
-    /// hashed params so that
+    /// hashed params and block info so that we don't have to clone a potentially big thing
+    /// this is probably a premature optimization
     hash: u64,
-    from_block: Option<&'a BlockNumAndHash>,
+    from_block: Option<&'a BlockNumOrHash>,
     to_block: Option<&'a BlockNumAndHash>,
     cache_jsonrpc_errors: bool,
 }
 
 impl JsonRpcQueryCacheKey<'_> {
+    #[inline]
     pub fn hash(&self) -> u64 {
         self.hash
     }
-    pub fn from_block_num(&self) -> Option<&U64> {
-        self.from_block.as_ref().map(|x| x.num())
+    #[inline]
+    pub fn from_block_num(&self) -> Option<U64> {
+        self.from_block.map(|x| x.num())
     }
-    pub fn to_block_num(&self) -> Option<&U64> {
-        self.to_block.as_ref().map(|x| x.num())
+    #[inline]
+    pub fn to_block_num(&self) -> Option<U64> {
+        self.to_block.map(|x| x.num())
     }
+    #[inline]
     pub fn cache_errors(&self) -> bool {
         self.cache_jsonrpc_errors
     }
@@ -102,6 +107,7 @@ pub enum ForwardedResponse<T> {
 
 // TODO: impl for other inner result types?
 impl<R> ForwardedResponse<R> {
+    #[inline]
     pub fn num_bytes(&self) -> u64 {
         match self {
             Self::Result { num_bytes, .. } => *num_bytes,
@@ -109,6 +115,7 @@ impl<R> ForwardedResponse<R> {
         }
     }
 
+    #[inline]
     pub fn is_error(&self) -> bool {
         match self {
             Self::Result { .. } => false,
@@ -118,12 +125,14 @@ impl<R> ForwardedResponse<R> {
 }
 
 impl<R> ForwardedResponse<Option<R>> {
+    #[inline]
     pub fn is_null(&self) -> bool {
         matches!(self, Self::Result { value: None, .. })
     }
 }
 
 impl ForwardedResponse<Arc<RawValue>> {
+    #[inline]
     pub fn is_null(&self) -> bool {
         match self {
             Self::Result { value, .. } => value.get() == "null",

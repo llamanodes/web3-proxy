@@ -498,7 +498,7 @@ impl ValidatedRequest {
 
     #[inline]
     pub fn max_block_needed(&self) -> Option<U64> {
-        self.cache_mode.to_block().map(|x| *x.num())
+        self.cache_mode.to_block().map(|x| x.num())
     }
 
     #[inline]
@@ -506,7 +506,7 @@ impl ValidatedRequest {
         if self.archive_request.load(atomic::Ordering::Relaxed) {
             Some(U64::zero())
         } else {
-            self.cache_mode.from_block().map(|x| *x.num())
+            self.cache_mode.from_block().map(|x| x.num())
         }
     }
 

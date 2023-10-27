@@ -46,9 +46,11 @@ pub fn BlockNumber_to_U64(block_num: BlockNumber, latest_block: U64) -> (U64, bo
 pub struct BlockNumAndHash(U64, H256);
 
 impl BlockNumAndHash {
-    pub fn num(&self) -> &U64 {
-        &self.0
+    #[inline]
+    pub fn num(&self) -> U64 {
+        self.0
     }
+    #[inline]
     pub fn hash(&self) -> &H256 {
         &self.1
     }
@@ -103,7 +105,7 @@ pub async fn clean_block_number<'a>(
                         if block_hash == *head_block.hash() {
                             (head_block.into(), false)
                         } else if let Some(app) = app {
-                            // TODO: query for the block
+                            // TODO: make a jsonrpc query here? cache rates will be better but it adds a network request
                             let block = app
                                 .balanced_rpcs
                                 .blocks_by_hash
@@ -137,7 +139,7 @@ pub async fn clean_block_number<'a>(
                         if block_hash == *head_block.hash() {
                             (head_block.number(), false)
                         } else if let Some(app) = app {
-                            // TODO: what should this max_wait be?
+                            // TODO: make a jsonrpc query here? cache rates will be better but it adds a network request
                             let block = app
                                 .balanced_rpcs
                                 .blocks_by_hash
@@ -172,7 +174,7 @@ pub async fn clean_block_number<'a>(
                     if block_num == head_block_num {
                         (head_block.into(), changed)
                     } else if let Some(app) = app {
-                        // TODO: we used to make a query here, but thats causing problems with recursion now. come back to this
+                        // TODO: make a jsonrpc query here? cache rates will be better but it adds a network request
                         let block_hash = app
                             .balanced_rpcs
                             .blocks_by_number
@@ -180,6 +182,7 @@ pub async fn clean_block_number<'a>(
                             .await
                             .context("fetching block hash from number")?;
 
+                        // TODO: make a jsonrpc query here? cache rates will be better but it adds a network request
                         let block = app
                             .balanced_rpcs
                             .blocks_by_hash
@@ -210,6 +213,21 @@ pub async fn clean_block_number<'a>(
     }
 }
 
+#[derive(Debug, From, Hash, Eq, PartialEq)]
+pub enum BlockNumOrHash {
+    Num(U64),
+    And(BlockNumAndHash),
+}
+
+impl BlockNumOrHash {
+    pub fn num(&self) -> U64 {
+        match self {
+            Self::Num(x) => *x,
+            Self::And(x) => x.num(),
+        }
+    }
+}
+
 /// TODO: change this to also return the hash needed?
 /// this replaces any "latest" identifiers in the JsonRpcRequest with the current block number which feels like the data is structured wrong
 #[derive(Debug, Default, Hash, Eq, PartialEq)]
@@ -221,8 +239,9 @@ pub enum CacheMode {
         cache_errors: bool,
     },
     Range {
-        from_block: BlockNumAndHash,
-        to_block: BlockNumAndHash,
+        from_block: BlockNumOrHash,
+        to_block: BlockNumOrHash,
+        cache_block: BlockNumAndHash,
         /// cache jsonrpc errors (server errors are never cached)
         cache_errors: bool,
     },
@@ -285,12 +304,12 @@ impl CacheMode {
         }
 
         if let Some(head_block) = head_block {
-            CacheMode::Standard {
+            Self::Standard {
                 block: head_block.into(),
                 cache_errors: true,
             }
         } else {
-            CacheMode::Never
+            Self::Never
         }
     }
 
@@ -333,9 +352,9 @@ impl CacheMode {
         match request.method.as_ref() {
             "debug_traceTransaction" => {
                 // TODO: make sure re-orgs work properly!
-                Ok(CacheMode::SuccessForever)
+                Ok(Self::SuccessForever)
             }
-            "eth_gasPrice" => Ok(CacheMode::Standard {
+            "eth_gasPrice" => Ok(Self::Standard {
                 block: head_block.into(),
                 cache_errors: false,
             }),
@@ -343,23 +362,25 @@ impl CacheMode {
                 // TODO: double check that any node can serve this
                 // TODO: can a block change? like what if it gets orphaned?
                 // TODO: make sure re-orgs work properly!
-                Ok(CacheMode::SuccessForever)
+                Ok(Self::SuccessForever)
             }
             "eth_getBlockByNumber" => {
                 // TODO: double check that any node can serve this
                 // TODO: CacheSuccessForever if the block is old enough
                 // TODO: make sure re-orgs work properly!
-                Ok(CacheMode::Standard {
+                Ok(Self::Standard {
                     block: head_block.into(),
                     cache_errors: true,
                 })
             }
             "eth_getBlockTransactionCountByHash" => {
                 // TODO: double check that any node can serve this
-                Ok(CacheMode::SuccessForever)
+                Ok(Self::SuccessForever)
             }
             "eth_getLogs" => {
-                /*
+                //
+                // if we fail to get to_block, then use head_block
+
                 // TODO: think about this more
                 // TODO: jsonrpc has a specific code for this
                 let obj = params
@@ -371,7 +392,7 @@ impl CacheMode {
                     })?;
 
                 if obj.contains_key("blockHash") {
-                    Ok(CacheMode::CacheSuccessForever)
+                    Ok(Self::SuccessForever)
                 } else {
                     let from_block = if let Some(x) = obj.get_mut("fromBlock") {
                         // TODO: use .take instead of clone
@@ -387,11 +408,9 @@ impl CacheMode {
                             *x = json!(block_num);
                         }
 
-                        let block_hash = rpcs.block_hash(&block_num).await?;
-
-                        BlockNumAndHash(block_num, block_hash)
+                        BlockNumOrHash::Num(block_num)
                     } else {
-                        BlockNumAndHash(U64::zero(), H256::zero())
+                        BlockNumOrHash::Num(U64::zero())
                     };
 
                     let to_block = if let Some(x) = obj.get_mut("toBlock") {
@@ -399,67 +418,82 @@ impl CacheMode {
                         // what if its a hash?
                         let block_num: BlockNumber = serde_json::from_value(x.clone())?;
 
-                        let (block_num, change) =
-                            BlockNumber_to_U64(block_num, head_block.number());
+                        // sometimes people request `from_block=future, to_block=latest`. latest becomes head and then
+                        // TODO: if this is in the future, this cache key won't be very likely to be used again
+                        // TODO: delay here until the app has this block?
+                        let latest_block = head_block.number().max(from_block.num());
+
+                        let (block_num, change) = BlockNumber_to_U64(block_num, latest_block);
 
                         if change {
                             trace!("changing toBlock in eth_getLogs. {} -> {}", x, block_num);
                             *x = json!(block_num);
                         }
 
-                        let block_hash = rpcs.block_hash(&block_num).await?;
-
-                        BlockNumAndHash(block_num, block_hash)
+                        if let Some(app) = app {
+                            // TODO: make a jsonrpc query here? cache rates will be better but it adds a network request
+                            if let Some(block_hash) =
+                                app.balanced_rpcs.blocks_by_number.get(&block_num).await
+                            {
+                                BlockNumOrHash::And(BlockNumAndHash(block_num, block_hash))
+                            } else {
+                                BlockNumOrHash::Num(block_num)
+                            }
+                        } else {
+                            BlockNumOrHash::Num(block_num)
+                        }
                     } else {
-                        head_block.into()
+                        BlockNumOrHash::And(head_block.into())
                     };
 
-                    Ok(CacheMode::CacheRange {
+                    let cache_block = if let BlockNumOrHash::And(x) = &to_block {
+                        x.clone()
+                    } else {
+                        BlockNumAndHash::from(head_block)
+                    };
+
+                    Ok(Self::Range {
                         from_block,
                         to_block,
+                        cache_block,
                         cache_errors: true,
                     })
                 }
-                */
-                Ok(CacheMode::Standard {
-                    block: head_block.into(),
-                    cache_errors: true,
-                })
             }
             "eth_getTransactionByBlockHashAndIndex" => {
                 // TODO: check a Cache of recent hashes
                 // try full nodes first. retry will use archive
-                Ok(CacheMode::SuccessForever)
+                Ok(Self::SuccessForever)
             }
-            "eth_getTransactionByHash" => Ok(CacheMode::Never),
-            "eth_getTransactionReceipt" => Ok(CacheMode::Never),
+            "eth_getTransactionByHash" => Ok(Self::Never),
+            "eth_getTransactionReceipt" => Ok(Self::Never),
             "eth_getUncleByBlockHashAndIndex" => {
                 // TODO: check a Cache of recent hashes
                 // try full nodes first. retry will use archive
                 // TODO: what happens if this block is uncled later?
-                Ok(CacheMode::SuccessForever)
+                Ok(Self::SuccessForever)
             }
             "eth_getUncleCountByBlockHash" => {
                 // TODO: check a Cache of recent hashes
                 // try full nodes first. retry will use archive
                 // TODO: what happens if this block is uncled later?
-                Ok(CacheMode::SuccessForever)
+                Ok(Self::SuccessForever)
             }
             "eth_maxPriorityFeePerGas" => {
                 // TODO: this might be too aggressive. i think it can change before a block is mined
-                Ok(CacheMode::Standard {
+                Ok(Self::Standard {
                     block: head_block.into(),
                     cache_errors: false,
                 })
             }
-            "eth_sendRawTransaction" => Ok(CacheMode::Never),
-            "net_listening" => Ok(CacheMode::SuccessForever),
-            "net_version" => Ok(CacheMode::SuccessForever),
+            "eth_sendRawTransaction" => Ok(Self::Never),
+            "net_listening" => Ok(Self::SuccessForever),
+            "net_version" => Ok(Self::SuccessForever),
             method => match get_block_param_id(method) {
                 Some(block_param_id) => {
                     let block = clean_block_number(params, block_param_id, head_block, app).await?;
 
-                    Ok(CacheMode::Standard {
+                    Ok(Self::Standard {
                         block,
                         cache_errors: true,
                     })
@@ -480,7 +514,7 @@ impl CacheMode {
     }
 
     #[inline]
-    pub fn from_block(&self) -> Option<&BlockNumAndHash> {
+    pub fn from_block(&self) -> Option<&BlockNumOrHash> {
         match self {
             Self::SuccessForever => None,
             Self::Never => None,
@@ -494,13 +528,14 @@ impl CacheMode {
         !matches!(self, Self::Never)
     }
 
+    /// get the to_block used **for caching**. This may be the to_block in the request, or it might be the current head block.
     #[inline]
     pub fn to_block(&self) -> Option<&BlockNumAndHash> {
         match self {
             Self::SuccessForever => None,
             Self::Never => None,
             Self::Standard { block, .. } => Some(block),
-            Self::Range { to_block, .. } => Some(to_block),
+            Self::Range { cache_block, .. } => Some(cache_block),
         }
     }
 }
