@@ -402,11 +402,12 @@ impl CacheMode {
                         let (block_num, change) =
                             BlockNumber_to_U64(block_num, head_block.number());
 
-                        if change {
-                            // TODO: include the hash instead of the number?
-                            trace!("changing fromBlock in eth_getLogs. {} -> {}", x, block_num);
-                            *x = json!(block_num);
-                        }
+                        // TODO: double check this. it scares me
+                        // if change {
+                        //     // TODO: include the hash instead of the number?
+                        //     trace!("changing fromBlock in eth_getLogs. {} -> {}", x, block_num);
+                        //     *x = json!(block_num);
+                        // }
 
                         BlockNumOrHash::Num(block_num)
                     } else {
@@ -425,10 +426,11 @@ impl CacheMode {
 
                         let (block_num, change) = BlockNumber_to_U64(block_num, latest_block);
 
-                        if change {
-                            trace!("changing toBlock in eth_getLogs. {} -> {}", x, block_num);
-                            *x = json!(block_num);
-                        }
+                        // TODO: double check this. it scares me
+                        // if change {
+                        //     trace!("changing toBlock in eth_getLogs. {} -> {}", x, block_num);
+                        //     *x = json!(block_num);
+                        // }
 
                         if let Some(app) = app {
                             // TODO: make a jsonrpc query here? cache rates will be better but it adds a network request
