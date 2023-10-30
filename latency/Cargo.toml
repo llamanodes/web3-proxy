@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-portable-atomic = { version = "1.5.0", features = ["float"] }
+portable-atomic = { version = "1.5.1", features = ["float"] }
 serde = { version = "1.0.190", features = [] }
 tokio = { version = "1.33.0", features = ["full"] }
 tracing = "0.1.40"
