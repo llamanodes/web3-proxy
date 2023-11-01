@@ -72,7 +72,7 @@ pub async fn clean_block_number<'a>(
     block_param_id: usize,
     head_block: &'a Web3ProxyBlock,
     app: Option<&'a App>,
-) -> Web3ProxyResult<BlockNumAndHash> {
+) -> Web3ProxyResult<BlockNumOrHash> {
     match params.as_array_mut() {
         None => {
             // TODO: this needs the correct error code in the response
@@ -83,14 +83,14 @@ pub async fn clean_block_number<'a>(
                 if params.len() == block_param_id {
                     // add the latest block number to the end of the params
                     params.push(json!(head_block.number()));
-                } else {
-                    // don't modify the request. only cache with current block
-                    // TODO: more useful log that include the
-                    warn!("unexpected params length");
-                }
 
-                // don't modify params, just cache with the current block
-                Ok(head_block.into())
+                    Ok(head_block.into())
+                } else {
+                    // don't modify the request
+                    Err(Web3ProxyError::BadRequest(
+                        "unexpected params length".into(),
+                    ))
+                }
             }
             Some(x) => {
                 // dig into the json value to find a BlockNumber or similar block identifier
@@ -113,7 +113,7 @@ pub async fn clean_block_number<'a>(
                                 .await
                                 .context("fetching block number from hash")?;
 
-                            (BlockNumAndHash::from(&block), false)
+                            (BlockNumOrHash::from(&block), false)
                         } else {
                             return Err(anyhow::anyhow!(
                                 "app missing. cannot find block number from hash"
@@ -175,28 +175,25 @@ pub async fn clean_block_number<'a>(
                         (head_block.into(), changed)
                     } else if let Some(app) = app {
                         // TODO: make a jsonrpc query here? cache rates will be better but it adds a network request
-                        let block_hash = app
-                            .balanced_rpcs
-                            .blocks_by_number
-                            .get(&block_num)
-                            .await
-                            .context("fetching block hash from number")?;
+                        // todo!("don't require the hash. just try to get it. same for eth_getLogs");
+                        // let block_hash = app
+                        //     .balanced_rpcs
+                        //     .blocks_by_number
+                        //     .get(&block_num)
+                        //     .await
+                        //     .context("fetching block hash from number")?;
 
-                        // TODO: make a jsonrpc query here? cache rates will be better but it adds a network request
-                        let block = app
-                            .balanced_rpcs
-                            .blocks_by_hash
-                            .get(&block_hash)
-                            .await
-                            .context("fetching block from hash")?;
+                        // // TODO: make a jsonrpc query here? cache rates will be better but it adds a network request
+                        // let block = app
+                        //     .balanced_rpcs
+                        //     .blocks_by_hash
+                        //     .get(&block_hash)
+                        //     .await
+                        //     .context("fetching block from hash")?;
 
-                        // TODO: do true here? will that work for **all** methods on **all** chains? if not we need something smarter
-                        (BlockNumAndHash::from(&block), changed)
+                        (BlockNumOrHash::Num(block_num), changed)
                     } else {
-                        return Err(anyhow::anyhow!(
-                            "app missing. cannot find block number from hash"
-                        )
-                        .into());
+                        (BlockNumOrHash::Num(block_num), changed)
                     }
                 };
 
@@ -240,7 +237,6 @@ impl From<&Web3ProxyBlock> for BlockNumOrHash {
 pub enum CacheMode {
     SuccessForever,
     Standard {
-        /// TODO: i don't think i'm using this correctly everywhere. i think we return an error if this can't be found when we should just allow the number
         block_needed: BlockNumOrHash,
         cache_block: BlockNumAndHash,
         /// cache jsonrpc errors (server errors are never cached)
@@ -495,11 +491,17 @@ impl CacheMode {
             "net_version" => Ok(Self::SuccessForever),
             method => match get_block_param_id(method) {
                 Some(block_param_id) => {
-                    let block = clean_block_number(params, block_param_id, head_block, app).await?;
+                    let block_needed =
+                        clean_block_number(params, block_param_id, head_block, app).await?;
+
+                    let cache_block = match &block_needed {
+                        BlockNumOrHash::And(block) => block.clone(),
+                        BlockNumOrHash::Num(_) => head_block.into(),
+                    };
 
                     Ok(Self::Standard {
-                        block_needed: BlockNumOrHash::And(block.clone()),
-                        cache_block: block,
+                        block_needed,
+                        cache_block,
                         cache_errors: true,
                     })
                 }
