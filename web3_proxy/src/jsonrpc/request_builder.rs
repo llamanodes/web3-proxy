@@ -355,7 +355,7 @@ impl ValidatedRequest {
             _ => CacheMode::Never,
         };
 
-        let connect_timeout = Duration::from_secs(3);
+        let connect_timeout = Duration::from_secs(10);
         let expire_timeout = max_wait.unwrap_or_else(|| Duration::from_secs(295));
 
         let x = Self {
@@ -512,8 +512,7 @@ impl ValidatedRequest {
 
     #[inline]
     pub fn connect_timeout_at(&self) -> Instant {
-        // TODO: get from config
-        self.start_instant + Duration::from_secs(3)
+        self.start_instant + self.connect_timeout
     }
 
     #[inline]
@@ -525,7 +524,7 @@ impl ValidatedRequest {
     pub fn expire_at(&self) -> Instant {
         // TODO: get from config
         // erigon's timeout is 5 minutes so we want it shorter than that
-        self.start_instant + Duration::from_secs(295)
+        self.start_instant + self.expire_timeout
     }
 
     #[inline]
