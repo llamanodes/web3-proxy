@@ -196,7 +196,7 @@ impl Web3Rpcs {
 
         // TODO: should this be spawned and then we just hold onto the handle here?
         let mut consensus_finder =
-            ConsensusFinder::new(Some(self.max_head_block_age), Some(self.max_head_block_lag));
+            ConsensusFinder::new(Some(self.max_head_block_age), self.max_head_block_lag);
 
         // TODO: what timeout on block receiver? we want to keep consensus_finder fresh so that server tiers are correct
         let triple_block_time = average_block_interval(self.chain_id).mul_f32(3.0);
