@@ -1,5 +1,5 @@
 use crate::{
-    block_number::{BlockNumAndHash, BlockNumOrHash, CacheMode},
+    block_number::{BlockNumOrHash, CacheMode},
     errors::{Web3ProxyError, Web3ProxyResult},
     frontend::authorization::RequestOrMethod,
     jsonrpc::{self, JsonRpcErrorData, ResponsePayload},
@@ -23,7 +23,7 @@ pub struct JsonRpcQueryCacheKey<'a> {
     /// this is probably a premature optimization
     hash: u64,
     from_block: Option<&'a BlockNumOrHash>,
-    to_block: Option<&'a BlockNumAndHash>,
+    to_block: Option<&'a BlockNumOrHash>,
     cache_jsonrpc_errors: bool,
 }
 
@@ -64,17 +64,19 @@ impl<'a> JsonRpcQueryCacheKey<'a> {
         // TODO: do this without clone
         let from_block = cache_mode.from_block();
         let to_block = cache_mode.to_block();
+        let cache_block = cache_mode.cache_block();
         let cache_jsonrpc_errors = cache_mode.cache_jsonrpc_errors();
 
         let mut hasher = DefaultHashBuilder::default().build_hasher();
 
         from_block.hash(&mut hasher);
         to_block.hash(&mut hasher);
+        cache_block.hash(&mut hasher);
 
         request.method().hash(&mut hasher);
 
         // TODO: make sure preserve_order feature is OFF
-        // TODO: is there a faster way to do this?
+        // TODO: is there a faster way to do this? can we serialize directly into the hasher?
         request.params().to_string().hash(&mut hasher);
 
         cache_jsonrpc_errors.hash(&mut hasher);

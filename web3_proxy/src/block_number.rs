@@ -228,13 +228,21 @@ impl BlockNumOrHash {
     }
 }
 
+impl From<&Web3ProxyBlock> for BlockNumOrHash {
+    fn from(value: &Web3ProxyBlock) -> Self {
+        Self::And(value.into())
+    }
+}
+
 /// TODO: change this to also return the hash needed?
 /// this replaces any "latest" identifiers in the JsonRpcRequest with the current block number which feels like the data is structured wrong
 #[derive(Debug, Default, Hash, Eq, PartialEq)]
 pub enum CacheMode {
     SuccessForever,
     Standard {
-        block: BlockNumAndHash,
+        /// TODO: i don't think i'm using this correctly everywhere. i think we return an error if this can't be found when we should just allow the number
+        block_needed: BlockNumOrHash,
+        cache_block: BlockNumAndHash,
         /// cache jsonrpc errors (server errors are never cached)
         cache_errors: bool,
     },
@@ -305,7 +313,8 @@ impl CacheMode {
 
         if let Some(head_block) = head_block {
             Self::Standard {
-                block: head_block.into(),
+                block_needed: head_block.into(),
+                cache_block: head_block.into(),
                 cache_errors: true,
             }
         } else {
@@ -320,18 +329,6 @@ impl CacheMode {
     ) -> Web3ProxyResult<Self> {
         let params = &mut request.params;
 
-        if matches!(params, serde_json::Value::Null) {
-            // no params given. cache with the head block
-            if let Some(head_block) = head_block {
-                return Ok(Self::Standard {
-                    block: head_block.into(),
-                    cache_errors: true,
-                });
-            } else {
-                return Ok(Self::Never);
-            }
-        }
-
         if head_block.is_none() {
             // since we don't have a head block, i don't trust our anything enough to cache
             return Ok(Self::Never);
@@ -339,11 +336,21 @@ impl CacheMode {
 
         let head_block = head_block.expect("head_block was just checked above");
 
+        if matches!(params, serde_json::Value::Null) {
+            // no params given. cache with the head block
+            return Ok(Self::Standard {
+                block_needed: head_block.into(),
+                cache_block: head_block.into(),
+                cache_errors: true,
+            });
+        }
+
         if let Some(params) = params.as_array() {
             if params.is_empty() {
                 // no params given. cache with the head block
                 return Ok(Self::Standard {
-                    block: head_block.into(),
+                    block_needed: head_block.into(),
+                    cache_block: head_block.into(),
                     cache_errors: true,
                 });
             }
@@ -354,10 +361,7 @@ impl CacheMode {
                 // TODO: make sure re-orgs work properly!
                 Ok(Self::SuccessForever)
             }
-            "eth_gasPrice" => Ok(Self::Standard {
-                block: head_block.into(),
-                cache_errors: false,
-            }),
+            "eth_gasPrice" => Ok(Self::Never),
             "eth_getBlockByHash" => {
                 // TODO: double check that any node can serve this
                 // TODO: can a block change? like what if it gets orphaned?
@@ -369,7 +373,8 @@ impl CacheMode {
                 // TODO: CacheSuccessForever if the block is old enough
                 // TODO: make sure re-orgs work properly!
                 Ok(Self::Standard {
-                    block: head_block.into(),
+                    block_needed: head_block.into(),
+                    cache_block: head_block.into(),
                     cache_errors: true,
                 })
             }
@@ -483,10 +488,7 @@ impl CacheMode {
             }
             "eth_maxPriorityFeePerGas" => {
                 // TODO: this might be too aggressive. i think it can change before a block is mined
-                Ok(Self::Standard {
-                    block: head_block.into(),
-                    cache_errors: false,
-                })
+                Ok(Self::Never)
             }
             "eth_sendRawTransaction" => Ok(Self::Never),
             "net_listening" => Ok(Self::SuccessForever),
@@ -496,7 +498,8 @@ impl CacheMode {
                     let block = clean_block_number(params, block_param_id, head_block, app).await?;
 
                     Ok(Self::Standard {
-                        block,
+                        block_needed: BlockNumOrHash::And(block.clone()),
+                        cache_block: block,
                         cache_errors: true,
                     })
                 }
@@ -530,13 +533,26 @@ impl CacheMode {
         !matches!(self, Self::Never)
     }
 
-    /// get the to_block used **for caching**. This may be the to_block in the request, or it might be the current head block.
     #[inline]
-    pub fn to_block(&self) -> Option<&BlockNumAndHash> {
+    pub fn to_block(&self) -> Option<&BlockNumOrHash> {
         match self {
             Self::SuccessForever => None,
             Self::Never => None,
-            Self::Standard { block, .. } => Some(block),
+            Self::Standard {
+                block_needed: block,
+                ..
+            } => Some(block),
+            Self::Range { to_block, .. } => Some(to_block),
+        }
+    }
+
+    /// get the to_block used **for caching**. This may be the to_block in the request, or it might be the current head block.
+    #[inline]
+    pub fn cache_block(&self) -> Option<&BlockNumAndHash> {
+        match self {
+            Self::SuccessForever => None,
+            Self::Never => None,
+            Self::Standard { cache_block, .. } => Some(cache_block),
             Self::Range { cache_block, .. } => Some(cache_block),
         }
     }
@@ -579,7 +595,8 @@ mod test {
         assert_eq!(
             x,
             CacheMode::Standard {
-                block: (&head_block).into(),
+                block_needed: (&head_block).into(),
+                cache_block: (&head_block).into(),
                 cache_errors: true
             }
         );
@@ -616,7 +633,8 @@ mod test {
         assert_eq!(
             x,
             CacheMode::Standard {
-                block: (&head_block).into(),
+                block_needed: (&head_block).into(),
+                cache_block: (&head_block).into(),
                 cache_errors: true
             }
         );
