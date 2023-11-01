@@ -394,11 +394,14 @@ impl ConsensusFinder {
         new_block: Option<Web3ProxyBlock>,
     ) -> Web3ProxyResult<bool> {
         let new_ranked_rpcs = match self
-            .find_consensus_connections(web3_rpcs)
+            .rank_rpcs(web3_rpcs)
             .await
             .web3_context("error while finding consensus head block!")?
         {
-            None => return Ok(false),
+            None => {
+                warn!("no ranked rpcs found!");
+                return Ok(false);
+            }
             Some(x) => x,
         };
 
@@ -748,10 +751,7 @@ impl ConsensusFinder {
         Ok(())
     }
 
-    pub async fn find_consensus_connections(
-        &mut self,
-        web3_rpcs: &Web3Rpcs,
-    ) -> Web3ProxyResult<Option<RankedRpcs>> {
+    pub async fn rank_rpcs(&mut self, web3_rpcs: &Web3Rpcs) -> Web3ProxyResult<Option<RankedRpcs>> {
         self.update_tiers().await?;
 
         let minmax_block = self
