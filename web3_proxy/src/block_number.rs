@@ -175,23 +175,13 @@ pub async fn clean_block_number<'a>(
                         (head_block.into(), changed)
                     } else if let Some(app) = app {
                         // TODO: make a jsonrpc query here? cache rates will be better but it adds a network request
-                        // todo!("don't require the hash. just try to get it. same for eth_getLogs");
-                        // let block_hash = app
-                        //     .balanced_rpcs
-                        //     .blocks_by_number
-                        //     .get(&block_num)
-                        //     .await
-                        //     .context("fetching block hash from number")?;
-
-                        // // TODO: make a jsonrpc query here? cache rates will be better but it adds a network request
-                        // let block = app
-                        //     .balanced_rpcs
-                        //     .blocks_by_hash
-                        //     .get(&block_hash)
-                        //     .await
-                        //     .context("fetching block from hash")?;
-
-                        (BlockNumOrHash::Num(block_num), changed)
+                        if let Some(block_hash) =
+                            app.balanced_rpcs.blocks_by_number.get(&block_num).await
+                        {
+                            (BlockNumAndHash(block_num, block_hash).into(), changed)
+                        } else {
+                            (BlockNumOrHash::Num(block_num), changed)
+                        }
                     } else {
                         (BlockNumOrHash::Num(block_num), changed)
                     }
@@ -379,9 +369,6 @@ impl CacheMode {
                 Ok(Self::SuccessForever)
             }
             "eth_getLogs" => {
-                //
-                // if we fail to get to_block, then use head_block
-
                 // TODO: think about this more
                 // TODO: jsonrpc has a specific code for this
                 let obj = params
