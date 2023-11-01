@@ -187,12 +187,13 @@ pub async fn clean_block_number<'a>(
                     }
                 };
 
-                // if we changed "latest" to an actual block, update the params to match
-                // TODO: should we do hash or number? some functions work with either, but others need a number :cry:
-                if change {
-                    trace!(old=%x, new=%block.num(), "changing block number");
-                    *x = json!(block.num());
-                }
+                // TODO: this scares me. we need it, so bring it back soon. but for now i think its breaking things
+                // // if we changed "latest" to an actual block, update the params to match
+                // // TODO: should we do hash or number? some functions work with either, but others need a number :cry:
+                // if change {
+                //     trace!(old=%x, new=%block.num(), "changing block number");
+                //     *x = json!(block.num());
+                // }
 
                 Ok(block)
             }
