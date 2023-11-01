@@ -1,8 +1,8 @@
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::{str::FromStr, time::Duration};
 use tracing::{info, warn};
 use web3_proxy::prelude::ethers::{
-    prelude::{Block, Transaction, TxHash, H256, U256, U64},
+    prelude::{Block, Log, Transaction, TxHash, H256, U256, U64},
     providers::{Http, JsonRpcClient, Quorum, QuorumProvider, WeightedProvider},
     types::{transaction::eip2718::TypedTransaction, Address, Bytes, Eip1559TransactionRequest},
 };
@@ -230,7 +230,7 @@ async fn it_matches_anvil() {
     let code: Bytes = quorum_provider
         .request(
             "eth_getCode",
-            ("0xce0042B868300000d44A59004Da54A005ffdcf9f", "latest"),
+            ["0xce0042B868300000d44A59004Da54A005ffdcf9f", "latest"],
         )
         .await
         .unwrap();
@@ -256,6 +256,46 @@ async fn it_matches_anvil() {
         .await
         .unwrap();
     assert!(future_block.is_none());
+
+    let logs: Vec<Log> = quorum_provider
+        .request("eth_getLogs", json!([{}]))
+        .await
+        .unwrap();
+    info!(?logs);
+
+    let logs: Vec<Log> = quorum_provider
+        .request("eth_getLogs", json!([{"fromBlock": U64::zero()}]))
+        .await
+        .unwrap();
+    info!(?logs);
+
+    let logs: Vec<Log> = quorum_provider
+        .request(
+            "eth_getLogs",
+            json!([{"fromBlock": U64::zero(), "toBlock": block_number}]),
+        )
+        .await
+        .unwrap();
+    info!(?logs);
+
+    let logs: Vec<Log> = quorum_provider
+        .request(
+            "eth_getLogs",
+            json!([{"fromBlock": "earliest", "toBlock": "latest"}]),
+        )
+        .await
+        .unwrap();
+    info!(?logs);
+
+    // // TODO: i prefer our way of erring on this, but we should probably match what everyone else does
+    // let logs: Vec<Log> = quorum_provider
+    //     .request(
+    //         "eth_getLogs",
+    //         json!([{"fromBlock": U64::zero(), "toBlock": U64::MAX}]),
+    //     )
+    //     .await
+    //     .unwrap();
+    // info!(?logs);
 
     // todo!("lots more requests");
 
