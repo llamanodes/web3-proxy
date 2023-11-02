@@ -284,7 +284,7 @@ impl CacheMode {
                 warn!(
                     method = %request.method,
                     params = ?request.params,
-                    "no servers available to get block from params but head block known. caching with head block"
+                    "no servers available to get block from params"
                 );
             }
             Err(err) => {
@@ -292,7 +292,7 @@ impl CacheMode {
                     method = %request.method,
                     params = ?request.params,
                     ?err,
-                    "could not get block from params. caching with head block"
+                    "could not get block from params"
                 );
             }
         }
@@ -407,14 +407,14 @@ impl CacheMode {
                         // what if its a hash?
                         let block_num: BlockNumber = serde_json::from_value(x.clone())?;
 
-                        // sometimes people request `from_block=future, to_block=latest`. latest becomes head and then
+                        // sometimes people request `from_block=head+1, to_block="latest"`. latest becomes head and then theres a problem
                         // TODO: if this is in the future, this cache key won't be very likely to be used again
                         // TODO: delay here until the app has this block?
                         let latest_block = head_block.number().max(from_block.num());
 
                         let (block_num, change) = BlockNumber_to_U64(block_num, latest_block);
 
-                        // TODO: double check this. it scares me
+                        // TODO: double check this. it scares me but i think we need it
                         // if change {
                         //     trace!("changing toBlock in eth_getLogs. {} -> {}", x, block_num);
                         //     *x = json!(block_num);
@@ -666,4 +666,6 @@ mod test {
         // TODO: cache with the head block instead?
         matches!(x, CacheMode::Never);
     }
+
+    // TODO: tests for eth_getLogs
 }
