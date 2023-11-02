@@ -265,8 +265,8 @@ impl Web3Rpc {
     /// sort by...
     /// - rate limit (ascending)
     /// - backups last
-    /// - tier (ascending)
     /// - block number (descending)
+    /// - tier (ascending)
     /// TODO: tests on this!
     /// TODO: should tier or block number take priority?
     /// TODO: should this return a struct that implements sorting traits?
@@ -308,7 +308,7 @@ impl Web3Rpc {
     ) -> ((Instant, bool, Reverse<U64>, u32), Duration) {
         let sort_on = self.sort_on(max_block, start_instant);
 
-        // // TODO: once we do power-of-2 choices, put median_latency back
+        // // TODO: once we do power-of-2 choices, use median_latency here instead of weighted_latency. though its already part of tiers so maybe its fine
         // let median_latency = self
         //     .median_latency
         //     .as_ref()
