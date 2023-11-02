@@ -348,6 +348,7 @@ impl ValidatedRequest {
         }
 
         // now that kafka has logged the user's original params, we can calculate the cache key
+        // calculating the cache key might alter the params
 
         // TODO: modify CacheMode::new to wait for a future block if one is requested! be sure to update head_block too!
         let cache_mode = match &mut request {
@@ -498,7 +499,13 @@ impl ValidatedRequest {
 
     #[inline]
     pub fn max_block_needed(&self) -> Option<U64> {
-        self.cache_mode.to_block().map(|x| x.num())
+        if let Some(to_block) = self.cache_mode.to_block() {
+            Some(to_block.num())
+        } else {
+            self.head_block
+                .as_ref()
+                .map(|head_block| head_block.number())
+        }
     }
 
     #[inline]
