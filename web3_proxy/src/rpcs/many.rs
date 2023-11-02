@@ -40,8 +40,8 @@ pub struct Web3Rpcs {
     /// TODO: hopefully this not being an async lock will be okay. if you need it across awaits, clone the arc
     pub(crate) by_name: RwLock<HashMap<String, Arc<Web3Rpc>>>,
     /// all providers with the same consensus head block. won't update if there is no `self.watch_head_block`
-    /// TODO: document that this is a watch sender and not a broadcast! if things get busy, blocks might get missed
     /// TODO: why is watch_head_block in an Option, but this one isn't?
+    /// TODO: document that this is a watch sender and not a broadcast! if things get busy, blocks might get missed
     /// Geth's subscriptions have the same potential for skipping blocks.
     pub(crate) watch_ranked_rpcs: watch::Sender<Option<Arc<RankedRpcs>>>,
     /// this head receiver makes it easy to wait until there is a new block
