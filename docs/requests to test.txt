@@ -1,0 +1,44 @@
+{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "eth_call",
+    "params": [
+        {
+            "from": null,
+            "to": "0x72a19342e8F1838460eBFCCEf09F6585e32db86E",
+            "data": "0xaa33fedb0000000000000000000000005668ead1edb8e2a4d724c8fb9cb5ffeabeb422dc0000000000000000000000000000000000000000000000000000000000000002"
+        },
+        "latest"
+    ]
+}
+{
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "eth_getBlockByNumber",
+    "params": [
+        "0x111cdd4",
+        false
+    ]
+}
+{
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "eth_getBlockByNumber",
+    "params": [
+        "0x111cdd5",
+        false
+    ]
+}
+{
+    "jsonrpc": "2.0",
+    "id": 4,
+    "method": "eth_call",
+    "params": [
+        {
+            "from": null,
+            "to": "0xC51D3287A8c20dc865dF7b5Da6f5b2d596eE694B",
+            "data": "0x38fff2d0"
+        },
+        "latest"
+    ]
+}
