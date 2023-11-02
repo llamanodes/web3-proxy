@@ -73,7 +73,9 @@ pub enum ShouldWaitForBlock {
 
 #[derive(Clone, Debug, Serialize)]
 enum SortMethod {
+    /// shuffle the servers randomly instead of by latency
     Shuffle,
+    /// sort the servers by latency (among other things)
     Sort,
 }
 
@@ -87,6 +89,7 @@ pub struct RankedRpcs {
     pub head_block: Web3ProxyBlock,
     pub num_synced: usize,
     pub backups_needed: bool,
+    pub check_block_data: bool,
 
     pub(crate) inner: HashSet<Arc<Web3Rpc>>,
 
@@ -102,7 +105,11 @@ pub struct RpcsForRequest {
 }
 
 impl RankedRpcs {
-    pub fn from_rpcs(rpcs: Vec<Arc<Web3Rpc>>, head_block: Option<Web3ProxyBlock>) -> Self {
+    pub fn from_rpcs(
+        rpcs: Vec<Arc<Web3Rpc>>,
+        head_block: Option<Web3ProxyBlock>,
+        check_block_data: bool,
+    ) -> Self {
         // we don't need to sort the rpcs now. we will sort them when a request neds them
         // TODO: the shame about this is that we lose just being able to compare 2 random servers
 
@@ -119,6 +126,7 @@ impl RankedRpcs {
 
         Self {
             backups_needed,
+            check_block_data,
             head_block,
             inner: rpcs,
             num_synced,
@@ -195,6 +203,7 @@ impl RankedRpcs {
 
             let consensus = RankedRpcs {
                 backups_needed,
+                check_block_data: true,
                 head_block: best_block,
                 sort_mode,
                 inner: best_rpcs,
@@ -233,16 +242,18 @@ impl RankedRpcs {
                 continue;
             }
 
-            if let Some(block_needed) = min_block_needed {
-                if !rpc.has_block_data(block_needed) {
-                    outer_for_request.push(rpc);
-                    continue;
+            if self.check_block_data {
+                if let Some(block_needed) = min_block_needed {
+                    if !rpc.has_block_data(block_needed) {
+                        outer_for_request.push(rpc);
+                        continue;
+                    }
                 }
-            }
-            if let Some(block_needed) = max_block_needed {
-                if !rpc.has_block_data(block_needed) {
-                    outer_for_request.push(rpc);
-                    continue;
+                if let Some(block_needed) = max_block_needed {
+                    if !rpc.has_block_data(block_needed) {
+                        outer_for_request.push(rpc);
+                        continue;
+                    }
                 }
             }
 

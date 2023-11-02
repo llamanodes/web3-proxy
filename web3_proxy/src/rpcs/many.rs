@@ -45,6 +45,7 @@ pub struct Web3Rpcs {
     /// Geth's subscriptions have the same potential for skipping blocks.
     pub(crate) watch_ranked_rpcs: watch::Sender<Option<Arc<RankedRpcs>>>,
     /// this head receiver makes it easy to wait until there is a new block
+    /// this is None if none of the child Rpcs are subscribed to newHeads
     pub(super) watch_head_block: Option<watch::Sender<Option<Web3ProxyBlock>>>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
     /// all blocks, including uncles
@@ -416,7 +417,11 @@ impl Web3Rpcs {
                 let rpcs = self.by_name.read().values().cloned().collect();
 
                 // TODO: does this need the head_block? i don't think so
-                let x = RankedRpcs::from_rpcs(rpcs, web3_request.head_block.clone());
+                let x = RankedRpcs::from_rpcs(
+                    rpcs,
+                    web3_request.head_block.clone(),
+                    self.watch_head_block.is_some(),
+                );
 
                 Arc::new(x)
             };
