@@ -217,6 +217,8 @@ async fn it_matches_anvil() {
         .unwrap();
     info!(%fund_tx_hash);
 
+    yield_now().await;
+
     // deploy singleton deployer
     // TODO: send through the quorum provider. it should detect that its already confirmed
     let deploy_tx: H256 = proxy_provider.request("eth_sendRawTransaction", ["0xf9016c8085174876e8008303c4d88080b90154608060405234801561001057600080fd5b50610134806100206000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c80634af63f0214602d575b600080fd5b60cf60048036036040811015604157600080fd5b810190602081018135640100000000811115605b57600080fd5b820183602082011115606c57600080fd5b80359060200191846001830284011164010000000083111715608d57600080fd5b91908080601f016020809104026020016040519081016040528093929190818152602001838380828437600092019190915250929550509135925060eb915050565b604080516001600160a01b039092168252519081900360200190f35b6000818351602085016000f5939250505056fea26469706673582212206b44f8a82cb6b156bfcc3dc6aadd6df4eefd204bc928a4397fd15dacf6d5320564736f6c634300060200331b83247000822470"]).await.unwrap();
@@ -226,6 +228,8 @@ async fn it_matches_anvil() {
             .parse()
             .unwrap()
     );
+
+    yield_now().await;
 
     let code: Bytes = quorum_provider
         .request(
@@ -245,6 +249,8 @@ async fn it_matches_anvil() {
         .unwrap()
         .unwrap();
     info!(?deploy_tx);
+
+    yield_now().await;
 
     let head_block_num: U64 = quorum_provider
         .request("eth_blockNumber", ())
