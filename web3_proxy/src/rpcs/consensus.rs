@@ -102,7 +102,7 @@ pub struct RpcsForRequest {
 }
 
 impl RankedRpcs {
-    pub fn from_rpcs(rpcs: Vec<Arc<Web3Rpc>>, head_block: Option<Web3ProxyBlock>) -> Option<Self> {
+    pub fn from_rpcs(rpcs: Vec<Arc<Web3Rpc>>, head_block: Option<Web3ProxyBlock>) -> Self {
         // we don't need to sort the rpcs now. we will sort them when a request neds them
         // TODO: the shame about this is that we lose just being able to compare 2 random servers
 
@@ -117,15 +117,13 @@ impl RankedRpcs {
 
         let sort_mode = SortMethod::Shuffle;
 
-        let ranked_rpcs = RankedRpcs {
+        Self {
             backups_needed,
             head_block,
             inner: rpcs,
             num_synced,
             sort_mode,
-        };
-
-        Some(ranked_rpcs)
+        }
     }
 
     pub fn from_votes(
@@ -904,12 +902,7 @@ impl RpcsForRequest {
             let error_handler = None;
 
             // todo!("be sure to set server_error if we exit without any rpcs!");
-            #[allow(clippy::never_loop)]
-            loop {
-                if self.request.connect_timeout() {
-                    break;
-                }
-
+            while !self.request.connect_timeout() {
                 let mut earliest_retry_at = None;
                 let mut opened = 0;
                 let mut tried = 0;

@@ -408,7 +408,6 @@ impl Web3Rpcs {
                 ranked_rpcs
             } else if self.watch_head_block.is_some() {
                 // if we are here, this set of rpcs is subscribed to newHeads. But we didn't get a RankedRpcs. that means something is wrong
-                trace!("watch_head_block is some");
                 return Err(Web3ProxyError::NoServersSynced);
             } else {
                 trace!("watch_head_block is none");
@@ -416,12 +415,10 @@ impl Web3Rpcs {
                 // no RankedRpcs, but also no newHeads subscription. This is probably a set of "protected" rpcs or similar
                 let rpcs = self.by_name.read().values().cloned().collect();
 
-                if let Some(x) = RankedRpcs::from_rpcs(rpcs, web3_request.head_block.clone()) {
-                    Arc::new(x)
-                } else {
-                    // i doubt we will ever get here
-                    return Err(Web3ProxyError::NoServersSynced);
-                }
+                // TODO: does this need the head_block? i don't think so
+                let x = RankedRpcs::from_rpcs(rpcs, web3_request.head_block.clone());
+
+                Arc::new(x)
             };
 
         match ranked_rpcs.for_request(web3_request) {
@@ -549,6 +546,7 @@ impl Web3Rpcs {
 
         // TODO: what error code? what data?
         // cloudflare gives {"jsonrpc":"2.0","error":{"code":-32043,"message":"Requested data cannot be older than 128 blocks."},"id":1}
+        // TODO: some queries other providers give "successful" results with null data. i don't like that at all but its what is often expected
         Err(JsonRpcErrorData {
             message: "Requested data is not available".into(),
             code: -32001,
