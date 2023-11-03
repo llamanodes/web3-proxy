@@ -209,6 +209,12 @@ pub struct AppConfig {
     /// optional arguments for your shutdown script.
     pub shutdown_script_args: Vec<String>,
 
+    /// optional script to run before shutting the frontend down.
+    /// this is useful for keeping load balancers happy.
+    pub start_script: Option<String>,
+    /// optional arguments for your shutdown script.
+    pub start_script_args: Vec<String>,
+
     /// Optionally send errors to <https://sentry.io>
     pub sentry_url: Option<Dsn>,
 

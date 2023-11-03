@@ -73,6 +73,8 @@ impl ProxydSubCommand {
         flush_stat_buffer_sender: mpsc::Sender<oneshot::Sender<FlushedStats>>,
         flush_stat_buffer_receiver: mpsc::Receiver<oneshot::Sender<FlushedStats>>,
     ) -> anyhow::Result<()> {
+        let mut terminate_stream = signal::unix::signal(SignalKind::terminate())?;
+
         // tokio has code for catching ctrl+c so we use that to shut down in most cases
         // frontend_shutdown_sender is currently only used in tests, but we might make a /shutdown endpoint or something
         // we do not need this receiver. new receivers are made by `shutdown_sender.subscribe()`
@@ -192,7 +194,21 @@ impl ProxydSubCommand {
             frontend_shutdown_complete_sender,
         ));
 
-        let mut terminate_stream = signal::unix::signal(SignalKind::terminate())?;
+        if let Some(start_script) = spawned_app.app.config.start_script.as_ref() {
+            let start_script = Command::new(start_script)
+                .args(&app.config.start_script_args)
+                .spawn()
+                .expect("failed to execute script");
+
+            match start_script.wait_with_output().await {
+                Ok(x) => {
+                    info!(?x, "start script finished");
+                }
+                Err(err) => {
+                    error!(?err, "start script failed");
+                }
+            };
+        }
 
         // if everything is working, these should all run forever
         let mut exited_with_err = false;
