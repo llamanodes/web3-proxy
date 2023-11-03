@@ -510,7 +510,7 @@ impl Web3ProxyError {
             Self::InvalidBlockBounds { min, max } => {
                 trace!(%min, %max, "InvalidBlockBounds");
                 (
-                    StatusCode::BAD_REQUEST,
+                    StatusCode::OK,
                     JsonRpcErrorData {
                         message: "Invalid blocks bounds requested".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
@@ -524,7 +524,7 @@ impl Web3ProxyError {
             Self::IpAddrParse(err) => {
                 debug!(?err, "IpAddrParse");
                 (
-                    StatusCode::BAD_REQUEST,
+                    StatusCode::OK,
                     JsonRpcErrorData {
                         message: err.to_string().into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
@@ -714,7 +714,7 @@ impl Web3ProxyError {
                         code: -32601,
                         data: Some(json!({
                             "method": method,
-                            "extra": "contact us if you need this",
+                            "extra": "contact us if you need this. https://discord.llamanodes.com/",
                         })),
                     },
                 )
