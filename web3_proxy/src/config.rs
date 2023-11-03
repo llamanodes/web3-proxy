@@ -203,6 +203,12 @@ pub struct AppConfig {
     /// the stats page url for a logged in user. if set, must contain "{rpc_key_id}"
     pub redirect_rpc_key_url: Option<String>,
 
+    /// optional script to run before shutting the frontend down.
+    /// this is useful for keeping load balancers happy.
+    pub shutdown_script: Option<String>,
+    /// optional arguments for your shutdown script.
+    pub shutdown_script_args: Vec<String>,
+
     /// Optionally send errors to <https://sentry.io>
     pub sentry_url: Option<Dsn>,
 

@@ -24,10 +24,10 @@ use std::sync::Arc;
 use std::{iter::once, time::Duration};
 use std::{net::SocketAddr, sync::atomic::Ordering};
 use strum::{EnumCount, EnumIter};
-use tokio::sync::broadcast;
+use tokio::{process::Command, sync::broadcast};
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 use tower_http::{cors::CorsLayer, normalize_path::NormalizePathLayer, trace::TraceLayer};
-use tracing::{error_span, info, trace_span};
+use tracing::{error, error_span, info, trace_span};
 use ulid::Ulid;
 
 #[cfg(feature = "listenfd")]
@@ -364,6 +364,22 @@ pub async fn serve(
         // TODO: option to use with_connect_info. we want it in dev, but not when running behind a proxy, but not
         .with_graceful_shutdown(async move {
             let _ = shutdown_receiver.recv().await;
+
+            if let Some(shutdown_script) = app.config.shutdown_script.as_ref() {
+                let shutdown_script = Command::new(shutdown_script)
+                    .args(&app.config.shutdown_script_args)
+                    .spawn()
+                    .expect("failed to execute script");
+
+                match shutdown_script.wait_with_output().await {
+                    Ok(x) => {
+                        info!(?x, "shutdown script finished");
+                    }
+                    Err(err) => {
+                        error!(?err, "shutdown script failed");
+                    }
+                };
+            }
         })
         .await
         .map_err(Into::into);

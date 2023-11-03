@@ -222,6 +222,7 @@ impl From<&Web3ProxyBlock> for BlockNumOrHash {
     }
 }
 
+/// TODO: have another type that contains &mut Value of the block_needed or from_block+to_block. this will make it easier to modify the request
 /// TODO: change this to also return the hash needed?
 /// this replaces any "latest" identifiers in the JsonRpcRequest with the current block number which feels like the data is structured wrong
 #[derive(Debug, Default, Hash, Eq, PartialEq)]
