@@ -12,6 +12,7 @@ use web3_proxy::prelude::argh::{self, FromArgs};
 use web3_proxy::prelude::futures::StreamExt;
 use web3_proxy::prelude::num::Zero;
 use web3_proxy::prelude::tokio;
+use web3_proxy::prelude::tokio::process::Command;
 use web3_proxy::prelude::tokio::signal::unix::SignalKind;
 use web3_proxy::prelude::tokio::sync::{broadcast, mpsc, oneshot};
 use web3_proxy::prelude::tokio::time::{sleep_until, Instant};
@@ -196,7 +197,7 @@ impl ProxydSubCommand {
 
         if let Some(start_script) = spawned_app.app.config.start_script.as_ref() {
             let start_script = Command::new(start_script)
-                .args(&app.config.start_script_args)
+                .args(&spawned_app.app.config.start_script_args)
                 .spawn()
                 .expect("failed to execute script");
 
