@@ -40,19 +40,19 @@ pipeline {
                         }
                     }
                 }
-                stage('Build and push intel_xeon1 image') {
-                    agent {
-                        label 'intel_xeon1'
-                    }
-                    environment {
-                        ARCH="intel_xeon1"
-                    }
-                    steps {
-                        script {
-                            myBuildandPush.buildAndPush()
-                        }
-                    }
-                }
+                // stage('Build and push intel_xeon1 image') {
+                //     agent {
+                //         label 'intel_xeon1'
+                //     }
+                //     environment {
+                //         ARCH="intel_xeon1"
+                //     }
+                //     steps {
+                //         script {
+                //             myBuildandPush.buildAndPush()
+                //         }
+                //     }
+                // }
             }
         }
         stage('push latest') {
@@ -68,17 +68,17 @@ pipeline {
                         }
                     }
                 }
-                stage('maybe push latest_intel_xeon1 tag') {
-                    agent any
-                    environment {
-                        ARCH="intel_xeon1"
-                    }
-                    steps {
-                        script {
-                            myPushLatest.maybePushLatest()
-                        }
-                    }
-                }
+                // stage('maybe push latest_intel_xeon1 tag') {
+                //     agent any
+                //     environment {
+                //         ARCH="intel_xeon1"
+                //     }
+                //     steps {
+                //         script {
+                //             myPushLatest.maybePushLatest()
+                //         }
+                //     }
+                // }
             }
         }
     }
