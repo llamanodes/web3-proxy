@@ -255,6 +255,7 @@ fn get_block_param_id(method: &str) -> Option<usize> {
         "eth_estimateGas" => Some(1),
         "eth_feeHistory" => Some(1),
         "eth_getBalance" => Some(1),
+        "eth_getBlockByNumber" => Some(0),
         "eth_getBlockReceipts" => Some(0),
         "eth_getBlockTransactionCountByNumber" => Some(0),
         "eth_getCode" => Some(1),
@@ -353,16 +354,6 @@ impl CacheMode {
                 // TODO: can a block change? like what if it gets orphaned?
                 // TODO: make sure re-orgs work properly!
                 Ok(Self::SuccessForever)
-            }
-            "eth_getBlockByNumber" => {
-                // TODO: double check that any node can serve this
-                // TODO: CacheSuccessForever if the block is old enough
-                // TODO: make sure re-orgs work properly!
-                Ok(Self::Standard {
-                    block_needed: head_block.into(),
-                    cache_block: head_block.into(),
-                    cache_errors: true,
-                })
             }
             "eth_getBlockTransactionCountByHash" => {
                 // TODO: double check that any node can serve this
