@@ -206,13 +206,17 @@ pub struct AppConfig {
     /// optional script to run before shutting the frontend down.
     /// this is useful for keeping load balancers happy.
     pub shutdown_script: Option<String>,
+
     /// optional arguments for your shutdown script.
+    #[serde_inline_default(vec![])]
     pub shutdown_script_args: Vec<String>,
 
     /// optional script to run before shutting the frontend down.
     /// this is useful for keeping load balancers happy.
     pub start_script: Option<String>,
+
     /// optional arguments for your shutdown script.
+    #[serde_inline_default(vec![])]
     pub start_script_args: Vec<String>,
 
     /// Optionally send errors to <https://sentry.io>
