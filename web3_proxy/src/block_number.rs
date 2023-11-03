@@ -11,6 +11,7 @@ use ethers::{
     prelude::{BlockNumber, U64},
     types::H256,
 };
+use serde::Serialize;
 use serde_json::json;
 use tracing::{error, trace, warn};
 
@@ -42,7 +43,7 @@ pub fn BlockNumber_to_U64(block_num: BlockNumber, latest_block: U64) -> (U64, bo
     }
 }
 
-#[derive(Clone, Debug, Eq, From, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, From, Hash, PartialEq, Serialize)]
 pub struct BlockNumAndHash(U64, H256);
 
 impl BlockNumAndHash {
@@ -200,7 +201,7 @@ pub async fn clean_block_number<'a>(
     }
 }
 
-#[derive(Debug, From, Hash, Eq, PartialEq)]
+#[derive(Debug, From, Hash, Eq, PartialEq, Serialize)]
 pub enum BlockNumOrHash {
     Num(U64),
     And(BlockNumAndHash),
@@ -272,15 +273,16 @@ fn get_block_param_id(method: &str) -> Option<usize> {
 }
 
 impl CacheMode {
-    /// like `try_new`, but instead of erroring, it will default to caching with the head block
+    /// like `try_new`, but instead of erroring if things can't be cached, it will default to caching with the head block
+    /// this will still error if something is wrong about the request (like the range is too large or invalid)
     /// returns None if this request should not be cached
     pub async fn new<'a>(
         request: &'a mut SingleRequest,
         head_block: Option<&'a Web3ProxyBlock>,
         app: Option<&'a App>,
-    ) -> Self {
+    ) -> Web3ProxyResult<Self> {
         match Self::try_new(request, head_block, app).await {
-            Ok(x) => return x,
+            x @ Ok(_) => return x,
             Err(Web3ProxyError::NoBlocksKnown) => {
                 warn!(
                     method = %request.method,
@@ -288,6 +290,8 @@ impl CacheMode {
                     "no servers available to get block from params"
                 );
             }
+            err @ Err(Web3ProxyError::RangeTooLarge { .. }) => return err,
+            err @ Err(Web3ProxyError::RangeInvalid { .. }) => return err,
             Err(err) => {
                 error!(
                     method = %request.method,
@@ -298,7 +302,7 @@ impl CacheMode {
             }
         }
 
-        if let Some(head_block) = head_block {
+        let fallback = if let Some(head_block) = head_block {
             Self::Standard {
                 block_needed: head_block.into(),
                 cache_block: head_block.into(),
@@ -306,7 +310,9 @@ impl CacheMode {
             }
         } else {
             Self::Never
-        }
+        };
+
+        Ok(fallback)
     }
 
     pub async fn try_new(
@@ -426,6 +432,22 @@ impl CacheMode {
                     } else {
                         BlockNumOrHash::And(head_block.into())
                     };
+
+                    if let Some(range) = to_block.num().checked_sub(from_block.num()) {
+                        if range.as_u64() > 200_000 {
+                            return Err(Web3ProxyError::RangeTooLarge {
+                                from: from_block,
+                                to: to_block,
+                                requested: range,
+                                allowed: 200_000.into(),
+                            });
+                        }
+                    } else {
+                        return Err(Web3ProxyError::RangeInvalid {
+                            from: from_block,
+                            to: to_block,
+                        });
+                    }
 
                     let cache_block = if let BlockNumOrHash::And(x) = &to_block {
                         x.clone()
@@ -652,7 +674,9 @@ mod test {
             x => panic!("{:?}", x),
         }
 
-        let x = CacheMode::new(&mut request, Some(&head_block), None).await;
+        let x = CacheMode::new(&mut request, Some(&head_block), None)
+            .await
+            .unwrap();
 
         // TODO: cache with the head block instead?
         matches!(x, CacheMode::Never);

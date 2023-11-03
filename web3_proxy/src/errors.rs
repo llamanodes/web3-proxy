@@ -1,5 +1,6 @@
 //! Utlities for logging errors for admins and displaying errors to users.
 
+use crate::block_number::BlockNumOrHash;
 use crate::frontend::authorization::Authorization;
 use crate::jsonrpc::{self, JsonRpcErrorData, ParsedResponse, StreamResponse};
 use crate::response_cache::ForwardedResponse;
@@ -150,6 +151,20 @@ pub enum Web3ProxyError {
     ParseBytesError(Option<ethers::types::ParseBytesError>),
     ParseMsgError(siwe::ParseError),
     ParseAddressError,
+    #[display(fmt = "{:?} > {:?}", from, to)]
+    RangeInvalid {
+        from: BlockNumOrHash,
+        to: BlockNumOrHash,
+    },
+    #[display(fmt = "{:?} > {:?}", from, to)]
+    #[error(ignore)]
+    #[from(ignore)]
+    RangeTooLarge {
+        from: BlockNumOrHash,
+        to: BlockNumOrHash,
+        requested: U64,
+        allowed: U64,
+    },
     #[display(fmt = "{:?}, {:?}", _0, _1)]
     RateLimited(Authorization, Option<Instant>),
     Redis(RedisError),
@@ -908,6 +923,41 @@ impl Web3ProxyError {
                         message: "Payment is required to activate premium".into(),
                         code: StatusCode::PAYMENT_REQUIRED.as_u16().into(),
                         data: None,
+                    },
+                )
+            }
+            Self::RangeInvalid { from, to } => {
+                trace!(?from, ?to, "RangeInvalid");
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcErrorData {
+                        message: "invalid block range given".into(),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: Some(json!({
+                            "from": from,
+                            "to": to,
+                        })),
+                    },
+                )
+            }
+            Self::RangeTooLarge {
+                from,
+                to,
+                requested,
+                allowed,
+            } => {
+                trace!(?from, ?to, %requested, %allowed, "RangeTooLarge");
+                (
+                    StatusCode::BAD_REQUEST,
+                    JsonRpcErrorData {
+                        message: "invalid block range given".into(),
+                        code: StatusCode::BAD_REQUEST.as_u16().into(),
+                        data: Some(json!({
+                            "from": from,
+                            "to": to,
+                            "requested": requested,
+                            "allowed": allowed,
+                        })),
                     },
                 )
             }

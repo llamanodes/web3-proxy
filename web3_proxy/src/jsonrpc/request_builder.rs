@@ -352,7 +352,7 @@ impl ValidatedRequest {
 
         // TODO: modify CacheMode::new to wait for a future block if one is requested! be sure to update head_block too!
         let cache_mode = match &mut request {
-            RequestOrMethod::Request(x) => CacheMode::new(x, head_block.as_ref(), app).await,
+            RequestOrMethod::Request(x) => CacheMode::new(x, head_block.as_ref(), app).await?,
             _ => CacheMode::Never,
         };
 
