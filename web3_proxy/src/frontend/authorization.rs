@@ -54,6 +54,7 @@ pub enum RateLimitResult {
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 pub enum AuthorizationType {
+    /// TODO: sometimes localhost should be internal and other times it should be Frontend. make a better separatation
     Internal,
     Frontend,
 }

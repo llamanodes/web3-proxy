@@ -320,13 +320,13 @@ pub async fn serve(
         axum::Server::from_tcp(listener)?
     } else {
         // TODO: allow only listening on localhost? top_config.app.host.parse()?
-        let addr = SocketAddr::from(([0, 0, 0, 0], app.frontend_port.load(Ordering::Relaxed)));
+        let addr = SocketAddr::from(([0, 0, 0, 0], app.frontend_port.load(Ordering::SeqCst)));
 
         axum::Server::try_bind(&addr)?
     };
     #[cfg(not(feature = "listenfd"))]
     let server_builder = {
-        let addr = SocketAddr::from(([0, 0, 0, 0], app.frontend_port.load(Ordering::Relaxed)));
+        let addr = SocketAddr::from(([0, 0, 0, 0], app.frontend_port.load(Ordering::SeqCst)));
 
         axum::Server::try_bind(&addr)?
     };
@@ -358,7 +358,7 @@ pub async fn serve(
     let port = server.local_addr().port();
     info!("listening on port {}", port);
 
-    app.frontend_port.store(port, Ordering::Relaxed);
+    app.frontend_port.store(port, Ordering::SeqCst);
 
     let server = server
         // TODO: option to use with_connect_info. we want it in dev, but not when running behind a proxy, but not

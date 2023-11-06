@@ -155,7 +155,7 @@ impl Web3Rpc {
         let backup = config.backup;
 
         let block_data_limit: AtomicU64 = config.block_data_limit.into();
-        let automatic_block_limit = (block_data_limit.load(atomic::Ordering::Relaxed) == 0)
+        let automatic_block_limit = (block_data_limit.load(atomic::Ordering::Acquire) == 0)
             && block_and_rpc_sender.is_some();
 
         // have a sender for tracking hard limit anywhere. we use this in case we
@@ -287,7 +287,7 @@ impl Web3Rpc {
             head_block = head_block.min(max_block);
         }
 
-        let tier = self.tier.load(atomic::Ordering::Relaxed);
+        let tier = self.tier.load(atomic::Ordering::Acquire);
 
         let backup = self.backup;
 
@@ -354,7 +354,7 @@ impl Web3Rpc {
         let request_scaling = 0.01;
         // TODO: what ordering?
         let active_requests =
-            self.active_requests.load(atomic::Ordering::Relaxed) as f32 * request_scaling + 1.0;
+            self.active_requests.load(atomic::Ordering::Acquire) as f32 * request_scaling + 1.0;
 
         peak_latency.mul_f32(active_requests)
     }
@@ -439,7 +439,7 @@ impl Web3Rpc {
             }
 
             self.block_data_limit
-                .store(limit, atomic::Ordering::Relaxed);
+                .store(limit, atomic::Ordering::Release);
         }
 
         if limit == Some(u64::MAX) {
@@ -763,7 +763,7 @@ impl Web3Rpc {
             .await
             .web3_context("failed check_provider")
         {
-            self.healthy.store(false, atomic::Ordering::Relaxed);
+            self.healthy.store(false, atomic::Ordering::Release);
             return Err(err);
         }
 
@@ -791,14 +791,14 @@ impl Web3Rpc {
                         break;
                     }
 
-                    new_total_requests = rpc.internal_requests.load(atomic::Ordering::Relaxed)
-                        + rpc.external_requests.load(atomic::Ordering::Relaxed);
+                    new_total_requests = rpc.internal_requests.load(atomic::Ordering::Acquire)
+                        + rpc.external_requests.load(atomic::Ordering::Acquire);
 
                     let detailed_healthcheck = new_total_requests - old_total_requests < 5;
 
                     // TODO: if this fails too many times, reset the connection
                     if let Err(err) = rpc.check_health(detailed_healthcheck, error_handler).await {
-                        rpc.healthy.store(false, atomic::Ordering::Relaxed);
+                        rpc.healthy.store(false, atomic::Ordering::Release);
 
                         // TODO: different level depending on the error handler
                         // TODO: if rate limit error, set "retry_at"
@@ -808,7 +808,7 @@ impl Web3Rpc {
                             error!(?err, "health check on {} failed", rpc);
                         }
                     } else {
-                        rpc.healthy.store(true, atomic::Ordering::Relaxed);
+                        rpc.healthy.store(true, atomic::Ordering::Release);
                     }
 
                     // TODO: should we count the requests done inside this health check
@@ -833,7 +833,7 @@ impl Web3Rpc {
                 true
             };
 
-            self.healthy.store(initial_check, atomic::Ordering::Relaxed);
+            self.healthy.store(initial_check, atomic::Ordering::Release);
 
             tokio::spawn(f)
         } else {
@@ -849,7 +849,7 @@ impl Web3Rpc {
 
                     // TODO: if this fails too many times, reset the connection
                     if let Err(err) = rpc.check_provider().await {
-                        rpc.healthy.store(false, atomic::Ordering::Relaxed);
+                        rpc.healthy.store(false, atomic::Ordering::Release);
 
                         // TODO: if rate limit error, set "retry_at"
                         if rpc.backup {
@@ -858,7 +858,7 @@ impl Web3Rpc {
                             error!(?err, "provider check on {} failed", rpc);
                         }
                     } else {
-                        rpc.healthy.store(true, atomic::Ordering::Relaxed);
+                        rpc.healthy.store(true, atomic::Ordering::Release);
                     }
 
                     sleep(Duration::from_secs(health_sleep_seconds)).await;
@@ -904,7 +904,7 @@ impl Web3Rpc {
         let (first_exit, _, _) = select_all(futures).await;
 
         // mark unhealthy
-        self.healthy.store(false, atomic::Ordering::Relaxed);
+        self.healthy.store(false, atomic::Ordering::Release);
 
         debug!(?first_exit, "subscriptions on {} exited", self);
 
@@ -1163,7 +1163,7 @@ impl Web3Rpc {
         // TODO: if websocket is reconnecting, return an error?
 
         if !allow_unhealthy {
-            if !(self.healthy.load(atomic::Ordering::Relaxed)) {
+            if !(self.healthy.load(atomic::Ordering::Acquire)) {
                 return Ok(OpenRequestResult::Failed);
             }
 
@@ -1384,17 +1384,17 @@ impl Serialize for Web3Rpc {
 
         state.serialize_field(
             "external_requests",
-            &self.external_requests.load(atomic::Ordering::Relaxed),
+            &self.external_requests.load(atomic::Ordering::Acquire),
         )?;
 
         state.serialize_field(
             "internal_requests",
-            &self.internal_requests.load(atomic::Ordering::Relaxed),
+            &self.internal_requests.load(atomic::Ordering::Acquire),
         )?;
 
         state.serialize_field(
             "active_requests",
-            &self.active_requests.load(atomic::Ordering::Relaxed),
+            &self.active_requests.load(atomic::Ordering::Acquire),
         )?;
 
         {
@@ -1423,7 +1423,7 @@ impl Serialize for Web3Rpc {
             state.serialize_field("weighted_latency_ms", &weighted_latency_ms)?;
         }
         {
-            let healthy = self.healthy.load(atomic::Ordering::Relaxed);
+            let healthy = self.healthy.load(atomic::Ordering::Acquire);
             state.serialize_field("healthy", &healthy)?;
         }
 
@@ -1446,7 +1446,7 @@ impl fmt::Debug for Web3Rpc {
 
         f.field("backup", &self.backup);
 
-        f.field("tier", &self.tier.load(atomic::Ordering::Relaxed));
+        f.field("tier", &self.tier.load(atomic::Ordering::Acquire));
 
         f.field("weighted_ms", &self.weighted_peak_latency().as_millis());
 

@@ -765,7 +765,7 @@ impl App {
             // TODO: what interval? i don't think we use it
             // i tried and failed to `impl JsonRpcClient for Web3ProxyApi`
             // i tried and failed to set up ipc. http is already running, so lets just use that
-            let frontend_port = self.frontend_port.load(Ordering::Relaxed);
+            let frontend_port = self.frontend_port.load(Ordering::SeqCst);
 
             if frontend_port == 0 {
                 panic!("frontend is not running. cannot create provider yet");
@@ -1305,22 +1305,22 @@ impl App {
 
         let (code, response) = match last_response {
             Ok(response_data) => {
-                web3_request.error_response.store(false, Ordering::Relaxed);
+                web3_request.error_response.store(false, Ordering::Release);
 
                 // TODO: is it true that all jsonrpc errors are user errors?
                 web3_request
                     .user_error_response
-                    .store(response_data.is_jsonrpc_err(), Ordering::Relaxed);
+                    .store(response_data.is_jsonrpc_err(), Ordering::Release);
 
                 (StatusCode::OK, response_data)
             }
             Err(err) => {
                 // max tries exceeded. return the error
 
-                web3_request.error_response.store(true, Ordering::Relaxed);
+                web3_request.error_response.store(true, Ordering::Release);
                 web3_request
                     .user_error_response
-                    .store(false, Ordering::Relaxed);
+                    .store(false, Ordering::Release);
 
                 err.as_json_response_parts(web3_request.id())
             }
@@ -1523,7 +1523,7 @@ impl App {
                     // TODO: only charge for archive if it gave a result
                     web3_request
                         .archive_request
-                        .store(true, atomic::Ordering::Relaxed);
+                        .store(true, atomic::Ordering::Release);
 
                     // TODO: we don't actually want try_send_all. we want the first non-null, non-error response
                     self

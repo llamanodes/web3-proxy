@@ -22,7 +22,7 @@ pub async fn serve(
         .layer(Extension(app.clone()));
 
     // note: the port here might be 0
-    let port = app.prometheus_port.load(Ordering::Relaxed);
+    let port = app.prometheus_port.load(Ordering::SeqCst);
     // TODO: config for the host?
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
@@ -34,7 +34,7 @@ pub async fn serve(
     let port = server.local_addr().port();
     info!("prometheus listening on port {}", port);
 
-    app.prometheus_port.store(port, Ordering::Relaxed);
+    app.prometheus_port.store(port, Ordering::SeqCst);
 
     server
         .with_graceful_shutdown(async move {

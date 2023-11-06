@@ -49,14 +49,17 @@ where
     /// filter duplicates and send the rest to any subscribers
     /// TODO: change this to be `send` and put a moka cache here instead of lru. then the de-dupe load will be spread across senders
     pub async fn send(&self, item: T) {
-        self.total_unfiltered.fetch_add(1, Ordering::Relaxed);
+        // this is just a debug counter so Relaxed is probably fine
+        self.total_unfiltered.fetch_add(1, Ordering::AcqRel);
 
         self.cache
             .get_with(item.clone(), async {
-                self.total_filtered.fetch_add(1, Ordering::Relaxed);
+                // this is just a debug counter so Relaxed is probably fine
+                self.total_filtered.fetch_add(1, Ordering::AcqRel);
 
                 if let Ok(x) = self.broadcast_filtered_tx.send(item) {
-                    self.total_broadcasts.fetch_add(x, Ordering::Relaxed);
+                    // this is just a debug counter so Relaxed is probably fine
+                    self.total_broadcasts.fetch_add(x, Ordering::AcqRel);
                 }
             })
             .await;
@@ -75,15 +78,15 @@ where
         f.debug_struct("DedupedBroadcaster")
             .field(
                 "total_unfiltered",
-                &self.total_unfiltered.load(Ordering::Relaxed),
+                &self.total_unfiltered.load(Ordering::Acquire),
             )
             .field(
                 "total_filtered",
-                &self.total_filtered.load(Ordering::Relaxed),
+                &self.total_filtered.load(Ordering::Acquire),
             )
             .field(
                 "total_broadcasts",
-                &self.total_broadcasts.load(Ordering::Relaxed),
+                &self.total_broadcasts.load(Ordering::Acquire),
             )
             .field(
                 "subscriptions",
@@ -105,15 +108,15 @@ where
 
         state.serialize_field(
             "total_unfiltered",
-            &self.total_unfiltered.load(Ordering::Relaxed),
+            &self.total_unfiltered.load(Ordering::Acquire),
         )?;
         state.serialize_field(
             "total_filtered",
-            &self.total_filtered.load(Ordering::Relaxed),
+            &self.total_filtered.load(Ordering::Acquire),
         )?;
         state.serialize_field(
             "total_broadcasts",
-            &self.total_broadcasts.load(Ordering::Relaxed),
+            &self.total_broadcasts.load(Ordering::Acquire),
         )?;
         state.serialize_field(
             "subscriptions",
@@ -153,8 +156,8 @@ mod tests {
 
         yield_now().await;
 
-        assert_eq!(broadcaster.total_unfiltered.load(Ordering::Relaxed), 7);
-        assert_eq!(broadcaster.total_filtered.load(Ordering::Relaxed), 3);
-        assert_eq!(broadcaster.total_broadcasts.load(Ordering::Relaxed), 6);
+        assert_eq!(broadcaster.total_unfiltered.load(Ordering::Acquire), 7);
+        assert_eq!(broadcaster.total_filtered.load(Ordering::Acquire), 3);
+        assert_eq!(broadcaster.total_broadcasts.load(Ordering::Acquire), 6);
     }
 }

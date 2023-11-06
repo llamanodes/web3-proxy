@@ -52,6 +52,7 @@ impl RollingQuantileLatencyTask {
     }
 
     /// Update the estimate object atomically.
+    /// This is relaxed because we care more about speed than accuracy.
     fn update(&mut self, rtt: f32) {
         self.quantile.update(rtt);
 

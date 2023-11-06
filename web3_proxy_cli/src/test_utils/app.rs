@@ -154,7 +154,7 @@ impl TestApp {
             })
         };
 
-        let mut frontend_port = frontend_port_arc.load(Ordering::Relaxed);
+        let mut frontend_port = frontend_port_arc.load(Ordering::SeqCst);
         let start = Instant::now();
         while frontend_port == 0 {
             // we have to give it some time because it might have to do migrations
@@ -163,7 +163,7 @@ impl TestApp {
             }
 
             sleep(Duration::from_millis(10)).await;
-            frontend_port = frontend_port_arc.load(Ordering::Relaxed);
+            frontend_port = frontend_port_arc.load(Ordering::SeqCst);
         }
 
         let proxy_endpoint = format!("http://127.0.0.1:{}", frontend_port);

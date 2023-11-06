@@ -551,20 +551,20 @@ impl RpcQueryStats {
         // TODO: do this without a clone
         let authorization = metadata.authorization.clone();
 
-        let archive_request = metadata.archive_request.load(Ordering::Relaxed);
+        let archive_request = metadata.archive_request.load(Ordering::Acquire);
 
         // TODO: do this without cloning. we can take their vec
         let backend_rpcs_used = metadata.backend_rpcs_used();
 
         let request_bytes = metadata.inner.num_bytes() as u64;
-        let response_bytes = metadata.response_bytes.load(Ordering::Relaxed);
+        let response_bytes = metadata.response_bytes.load(Ordering::Acquire);
 
-        let mut error_response = metadata.error_response.load(Ordering::Relaxed);
-        let mut response_millis = metadata.response_millis.load(Ordering::Relaxed);
+        let mut error_response = metadata.error_response.load(Ordering::Acquire);
+        let mut response_millis = metadata.response_millis.load(Ordering::Acquire);
 
-        let user_error_response = metadata.user_error_response.load(Ordering::Relaxed);
+        let user_error_response = metadata.user_error_response.load(Ordering::Acquire);
 
-        let response_timestamp = match metadata.response_timestamp.load(Ordering::Relaxed) {
+        let response_timestamp = match metadata.response_timestamp.load(Ordering::Acquire) {
             0 => {
                 // no response timestamp!
                 if !error_response {

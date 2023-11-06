@@ -145,7 +145,7 @@ impl Drop for OpenRequestHandle {
     fn drop(&mut self) {
         self.rpc
             .active_requests
-            .fetch_sub(1, atomic::Ordering::Relaxed);
+            .fetch_sub(1, atomic::Ordering::AcqRel);
     }
 }
 
@@ -159,7 +159,7 @@ impl OpenRequestHandle {
         // TODO: attach a unique id to this? customer requests have one, but not internal queries
         // TODO: what ordering?!
         rpc.active_requests
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
 
         let error_handler = error_handler.unwrap_or_default();
 
@@ -306,14 +306,16 @@ impl OpenRequestHandle {
 
         match &authorization.authorization_type {
             AuthorizationType::Frontend => {
+                // this is just a debug counter, so Relaxed is probably fine
                 self.rpc
                     .external_requests
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
             }
             AuthorizationType::Internal => {
+                // this is just a debug counter, so Relaxed is probably fine
                 self.rpc
                     .internal_requests
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
             }
         }
 
