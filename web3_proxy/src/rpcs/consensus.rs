@@ -408,7 +408,7 @@ impl ConsensusFinder {
             .web3_context("error while finding consensus head block!")?
         {
             None => {
-                warn!("no ranked rpcs found!");
+                warn!(?rpc, ?new_block, "no ranked rpcs found!");
                 return Ok(false);
             }
             Some(x) => x,
