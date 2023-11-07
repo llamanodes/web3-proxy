@@ -250,7 +250,7 @@ async fn it_matches_anvil() {
         .unwrap();
     info!(?deploy_tx);
 
-    yield_now().await;
+    sleep(Duration::from_secs(1)).await;
 
     let head_block_num: U64 = quorum_provider
         .request("eth_blockNumber", ())
