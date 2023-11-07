@@ -1,6 +1,6 @@
 [package]
 name = "web3_proxy_cli"
-version = "1.43.83"
+version = "1.43.84"
 edition = "2021"
 default-run = "web3_proxy_cli"
 
@@ -22,7 +22,7 @@ web3_proxy = { path = "../web3_proxy" }
 console-subscriber = { version = "0.2.0", features = ["env-filter", "parking_lot"], optional = true }
 parking_lot = { version = "0.12.1", features = ["arc_lock", "nightly"] }
 prettytable = { version = "0.10.0", default-features = false }
-serde = { version = "1.0.190" }
+serde = { version = "1.0.191" }
 serde_json = { version = "1.0.108", default-features = false, features = ["raw_value"] }
 tokio-console = { version = "0.1.10", optional = true }
 tracing = "0.1"

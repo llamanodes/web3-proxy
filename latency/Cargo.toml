@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 portable-atomic = { version = "1.5.1", features = ["float"] }
-serde = { version = "1.0.190", features = [] }
+serde = { version = "1.0.191", features = [] }
 tokio = { version = "1.33.0", features = ["full"] }
 tracing = "0.1.40"
 watermill = "0.1.1"
