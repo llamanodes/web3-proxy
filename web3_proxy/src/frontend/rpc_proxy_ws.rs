@@ -3,7 +3,7 @@
 //! WebSockets are the preferred method of receiving requests, but not all clients have good support.
 
 use super::authorization::{ip_is_authorized, key_is_authorized, Authorization};
-use crate::errors::{Web3ProxyError, Web3ProxyResponse};
+use crate::errors::{RequestForError, Web3ProxyError, Web3ProxyResponse};
 use crate::jsonrpc::{self, ParsedResponse, ValidatedRequest};
 use crate::{app::App, errors::Web3ProxyResult, jsonrpc::SingleRequest};
 use axum::headers::{Origin, Referer, UserAgent};
@@ -448,7 +448,7 @@ async fn handle_socket_payload(
     let response_str = match response {
         Ok(x) => x.to_json_string().await?,
         Err(err) => {
-            let (_, response_data) = err.as_response_parts();
+            let (_, response_data) = err.as_response_parts(RequestForError::None);
 
             let response = ParsedResponse::from_response_data(response_data, response_id);
 
@@ -498,7 +498,7 @@ async fn read_web3_socket(
                                     Ok((m, s)) => (m, Some(s)),
                                     Err(err) => {
                                         // TODO: how can we get the id out of the payload?
-                                        let m = err.into_message(None);
+                                        let m = err.into_message(None, None);
                                         (m, None)
                                     }
                                 }
@@ -532,7 +532,7 @@ async fn read_web3_socket(
                                     Ok((m, s)) => (m, Some(s)),
                                     Err(err) => {
                                         // TODO: how can we get the id out of the payload?
-                                        let m = err.into_message(None);
+                                        let m = err.into_message(None, None);
                                         (m, None)
                                     }
                                 };

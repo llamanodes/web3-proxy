@@ -1288,7 +1288,7 @@ impl App {
             // TODO: refresh the request here?
 
             // turn some of the Web3ProxyErrors into Ok results
-            match self._proxy_request_with_caching(&web3_request).await {
+            match self._proxy_request_with_caching(web3_request).await {
                 Ok(response_data) => {
                     last_success = Some(response_data);
                     break;
@@ -1308,7 +1308,30 @@ impl App {
                     break;
                 }
             }
+
+            // TODO: refresh the request instead of making new each time. then we need less clones
+            web3_request_result = ValidatedRequest::new_with_app(
+                self,
+                authorization.clone(),
+                None,
+                None,
+                request.clone().into(),
+                head_block.clone(),
+            )
+            .await;
         }
+
+        let web3_request = match web3_request_result {
+            Ok(x) => x,
+            Err(err) => {
+                // i don't think we can get here, but just in case
+                let (a, b) = err.as_json_response_parts(error_id, Some(&request));
+
+                let rpcs = vec![];
+
+                return (a, b, rpcs);
+            }
+        };
 
         let last_response = if let Some(last_success) = last_success {
             Ok(last_success)
@@ -1335,7 +1358,7 @@ impl App {
                     .user_error_response
                     .store(false, Ordering::SeqCst);
 
-                err.as_json_response_parts(web3_request.id())
+                err.as_json_response_parts(web3_request.id(), Some(web3_request.as_ref()))
             }
         };
 

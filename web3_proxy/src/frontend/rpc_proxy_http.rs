@@ -81,6 +81,7 @@ pub async fn versus_proxy_web3_rpc(
     .await
 }
 
+/// TODO: refactor this to use the builder pattern
 async fn _proxy_web3_rpc(
     app: Arc<App>,
     ip: &IpAddr,
@@ -91,14 +92,14 @@ async fn _proxy_web3_rpc(
 ) -> Result<Response, Response> {
     // TODO: create a stat if they error. (but we haven't parsed rpc_key yet, so it needs some thought)
     let payload = payload
-        .map_err(|e| Web3ProxyError::from(e).into_response_with_id(None))?
+        .map_err(|e| Web3ProxyError::from(e).into_response_with_id(None, None))?
         .0;
 
     let first_id = payload.first_id();
 
     let authorization = ip_is_authorized(&app, ip, origin, proxy_mode)
         .await
-        .map_err(|e| e.into_response_with_id(first_id.clone()))?;
+        .map_err(|e| e.into_response_with_id(first_id.clone(), None))?;
 
     let authorization = Arc::new(authorization);
 
@@ -109,10 +110,11 @@ async fn _proxy_web3_rpc(
     // TODO: calculate payload bytes here (before turning into serde_json::Value). that will save serializing later
 
     // TODO: is first_id the right thing to attach to this error?
+    // TODO: i think we want to attach the web3_request here. but that means we need to create it here
     let (status_code, response, rpcs) = app
         .proxy_web3_rpc(authorization, payload, Some(request_id))
         .await
-        .map_err(|e| e.into_response_with_id(first_id))?;
+        .map_err(|e| e.into_response_with_id(first_id, None))?;
 
     let mut response = (status_code, response).into_response();
 
@@ -282,6 +284,7 @@ pub async fn versus_proxy_web3_rpc_with_key(
     .await
 }
 
+/// TODO: refactor this to use the builder pattern
 #[allow(clippy::too_many_arguments)]
 async fn _proxy_web3_rpc_with_key(
     app: Arc<App>,
@@ -297,19 +300,19 @@ async fn _proxy_web3_rpc_with_key(
     // TODO: DRY w/ proxy_web3_rpc
     // TODO: create a stat if they error. (but we haven't parsed rpc_key yet, so it needs some thought)
     let payload = payload
-        .map_err(|e| Web3ProxyError::from(e).into_response_with_id(None))?
+        .map_err(|e| Web3ProxyError::from(e).into_response_with_id(None, None))?
         .0;
 
     let first_id = payload.first_id();
 
     let rpc_key = rpc_key
         .parse()
-        .map_err(|e: Web3ProxyError| e.into_response_with_id(first_id.clone()))?;
+        .map_err(|e: Web3ProxyError| e.into_response_with_id(first_id.clone(), None))?;
 
     let authorization =
         key_is_authorized(&app, &rpc_key, ip, origin, proxy_mode, referer, user_agent)
             .await
-            .map_err(|e| e.into_response_with_id(first_id.clone()))?;
+            .map_err(|e| e.into_response_with_id(first_id.clone(), None))?;
 
     let authorization = Arc::new(authorization);
 
@@ -319,10 +322,11 @@ async fn _proxy_web3_rpc_with_key(
 
     let rpc_secret_key_id = authorization.checks.rpc_secret_key_id;
 
+    // TODO: pass web3_request to the map_err
     let (status_code, response, rpcs) = app
         .proxy_web3_rpc(authorization, payload, Some(request_id))
         .await
-        .map_err(|e| e.into_response_with_id(first_id))?;
+        .map_err(|e| e.into_response_with_id(first_id, None))?;
 
     let mut response = (status_code, response).into_response();
 

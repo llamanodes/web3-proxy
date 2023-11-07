@@ -1,6 +1,6 @@
 use super::LooseId;
 use crate::app::App;
-use crate::errors::Web3ProxyError;
+use crate::errors::{Web3ProxyError, RequestForError};
 use crate::frontend::authorization::{Authorization, RequestOrMethod};
 use crate::jsonrpc::ValidatedRequest;
 use axum::response::Response as AxumResponse;
@@ -142,7 +142,7 @@ impl JsonRpcRequestEnum {
 
         request.add_response(&response);
 
-        let response = response.into_response_with_id(Some(err_id));
+        let response = response.into_response_with_id(Some(err_id), RequestForError::None);
 
         // TODO: variable duration depending on the IP
         sleep(duration).await;

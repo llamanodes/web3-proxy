@@ -2,7 +2,9 @@
 
 use crate::block_number::BlockNumOrHash;
 use crate::frontend::authorization::Authorization;
-use crate::jsonrpc::{self, JsonRpcErrorData, ParsedResponse, StreamResponse};
+use crate::jsonrpc::{
+    self, JsonRpcErrorData, ParsedResponse, SingleRequest, StreamResponse, ValidatedRequest,
+};
 use crate::response_cache::ForwardedResponse;
 use crate::rpcs::blockchain::Web3ProxyBlock;
 use crate::rpcs::one::Web3Rpc;
@@ -26,6 +28,7 @@ use redis_rate_limiter::redis::RedisError;
 use redis_rate_limiter::RedisPoolError;
 use reqwest::header::ToStrError;
 use rust_decimal::Error as DecimalError;
+use serde::Serialize;
 use serde_json::json;
 use serde_json::value::RawValue;
 use siwe::VerificationError;
@@ -215,12 +218,31 @@ pub enum Web3ProxyError {
     WithContext(Option<Box<Web3ProxyError>>, Cow<'static, str>),
 }
 
+#[derive(Default, From, Serialize)]
+pub enum RequestForError<'a> {
+    /// sometimes we don't have a request object at all
+    #[default]
+    None,
+    /// sometimes parsing the request fails. Give them the original string
+    Unparsed(&'a str),
+    /// sometimes we have json
+    SingleRequest(&'a SingleRequest),
+    // sometimes we have json for a batch of requests
+    // Batch(&'a BatchRequest),
+    /// assuming things went well, we have a validated request
+    Validated(&'a ValidatedRequest),
+}
+
 impl Web3ProxyError {
-    pub fn as_json_response_parts(
+    pub fn as_json_response_parts<'a, R>(
         &self,
         id: Box<RawValue>,
-    ) -> (StatusCode, jsonrpc::SingleResponse) {
-        let (code, response_data) = self.as_response_parts();
+        request_for_error: Option<R>,
+    ) -> (StatusCode, jsonrpc::SingleResponse)
+    where
+        R: Into<RequestForError<'a>>,
+    {
+        let (code, response_data) = self.as_response_parts(request_for_error);
         let response = jsonrpc::ParsedResponse::from_response_data(response_data, id);
         (code, response.into())
     }
@@ -228,7 +250,16 @@ impl Web3ProxyError {
     /// turn the error into an axum response.
     /// <https://www.jsonrpc.org/specification#error_object>
     /// TODO? change to `to_response_parts(self)`
-    pub fn as_response_parts(&self) -> (StatusCode, ForwardedResponse<Arc<RawValue>>) {
+    pub fn as_response_parts<'a, R>(
+        &self,
+        request_for_error: Option<R>,
+    ) -> (StatusCode, ForwardedResponse<Arc<RawValue>>)
+    where
+        R: Into<RequestForError<'a>>,
+    {
+        let request_for_error: RequestForError<'_> =
+            request_for_error.map(Into::into).unwrap_or_default();
+
         // TODO: include a unique request id in the data
         let (code, err): (StatusCode, JsonRpcErrorData) = match self {
             Self::Abi(err) => {
@@ -238,7 +269,10 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "abi error".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "request": request_for_error,
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -250,7 +284,9 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: format!("FORBIDDEN: {}", msg).into(),
                         code: StatusCode::FORBIDDEN.as_u16().into(),
-                        data: None,
+                        data: Some(json!({
+                            "request": request_for_error,
+                        })),
                     },
                 )
             }
@@ -263,6 +299,7 @@ impl Web3ProxyError {
                         message: "Archive data required".into(),
                         code: StatusCode::OK.as_u16().into(),
                         data: Some(json!({
+                            "request": request_for_error,
                             "min": min,
                             "max": max,
                         })),
@@ -277,12 +314,15 @@ impl Web3ProxyError {
                         // TODO: is it safe to expose all of our anyhow strings?
                         message: "INTERNAL SERVER ERROR".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "request": request_for_error,
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
             Self::Arc(err) => {
-                return err.as_response_parts();
+                return err.as_response_parts(Some(request_for_error));
             }
             Self::BadRequest(err) => {
                 trace!(?err, "BAD_REQUEST");
@@ -291,7 +331,10 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "bad request".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "request": request_for_error,
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -303,7 +346,10 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "bad response".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "request": request_for_error,
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -314,7 +360,9 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "bad routing".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
+                        data: Some(json!({
+                            "request": request_for_error,
+                        })),
                     },
                 )
             }
@@ -325,7 +373,10 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "contract error".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "request": request_for_error,
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -336,7 +387,10 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "database error!".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "request": request_for_error,
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -347,7 +401,10 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "database (arc) error!".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "request": request_for_error,
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -358,7 +415,10 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "decimal error".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "request": request_for_error,
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -374,7 +434,10 @@ impl Web3ProxyError {
                         JsonRpcErrorData {
                             message: "ethers http client error".into(),
                             code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                            data: Some(serde_json::Value::String(err.to_string())),
+                            data: Some(json!({
+                                "request": request_for_error,
+                                "err": err.to_string(),
+                            })),
                         },
                     )
                 }
@@ -391,7 +454,10 @@ impl Web3ProxyError {
                         JsonRpcErrorData {
                             message: "ethers provider error".into(),
                             code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                            data: Some(serde_json::Value::String(err.to_string())),
+                            data: Some(json!({
+                                "request": request_for_error,
+                                "err": err.to_string(),
+                            })),
                         },
                     )
                 }
@@ -408,7 +474,10 @@ impl Web3ProxyError {
                         JsonRpcErrorData {
                             message: "ethers ws client error".into(),
                             code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                            data: Some(serde_json::Value::String(err.to_string())),
+                            data: Some(json!({
+                                "request": request_for_error,
+                                "err": err.to_string(),
+                            })),
                         },
                     )
                 }
@@ -423,6 +492,7 @@ impl Web3ProxyError {
                         data: Some(json!({
                             "head": head,
                             "requested": requested,
+                            "request": request_for_error,
                         })),
                     },
                 )
@@ -435,7 +505,9 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "gas estimate result is not an U256".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
+                        data: Some(json!({
+                            "request": request_for_error,
+                        })),
                     },
                 )
             }
@@ -446,7 +518,10 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "hdr record error".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "request": request_for_error,
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -457,7 +532,10 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "headers error".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "request": request_for_error,
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -468,7 +546,10 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "header to string error".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "request": request_for_error,
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -479,7 +560,10 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: err.to_string().into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "request": request_for_error,
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -491,7 +575,10 @@ impl Web3ProxyError {
                         // TODO: is it safe to expose these error strings?
                         message: err.to_string().into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "request": request_for_error,
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -503,7 +590,10 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "influxdb2 error!".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "request": request_for_error,
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -517,6 +607,7 @@ impl Web3ProxyError {
                         data: Some(json!({
                             "min": min,
                             "max": max,
+                            "request": request_for_error,
                         })),
                     },
                 )
@@ -528,7 +619,9 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: err.to_string().into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
-                        data: None,
+                        data: Some(json!({
+                            "request": request_for_error,
+                        })),
                     },
                 )
             }
@@ -539,7 +632,9 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "IP is not allowed!".into(),
                         code: StatusCode::FORBIDDEN.as_u16().into(),
-                        data: Some(serde_json::Value::String(ip.to_string())),
+                        data: Some(json!({
+                            "ip": ip
+                        })),
                     },
                 )
             }
@@ -550,7 +645,10 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "invalid header value".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "request": request_for_error,
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -584,7 +682,10 @@ impl Web3ProxyError {
                         message: "std io".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
                         // TODO: is it safe to expose our io error strings?
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "request": request_for_error,
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -683,7 +784,10 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: message.into(),
                         code: code.into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "request": request_for_error,
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -724,9 +828,12 @@ impl Web3ProxyError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonRpcErrorData {
-                        message: "Blocks here must have a number or hash".into(),
+                        message: "Internal server error".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: None,
+                        data: Some(json!({
+                            "err": "Blocks here must have a number or hash",
+                            "extra": "you found a bug. please contact us if you see this and we can help figure out what happened. https://discord.llamanodes.com/",
+                        })),
                     },
                 )
             }
@@ -1261,7 +1368,7 @@ impl Web3ProxyError {
             Self::WithContext(err, msg) => match err {
                 Some(err) => {
                     warn!(?err, %msg, "error w/ context");
-                    return err.as_response_parts();
+                    return err.as_response_parts(Some(request_for_error));
                 }
                 None => {
                     warn!(%msg, "error w/ context");
@@ -1280,9 +1387,15 @@ impl Web3ProxyError {
         (code, ForwardedResponse::from(err))
     }
 
-    #[inline]
-    pub fn into_response_with_id(self, id: Option<Box<RawValue>>) -> Response {
-        let (status_code, response_data) = self.as_response_parts();
+    pub fn into_response_with_id<'a, R>(
+        self,
+        id: Option<Box<RawValue>>,
+        request_for_error: Option<R>,
+    ) -> Response
+    where
+        R: Into<RequestForError<'a>>,
+    {
+        let (status_code, response_data) = self.as_response_parts(request_for_error);
 
         let id = id.unwrap_or_default();
 
@@ -1292,7 +1405,7 @@ impl Web3ProxyError {
     }
 
     /// some things should keep going even if the db is down
-    pub fn split_db_errors(&self) -> Result<&Self, &Self> {
+    pub fn ok_db_errors(&self) -> Result<&Self, &Self> {
         match self {
             Web3ProxyError::NoDatabaseConfigured => Ok(self),
             Web3ProxyError::Database(err) => {
@@ -1305,7 +1418,7 @@ impl Web3ProxyError {
             }
             Web3ProxyError::Arc(x) => {
                 // errors from inside moka cache helpers are wrapped in an Arc
-                x.split_db_errors()
+                x.ok_db_errors()
             }
             _ => Err(self),
         }
@@ -1326,8 +1439,9 @@ impl From<tokio::time::error::Elapsed> for Web3ProxyError {
 
 impl IntoResponse for Web3ProxyError {
     #[inline]
+    /// TODO: maybe we don't want this anymore. maybe we want to require a web3_request?
     fn into_response(self) -> Response {
-        self.into_response_with_id(Default::default())
+        self.into_response_with_id(Default::default(), RequestForError::None)
     }
 }
 
@@ -1351,8 +1465,11 @@ where
 }
 
 impl Web3ProxyError {
-    pub fn into_message(self, id: Option<Box<RawValue>>) -> Message {
-        let (_, err) = self.as_response_parts();
+    pub fn into_message<'a, R>(self, id: Option<Box<RawValue>>, web3_request: R) -> Message
+    where
+        R: Into<RequestForError<'a>>,
+    {
+        let (_, err) = self.as_response_parts(web3_request);
 
         let id = id.unwrap_or_default();
 

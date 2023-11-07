@@ -4,7 +4,7 @@ use super::rpc_proxy_ws::ProxyMode;
 use crate::app::{App, APP_USER_AGENT};
 use crate::balance::Balance;
 use crate::caches::RegisteredUserRateLimitKey;
-use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
+use crate::errors::{RequestForError, Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::globals::global_db_replica_conn;
 use crate::jsonrpc::{self, SingleRequest};
 use crate::secrets::RpcSecretKey;
@@ -192,7 +192,7 @@ impl ResponseOrBytes<'_> {
             Self::Response(x) => x.num_bytes(),
             Self::Bytes(num_bytes) => *num_bytes,
             Self::Error(x) => {
-                let (_, x) = x.as_response_parts();
+                let (_, x) = x.as_response_parts(RequestForError::None);
 
                 x.num_bytes()
             }
@@ -894,7 +894,7 @@ impl App {
         let authorization_checks = match self.authorization_checks(proxy_mode, rpc_key).await {
             Ok(x) => x,
             Err(err) => {
-                if let Ok(_err) = err.split_db_errors() {
+                if let Ok(_err) = err.ok_db_errors() {
                     // // TODO: this is too verbose during an outage. the warnings on the config reloader should be fine
                     // warn!(
                     //     ?err,
