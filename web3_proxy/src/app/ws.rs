@@ -90,6 +90,7 @@ impl App {
                             None,
                             RequestOrMethod::Method("eth_subscribe(newHeads)".into(), 0),
                             Some(new_head),
+                            None,
                         )
                         .await;
 
@@ -180,6 +181,7 @@ impl App {
                                         "eth_subscribe(newPendingTransactions)".into(),
                                         0,
                                     ),
+                                    None,
                                     None,
                                 )
                                 .await

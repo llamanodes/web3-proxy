@@ -1,6 +1,7 @@
 //! Take a user's HTTP JSON-RPC requests and either respond from local data or proxy the request to a backend rpc server.
 
 use super::authorization::{ip_is_authorized, key_is_authorized};
+use super::request_id::RequestId;
 use super::rpc_proxy_ws::ProxyMode;
 use crate::errors::Web3ProxyError;
 use crate::{app::App, jsonrpc::JsonRpcRequestEnum};
@@ -26,9 +27,18 @@ pub async fn proxy_web3_rpc(
     Extension(app): Extension<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
+    Extension(RequestId(request_id)): Extension<RequestId>,
     payload: Result<Json<JsonRpcRequestEnum>, JsonRejection>,
 ) -> Result<Response, Response> {
-    _proxy_web3_rpc(app, &ip, origin.as_deref(), payload, ProxyMode::Best).await
+    _proxy_web3_rpc(
+        app,
+        &ip,
+        origin.as_deref(),
+        payload,
+        ProxyMode::Best,
+        request_id,
+    )
+    .await
 }
 
 #[debug_handler]
@@ -36,11 +46,20 @@ pub async fn fastest_proxy_web3_rpc(
     Extension(app): Extension<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
+    Extension(RequestId(request_id)): Extension<RequestId>,
     payload: Result<Json<JsonRpcRequestEnum>, JsonRejection>,
 ) -> Result<Response, Response> {
     // TODO: read the fastest number from params
     // TODO: check that the app allows this without authentication
-    _proxy_web3_rpc(app, &ip, origin.as_deref(), payload, ProxyMode::Fastest(0)).await
+    _proxy_web3_rpc(
+        app,
+        &ip,
+        origin.as_deref(),
+        payload,
+        ProxyMode::Fastest(0),
+        request_id,
+    )
+    .await
 }
 
 #[debug_handler]
@@ -48,9 +67,18 @@ pub async fn versus_proxy_web3_rpc(
     Extension(app): Extension<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
+    Extension(RequestId(request_id)): Extension<RequestId>,
     payload: Result<Json<JsonRpcRequestEnum>, JsonRejection>,
 ) -> Result<Response, Response> {
-    _proxy_web3_rpc(app, &ip, origin.as_deref(), payload, ProxyMode::Versus).await
+    _proxy_web3_rpc(
+        app,
+        &ip,
+        origin.as_deref(),
+        payload,
+        ProxyMode::Versus,
+        request_id,
+    )
+    .await
 }
 
 async fn _proxy_web3_rpc(
@@ -59,6 +87,7 @@ async fn _proxy_web3_rpc(
     origin: Option<&Origin>,
     payload: Result<Json<JsonRpcRequestEnum>, JsonRejection>,
     proxy_mode: ProxyMode,
+    request_id: String,
 ) -> Result<Response, Response> {
     // TODO: create a stat if they error. (but we haven't parsed rpc_key yet, so it needs some thought)
     let payload = payload
@@ -81,7 +110,7 @@ async fn _proxy_web3_rpc(
 
     // TODO: is first_id the right thing to attach to this error?
     let (status_code, response, rpcs) = app
-        .proxy_web3_rpc(authorization, payload)
+        .proxy_web3_rpc(authorization, payload, Some(request_id))
         .await
         .map_err(|e| e.into_response_with_id(first_id))?;
 
@@ -132,6 +161,7 @@ pub async fn proxy_web3_rpc_with_key(
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
     Path(rpc_key): Path<String>,
+    Extension(RequestId(request_id)): Extension<RequestId>,
     payload: Result<Json<JsonRpcRequestEnum>, JsonRejection>,
 ) -> Result<Response, Response> {
     _proxy_web3_rpc_with_key(
@@ -143,6 +173,7 @@ pub async fn proxy_web3_rpc_with_key(
         rpc_key,
         payload,
         ProxyMode::Best,
+        request_id,
     )
     .await
 }
@@ -158,6 +189,7 @@ pub async fn debug_proxy_web3_rpc_with_key(
     user_agent: Option<TypedHeader<UserAgent>>,
     request_headers: HeaderMap,
     Path(rpc_key): Path<String>,
+    Extension(RequestId(request_id)): Extension<RequestId>,
     payload: Result<Json<JsonRpcRequestEnum>, JsonRejection>,
 ) -> Result<Response, Response> {
     let mut response = match _proxy_web3_rpc_with_key(
@@ -169,6 +201,7 @@ pub async fn debug_proxy_web3_rpc_with_key(
         rpc_key,
         payload,
         ProxyMode::Debug,
+        request_id,
     )
     .await
     {
@@ -201,6 +234,7 @@ pub async fn fastest_proxy_web3_rpc_with_key(
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
     Path(rpc_key): Path<String>,
+    Extension(RequestId(request_id)): Extension<RequestId>,
     payload: Result<Json<JsonRpcRequestEnum>, JsonRejection>,
 ) -> Result<Response, Response> {
     _proxy_web3_rpc_with_key(
@@ -212,6 +246,7 @@ pub async fn fastest_proxy_web3_rpc_with_key(
         rpc_key,
         payload,
         ProxyMode::Fastest(0),
+        request_id,
     )
     .await
 }
@@ -224,6 +259,7 @@ pub async fn versus_proxy_web3_rpc_with_key(
     referer: Option<TypedHeader<Referer>>,
     user_agent: Option<TypedHeader<UserAgent>>,
     Path(rpc_key): Path<String>,
+    Extension(RequestId(request_id)): Extension<RequestId>,
     payload: Result<Json<JsonRpcRequestEnum>, JsonRejection>,
 ) -> Result<Response, Response> {
     _proxy_web3_rpc_with_key(
@@ -235,6 +271,7 @@ pub async fn versus_proxy_web3_rpc_with_key(
         rpc_key,
         payload,
         ProxyMode::Versus,
+        request_id,
     )
     .await
 }
@@ -249,6 +286,7 @@ async fn _proxy_web3_rpc_with_key(
     rpc_key: String,
     payload: Result<Json<JsonRpcRequestEnum>, JsonRejection>,
     proxy_mode: ProxyMode,
+    request_id: String,
 ) -> Result<Response, Response> {
     // TODO: DRY w/ proxy_web3_rpc
     // TODO: create a stat if they error. (but we haven't parsed rpc_key yet, so it needs some thought)
@@ -276,7 +314,7 @@ async fn _proxy_web3_rpc_with_key(
     let rpc_secret_key_id = authorization.checks.rpc_secret_key_id;
 
     let (status_code, response, rpcs) = app
-        .proxy_web3_rpc(authorization, payload)
+        .proxy_web3_rpc(authorization, payload, Some(request_id))
         .await
         .map_err(|e| e.into_response_with_id(first_id))?;
 

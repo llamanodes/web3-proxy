@@ -217,6 +217,7 @@ impl MigrateStatsToV2SubCommand {
                         connect_timeout: Default::default(),
                         expire_timeout: Default::default(),
                         permit: None,
+                        request_id: None,
                     };
 
                     web3_request.try_send_stat()?;
