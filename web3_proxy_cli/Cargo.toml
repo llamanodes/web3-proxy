@@ -1,6 +1,6 @@
 [package]
 name = "web3_proxy_cli"
-version = "1.43.85"
+version = "1.43.86"
 edition = "2021"
 default-run = "web3_proxy_cli"
 
