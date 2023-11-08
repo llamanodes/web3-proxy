@@ -192,7 +192,7 @@ impl ResponseOrBytes<'_> {
             Self::Response(x) => x.num_bytes(),
             Self::Bytes(num_bytes) => *num_bytes,
             Self::Error(x) => {
-                let (_, x) = x.as_response_parts(RequestForError::None);
+                let (_, x) = x.as_response_parts(None::<RequestForError>);
 
                 x.num_bytes()
             }

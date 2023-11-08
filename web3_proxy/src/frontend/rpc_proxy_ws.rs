@@ -448,7 +448,7 @@ async fn handle_socket_payload(
     let response_str = match response {
         Ok(x) => x.to_json_string().await?,
         Err(err) => {
-            let (_, response_data) = err.as_response_parts(RequestForError::None);
+            let (_, response_data) = err.as_response_parts(None::<RequestForError>);
 
             let response = ParsedResponse::from_response_data(response_data, response_id);
 
@@ -498,7 +498,7 @@ async fn read_web3_socket(
                                     Ok((m, s)) => (m, Some(s)),
                                     Err(err) => {
                                         // TODO: how can we get the id out of the payload?
-                                        let m = err.into_message(None, None);
+                                        let m = err.into_message(None, None::<RequestForError>);
                                         (m, None)
                                     }
                                 }
@@ -532,7 +532,7 @@ async fn read_web3_socket(
                                     Ok((m, s)) => (m, Some(s)),
                                     Err(err) => {
                                         // TODO: how can we get the id out of the payload?
-                                        let m = err.into_message(None, None);
+                                        let m = err.into_message(None, None::<RequestForError>);
                                         (m, None)
                                     }
                                 };

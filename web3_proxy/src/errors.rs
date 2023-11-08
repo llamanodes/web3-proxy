@@ -1441,7 +1441,7 @@ impl IntoResponse for Web3ProxyError {
     #[inline]
     /// TODO: maybe we don't want this anymore. maybe we want to require a web3_request?
     fn into_response(self) -> Response {
-        self.into_response_with_id(Default::default(), RequestForError::None)
+        self.into_response_with_id(Default::default(), None::<RequestForError>)
     }
 }
 
@@ -1465,11 +1465,15 @@ where
 }
 
 impl Web3ProxyError {
-    pub fn into_message<'a, R>(self, id: Option<Box<RawValue>>, web3_request: R) -> Message
+    pub fn into_message<'a, R>(
+        self,
+        id: Option<Box<RawValue>>,
+        request_for_error: Option<R>,
+    ) -> Message
     where
         R: Into<RequestForError<'a>>,
     {
-        let (_, err) = self.as_response_parts(web3_request);
+        let (_, err) = self.as_response_parts(request_for_error);
 
         let id = id.unwrap_or_default();
 
