@@ -567,7 +567,10 @@ impl Web3Rpc {
         self: &Arc<Self>,
         new_head_block: Web3ProxyResult<Option<ArcBlock>>,
     ) -> Web3ProxyResult<()> {
-        let head_block_sender = self.head_block_sender.as_ref().unwrap();
+        let head_block_sender = self
+            .head_block_sender
+            .as_ref()
+            .expect("head_block_sender is always set");
 
         let new_head_block = match new_head_block {
             Ok(x) => {
@@ -584,11 +587,9 @@ impl Web3Rpc {
 
                         trace!("clearing head block on {} ({}ms old)!", self, age);
 
-                        // send an empty block to take this server out of rotation
-                        head_block_sender.send_replace(None);
-
                         // TODO: clear self.block_data_limit?
 
+                        // send an empty block to take this server out of rotation
                         None
                     }
                     Some(new_head_block) => {
@@ -603,7 +604,6 @@ impl Web3Rpc {
                             .await;
 
                         // we are synced! yey!
-                        head_block_sender.send_replace(Some(new_head_block.clone()));
 
                         // TODO: checking this every time seems excessive
                         if self.block_data_limit() == U64::zero() {
@@ -631,11 +631,14 @@ impl Web3Rpc {
             }
         };
 
-        // tell web3rpcs about this rpc having this block
         if let Some(block_and_rpc_sender) = &self.block_and_rpc_sender {
+            // tell web3rpcs about this rpc having this block
+            // web3rpcs will do `self.head_block_sender.send_replace(new_head_block)`
             block_and_rpc_sender
                 .send((new_head_block, self.clone()))
                 .context("block_and_rpc_sender failed sending")?;
+        } else {
+            head_block_sender.send_replace(new_head_block);
         }
 
         Ok(())

@@ -402,6 +402,8 @@ impl ConsensusFinder {
         rpc: Option<&Arc<Web3Rpc>>,
         new_block: Option<Web3ProxyBlock>,
     ) -> Web3ProxyResult<bool> {
+        let rpc_block_sender = rpc.and_then(|x| x.head_block_sender.as_ref());
+
         let new_ranked_rpcs = match self
             .rank_rpcs(web3_rpcs)
             .await
@@ -409,6 +411,11 @@ impl ConsensusFinder {
         {
             None => {
                 warn!(?rpc, ?new_block, "no ranked rpcs found!");
+
+                if let Some(rpc_block_sender) = rpc_block_sender {
+                    rpc_block_sender.send_replace(new_block);
+                }
+
                 return Ok(false);
             }
             Some(x) => x,
@@ -427,6 +434,10 @@ impl ConsensusFinder {
         let total_rpcs = web3_rpcs.len();
 
         let new_ranked_rpcs = Arc::new(new_ranked_rpcs);
+
+        if let Some(rpc_block_sender) = rpc_block_sender {
+            rpc_block_sender.send_replace(new_block.clone());
+        }
 
         let old_ranked_rpcs = web3_rpcs
             .watch_ranked_rpcs
