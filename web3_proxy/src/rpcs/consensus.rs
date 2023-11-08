@@ -672,7 +672,7 @@ impl ConsensusFinder {
             0 => {}
             1 => {
                 for rpc in self.rpc_heads.keys() {
-                    rpc.tier.store(1, atomic::Ordering::Release)
+                    rpc.tier.store(1, atomic::Ordering::SeqCst)
                 }
             }
             _ => {
@@ -752,7 +752,7 @@ impl ConsensusFinder {
 
                     trace!("{} - p50_sec: {}, tier {}", rpc, median_latency_sec, tier);
 
-                    rpc.tier.store(tier, atomic::Ordering::Release);
+                    rpc.tier.store(tier, atomic::Ordering::SeqCst);
                 }
             }
         }

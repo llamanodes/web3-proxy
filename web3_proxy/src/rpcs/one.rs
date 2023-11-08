@@ -438,8 +438,7 @@ impl Web3Rpc {
                 warn!("{} is unable to serve requests", self);
             }
 
-            self.block_data_limit
-                .store(limit, atomic::Ordering::Release);
+            self.block_data_limit.store(limit, atomic::Ordering::SeqCst);
         }
 
         if limit == Some(u64::MAX) {
@@ -763,7 +762,7 @@ impl Web3Rpc {
             .await
             .web3_context("failed check_provider")
         {
-            self.healthy.store(false, atomic::Ordering::Release);
+            self.healthy.store(false, atomic::Ordering::SeqCst);
             return Err(err);
         }
 
@@ -798,7 +797,7 @@ impl Web3Rpc {
 
                     // TODO: if this fails too many times, reset the connection
                     if let Err(err) = rpc.check_health(detailed_healthcheck, error_handler).await {
-                        rpc.healthy.store(false, atomic::Ordering::Release);
+                        rpc.healthy.store(false, atomic::Ordering::SeqCst);
 
                         // TODO: different level depending on the error handler
                         // TODO: if rate limit error, set "retry_at"
@@ -808,7 +807,7 @@ impl Web3Rpc {
                             error!(?err, "health check on {} failed", rpc);
                         }
                     } else {
-                        rpc.healthy.store(true, atomic::Ordering::Release);
+                        rpc.healthy.store(true, atomic::Ordering::SeqCst);
                     }
 
                     // TODO: should we count the requests done inside this health check
@@ -833,7 +832,7 @@ impl Web3Rpc {
                 true
             };
 
-            self.healthy.store(initial_check, atomic::Ordering::Release);
+            self.healthy.store(initial_check, atomic::Ordering::SeqCst);
 
             tokio::spawn(f)
         } else {
@@ -849,7 +848,7 @@ impl Web3Rpc {
 
                     // TODO: if this fails too many times, reset the connection
                     if let Err(err) = rpc.check_provider().await {
-                        rpc.healthy.store(false, atomic::Ordering::Release);
+                        rpc.healthy.store(false, atomic::Ordering::SeqCst);
 
                         // TODO: if rate limit error, set "retry_at"
                         if rpc.backup {
@@ -858,7 +857,7 @@ impl Web3Rpc {
                             error!(?err, "provider check on {} failed", rpc);
                         }
                     } else {
-                        rpc.healthy.store(true, atomic::Ordering::Release);
+                        rpc.healthy.store(true, atomic::Ordering::SeqCst);
                     }
 
                     sleep(Duration::from_secs(health_sleep_seconds)).await;
@@ -904,7 +903,7 @@ impl Web3Rpc {
         let (first_exit, _, _) = select_all(futures).await;
 
         // mark unhealthy
-        self.healthy.store(false, atomic::Ordering::Release);
+        self.healthy.store(false, atomic::Ordering::SeqCst);
 
         debug!(?first_exit, "subscriptions on {} exited", self);
 
