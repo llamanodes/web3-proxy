@@ -1222,16 +1222,25 @@ impl Web3ProxyError {
                 )
             }
             Self::Timeout(x) => {
-                let data = x.as_ref().map(|x| json!(x.as_secs_f32()));
+                let data = if request_for_error.active_premium() {
+                    json!({
+                        "duration": x.as_ref().map(|x| x.as_secs_f32()),
+                        "request": request_for_error,
+                    })
+                } else {
+                    json!({
+                        "duration": x.as_ref().map(|x| x.as_secs_f32()),
+                        "request": request_for_error,
+                        "extra": "upgrade to a premium rpc key for longer timeouts"
+                    })
+                };
 
                 (
                     StatusCode::REQUEST_TIMEOUT,
                     JsonRpcErrorData {
                         message: "request timed out".into(),
                         code: StatusCode::REQUEST_TIMEOUT.as_u16().into(),
-                        // TODO: prettier message
-                        // TODO: include the actual id!
-                        data,
+                        data: Some(data),
                     },
                 )
             }
