@@ -1411,7 +1411,10 @@ impl App {
             | "shh_newIdentity"
             | "shh_post"
             | "shh_uninstallFilter"
-            | "shh_version") => {
+            | "shh_version"
+            | "wallet_getEthereumChains"
+            | "wallet_getSnaps"
+            | "wallet_requestSnaps") => {
                 return Err(Web3ProxyError::MethodNotFound(method.to_owned().into()));
             }
             // TODO: implement these commands
