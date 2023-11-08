@@ -810,7 +810,7 @@ impl ConsensusFinder {
             HashMap::with_capacity(num_known);
 
         for (rpc, rpc_head) in self.rpc_heads.iter() {
-            if !rpc.healthy.load(atomic::Ordering::Acquire) {
+            if !rpc.healthy.load(atomic::Ordering::SeqCst) {
                 // TODO: should unhealthy servers get a vote? they were included in minmax_block. i think that is enough
                 continue;
             }
@@ -878,14 +878,14 @@ impl ConsensusFinder {
     pub fn best_tier(&self) -> Option<u32> {
         self.rpc_heads
             .iter()
-            .map(|(x, _)| x.tier.load(atomic::Ordering::Acquire))
+            .map(|(x, _)| x.tier.load(atomic::Ordering::SeqCst))
             .min()
     }
 
     pub fn worst_tier(&self) -> Option<u32> {
         self.rpc_heads
             .iter()
-            .map(|(x, _)| x.tier.load(atomic::Ordering::Acquire))
+            .map(|(x, _)| x.tier.load(atomic::Ordering::SeqCst))
             .max()
     }
 }
