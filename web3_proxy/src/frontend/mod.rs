@@ -10,8 +10,8 @@ pub mod rpc_proxy_ws;
 pub mod status;
 pub mod users;
 
-use crate::app::App;
 use crate::errors::Web3ProxyResult;
+use crate::{app::App, retry::RetryPolicy};
 use axum::{
     routing::{get, post},
     Extension, Router,
@@ -25,6 +25,8 @@ use std::{iter::once, time::Duration};
 use std::{net::SocketAddr, sync::atomic::Ordering};
 use strum::{EnumCount, EnumIter};
 use tokio::{process::Command, sync::broadcast};
+use tower::retry::budget::Budget;
+use tower::retry::{Retry, RetryLayer};
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 use tower_http::{cors::CorsLayer, normalize_path::NormalizePathLayer, trace::TraceLayer};
 use tracing::{error, error_span, info, trace_span};
@@ -262,6 +264,12 @@ pub async fn serve(
         // layers are ordered bottom up
         // the last layer is first for requests and last for responses
         //
+        // Retry layer
+        .layer(RetryLayer::new(RetryPolicy::new(
+            Budget::new(Duration::from_secs(60), 1, 0.2),
+            3,
+            Duration::from_millis(50),
+        )))
         // Remove trailing slashes
         .layer(NormalizePathLayer::trim_trailing_slash())
         // Mark the `Authorization` request header as sensitive so it doesn't show in logs
@@ -360,6 +368,7 @@ pub async fn serve(
 
     app.frontend_port.store(port, Ordering::SeqCst);
 
+    // shut down without disrupting active or incoming connections
     let server = server
         // TODO: option to use with_connect_info. we want it in dev, but not when running behind a proxy, but not
         .with_graceful_shutdown(async move {

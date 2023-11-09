@@ -23,6 +23,7 @@ pub mod prometheus;
 pub mod referral_code;
 pub mod relational_db;
 pub mod response_cache;
+pub mod retry;
 pub mod rpcs;
 pub mod secrets;
 pub mod stats;
