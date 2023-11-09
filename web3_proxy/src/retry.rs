@@ -23,10 +23,11 @@ impl RetryPolicy {
     }
 }
 
-impl<T: Clone + 'static, Res, E> Policy<T, Res, E> for RetryPolicy {
+/// TODO: these bounds are wrong. Req needs Clone and something else is probably needed too
+impl<Req: Clone, Res, E> Policy<Req, Res, E> for RetryPolicy {
     type Future = BoxFuture<'static, Self>;
 
-    fn retry(&self, _: &T, result: Result<&Res, &E>) -> Option<Self::Future> {
+    fn retry(&self, _: &Req, result: Result<&Res, &E>) -> Option<Self::Future> {
         match result {
             Ok(_) => {
                 self.budget.deposit();
@@ -51,7 +52,7 @@ impl<T: Clone + 'static, Res, E> Policy<T, Res, E> for RetryPolicy {
         }
     }
 
-    fn clone_request(&self, req: &T) -> Option<T> {
+    fn clone_request(&self, req: &Req) -> Option<Req> {
         Some(req.clone())
     }
 }

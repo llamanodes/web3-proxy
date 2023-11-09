@@ -27,6 +27,7 @@ use strum::{EnumCount, EnumIter};
 use tokio::{process::Command, sync::broadcast};
 use tower::retry::budget::Budget;
 use tower::retry::{Retry, RetryLayer};
+use tower::{Layer, ServiceBuilder};
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 use tower_http::{cors::CorsLayer, normalize_path::NormalizePathLayer, trace::TraceLayer};
 use tracing::{error, error_span, info, trace_span};
@@ -258,18 +259,21 @@ pub async fn serve(
         );
     }
 
+    let retry_layer = RetryLayer::new(RetryPolicy::new(
+        Budget::new(Duration::from_secs(60), 1, 0.2),
+        3,
+        Duration::from_millis(50),
+    ));
+
+    // RetryLayer is **not** clone, but axum needs Clone-able layers. Wrap it in a ServiceBuilder
+    let retry_layer = ServiceBuilder::new().layer(retry_layer);
+
     router = router
         //
         // Axum layers
         // layers are ordered bottom up
         // the last layer is first for requests and last for responses
         //
-        // Retry layer
-        .layer(RetryLayer::new(RetryPolicy::new(
-            Budget::new(Duration::from_secs(60), 1, 0.2),
-            3,
-            Duration::from_millis(50),
-        )))
         // Remove trailing slashes
         .layer(NormalizePathLayer::trim_trailing_slash())
         // Mark the `Authorization` request header as sensitive so it doesn't show in logs
@@ -280,6 +284,8 @@ pub async fn serve(
         .layer(Extension(app.clone()))
         // frontend caches
         .layer(Extension(Arc::new(response_cache)))
+        // Retries
+        .layer(retry_layer)
         // request id
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &Request<Body>| {
