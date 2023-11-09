@@ -1241,38 +1241,38 @@ impl App {
         // TODO: this clone is only for an error response. refactor to not need it
         let error_id = request.id.clone();
 
-        let mut last_success = None;
-        let mut last_error = None;
-        let mut web3_request;
-
         // TODO: think more about how to handle retries without hammering our servers with errors
         let mut ranked_rpcs = self.balanced_rpcs.watch_ranked_rpcs.subscribe();
+
+        let web3_request = match ValidatedRequest::new_with_app(
+            self,
+            authorization.clone(),
+            None,
+            None,
+            request.into(),
+            head_block.clone(),
+        )
+        .await
+        {
+            Ok(x) => x,
+            Err(err) => {
+                let (a, b) = err.as_json_response_parts(error_id);
+
+                let rpcs = vec![];
+
+                return (a, b, rpcs);
+            }
+        };
+
+        let mut last_success = None;
+        let mut last_error = None;
 
         let latest_start = sleep_until(Instant::now() + Duration::from_secs(3));
         pin!(latest_start);
 
         // TODO: how many retries?
         loop {
-            // TODO: refresh the request instead of making new each time. then we need less clones
-            web3_request = match ValidatedRequest::new_with_app(
-                self,
-                authorization.clone(),
-                None,
-                None,
-                request.clone().into(),
-                head_block.clone(),
-            )
-            .await
-            {
-                Ok(x) => x,
-                Err(err) => {
-                    let (a, b) = err.as_json_response_parts(error_id);
-
-                    let rpcs = vec![];
-
-                    return (a, b, rpcs);
-                }
-            };
+            // TODO: refresh the request here?
 
             // turn some of the Web3ProxyErrors into Ok results
             match self._proxy_request_with_caching(&web3_request).await {
