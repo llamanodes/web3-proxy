@@ -13,9 +13,10 @@ use crate::app::App;
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
 use crate::globals::global_db_transaction;
 use axum::{
+    extract::State,
     headers::{authorization::Bearer, Authorization},
     response::IntoResponse,
-    Extension, Json, TypedHeader,
+    Json, TypedHeader,
 };
 use axum_macros::debug_handler;
 use entities::{self, referee, referrer, user};
@@ -32,7 +33,7 @@ use std::sync::Arc;
 /// TODO: this will change as we add better support for secondary users.
 #[debug_handler]
 pub async fn user_get(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
     let user = app.bearer_is_authorized(bearer_token).await?;
@@ -51,7 +52,7 @@ pub struct UserPost {
 /// `POST /user` -- modify the account connected to the bearer token in the `Authentication` header.
 #[debug_handler]
 pub async fn user_post(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
     Json(payload): Json<UserPost>,
 ) -> Web3ProxyResponse {

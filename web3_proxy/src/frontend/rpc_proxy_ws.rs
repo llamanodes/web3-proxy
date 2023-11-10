@@ -9,9 +9,9 @@ use crate::{app::App, errors::Web3ProxyResult, jsonrpc::SingleRequest};
 use axum::headers::{Origin, Referer, UserAgent};
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
-    extract::Path,
+    extract::{Path, State},
     response::{IntoResponse, Redirect},
-    Extension, TypedHeader,
+    TypedHeader,
 };
 use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
@@ -54,7 +54,7 @@ pub enum ProxyMode {
 /// Queries a single server at a time
 #[debug_handler]
 pub async fn websocket_handler(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
@@ -66,7 +66,7 @@ pub async fn websocket_handler(
 /// Queries all synced backends with every request! This might get expensive!
 // #[debug_handler]
 pub async fn fastest_websocket_handler(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
@@ -87,7 +87,7 @@ pub async fn fastest_websocket_handler(
 /// Queries **all** backends with every request! This might get expensive!
 #[debug_handler]
 pub async fn versus_websocket_handler(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     ws_upgrade: Option<WebSocketUpgrade>,
@@ -127,7 +127,7 @@ async fn _websocket_handler(
 /// Can optionally authorized based on origin, referer, or user agent.
 #[debug_handler]
 pub async fn websocket_handler_with_key(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     Path(rpc_key): Path<String>,
     origin: Option<TypedHeader<Origin>>,
@@ -151,7 +151,7 @@ pub async fn websocket_handler_with_key(
 #[debug_handler]
 #[allow(clippy::too_many_arguments)]
 pub async fn debug_websocket_handler_with_key(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     Path(rpc_key): Path<String>,
     origin: Option<TypedHeader<Origin>>,
@@ -190,7 +190,7 @@ pub async fn debug_websocket_handler_with_key(
 
 #[debug_handler]
 pub async fn fastest_websocket_handler_with_key(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     Path(rpc_key): Path<String>,
     origin: Option<TypedHeader<Origin>>,
@@ -214,7 +214,7 @@ pub async fn fastest_websocket_handler_with_key(
 
 #[debug_handler]
 pub async fn versus_websocket_handler_with_key(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     Path(rpc_key): Path<String>,
     origin: Option<TypedHeader<Origin>>,

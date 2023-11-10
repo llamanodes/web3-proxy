@@ -10,6 +10,7 @@ use crate::{
 };
 use axum::{
     body::{Bytes, Full},
+    extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
     Extension, Json,
@@ -37,7 +38,7 @@ static CONTENT_TYPE_PLAIN: &str = "text/plain";
 
 #[debug_handler]
 pub async fn debug_request(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     ip: InsecureClientIp,
     headers: HeaderMap,
 ) -> impl IntoResponse {
@@ -76,7 +77,7 @@ pub async fn debug_request(
 /// Health check page for load balancers to use.
 #[debug_handler]
 pub async fn health(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     Extension(cache): Extension<Arc<ResponseCache>>,
 ) -> Result<impl IntoResponse, Web3ProxyError> {
     let (code, content_type, body) = timeout(
@@ -113,7 +114,7 @@ async fn _health(app: Arc<App>) -> (StatusCode, &'static str, Bytes) {
 /// Easy alerting if backup servers are in use.
 #[debug_handler]
 pub async fn backups_needed(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     Extension(cache): Extension<Arc<ResponseCache>>,
 ) -> Result<impl IntoResponse, Web3ProxyError> {
     let (code, content_type, body) = timeout(
@@ -164,7 +165,7 @@ async fn _backups_needed(app: Arc<App>) -> (StatusCode, &'static str, Bytes) {
 /// TODO: replace this with proper stats and monitoring. frontend uses it for their public dashboards though
 #[debug_handler]
 pub async fn status(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     Extension(cache): Extension<Arc<ResponseCache>>,
 ) -> Result<impl IntoResponse, Web3ProxyError> {
     let (code, content_type, body) = timeout(

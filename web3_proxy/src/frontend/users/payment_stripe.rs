@@ -19,7 +19,7 @@ use tracing::{debug, error, warn};
 /// this endpoint is called from the webhook with the user_id parameter in the request
 #[debug_handler]
 pub async fn user_balance_stripe_post(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     // InsecureClientIp(ip): InsecureClientIp,
     headers: HeaderMap,
     payload: String,

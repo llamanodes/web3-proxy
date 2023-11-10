@@ -10,10 +10,10 @@ use crate::globals::{global_db_conn, global_db_replica_conn};
 use crate::premium::{get_user_and_tier_from_address, grant_premium_tier};
 use crate::user_token::UserBearerToken;
 use axum::{
-    extract::{Path, Query},
+    extract::{Path, Query, State},
     headers::{authorization::Bearer, Authorization},
     response::IntoResponse,
-    Extension, Json, TypedHeader,
+    Json, TypedHeader,
 };
 use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
@@ -52,7 +52,7 @@ pub struct AdminIncreaseBalancePost {
 /// - user_role_tier that is supposed to be adapted
 #[debug_handler]
 pub async fn admin_increase_balance(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Json(payload): Json<AdminIncreaseBalancePost>,
 ) -> Web3ProxyResponse {
@@ -115,7 +115,7 @@ pub async fn admin_increase_balance(
 /// TODO: JSON post data instead of query params
 #[debug_handler]
 pub async fn admin_change_user_roles(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
@@ -130,7 +130,7 @@ pub async fn admin_change_user_roles(
 /// We assume that the admin has already logged in, and has a bearer token ...
 #[debug_handler]
 pub async fn admin_imitate_login_get(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     Path(mut params): Path<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
@@ -287,7 +287,7 @@ pub async fn admin_imitate_login_get(
 /// The bearer token can be used to authenticate other admin requests
 #[debug_handler]
 pub async fn admin_imitate_login_post(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     Json(payload): Json<PostLogin>,
 ) -> Web3ProxyResponse {

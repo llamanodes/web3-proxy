@@ -8,10 +8,10 @@ use crate::http_params::{
 use crate::stats::influxdb_queries::query_user_influx_stats;
 use crate::stats::StatType;
 use axum::{
-    extract::Query,
+    extract::{Query, State},
     headers::{authorization::Bearer, Authorization},
     response::IntoResponse,
-    Extension, Json, TypedHeader,
+    Json, TypedHeader,
 };
 use axum_macros::debug_handler;
 use entities;
@@ -28,7 +28,7 @@ use tracing::info;
 /// `GET /user/revert_logs` -- Use a bearer token to get the user's revert logs.
 #[debug_handler]
 pub async fn user_revert_logs_get(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
@@ -125,7 +125,7 @@ pub async fn user_revert_logs_get(
 /// `GET /user/stats/aggregate` -- Public endpoint for aggregate stats such as bandwidth used and methods requested.
 #[debug_handler]
 pub async fn user_influx_stats_aggregated_get(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
@@ -137,7 +137,7 @@ pub async fn user_influx_stats_aggregated_get(
 /// `GET /user/stats/accounting` -- Use a bearer token to get the user's revert logs.
 #[debug_handler]
 pub async fn user_mysql_stats_get(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
     let user = app.bearer_is_authorized(bearer).await?;
@@ -171,7 +171,7 @@ pub async fn user_mysql_stats_get(
 /// TODO: this will change as we add better support for secondary users.
 #[debug_handler]
 pub async fn user_influx_stats_detailed_get(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {

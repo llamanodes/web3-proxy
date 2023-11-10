@@ -1,6 +1,8 @@
 //! `frontend` contains HTTP and websocket endpoints for use by a website or web3 wallet.
 //!
 //! Important reading about axum extractors: <https://docs.rs/axum/latest/axum/extract/index.html#the-order-of-extractors>
+//!
+//! There are a lot of things in tower/axum that i should have used instead of implementing here.
 // TODO: these are only public so docs are generated. What's a better way to do this?
 pub mod admin;
 pub mod authorization;
@@ -43,12 +45,8 @@ pub enum ResponseCacheKey {
 
 pub type ResponseCache = Cache<ResponseCacheKey, (StatusCode, &'static str, axum::body::Bytes)>;
 
-/// Start the frontend server.
-pub async fn serve(
-    app: Arc<App>,
-    mut shutdown_receiver: broadcast::Receiver<()>,
-    shutdown_complete_sender: broadcast::Sender<()>,
-) -> Web3ProxyResult<()> {
+/// build our axum Router
+pub fn make_router(app: Arc<App>) -> Router<()> {
     // setup caches for whatever the frontend needs
     // no need for max items since it is limited by the enum key
     // TODO: latest moka allows for different ttls for different
@@ -59,9 +57,8 @@ pub async fn serve(
         .time_to_live(Duration::from_millis(200))
         .build();
 
-    // TODO: read config for if fastest/versus should be available publicly. default off
+    let response_cache = Arc::new(response_cache);
 
-    // build our axum Router
     let mut router = Router::new()
         // TODO: i think these routes could be done a lot better
         //
@@ -142,10 +139,23 @@ pub async fn serve(
         //
         // System things
         //
-        .route("/health", get(status::health))
-        .route("/status", get(status::status))
-        .route("/status/backups_needed", get(status::backups_needed))
-        .route("/status/debug_request", get(status::debug_request))
+        // TODO: response_cache should probably be inside State
+        .route(
+            "/health",
+            get(status::health).route_layer(Extension(response_cache.clone())),
+        )
+        .route(
+            "/status",
+            get(status::status).route_layer(Extension(response_cache.clone())),
+        )
+        .route(
+            "/status/backups_needed",
+            get(status::backups_needed).route_layer(Extension(response_cache.clone())),
+        )
+        .route(
+            "/status/debug_request",
+            get(status::debug_request).route_layer(Extension(response_cache.clone())),
+        )
         //
         // User stuff
         //
@@ -256,22 +266,17 @@ pub async fn serve(
         );
     }
 
-    router = router
-        //
-        // Axum layers
-        // layers are ordered bottom up
-        // the last layer is first for requests and last for responses
-        //
+    // Axum layers
+    // layers are ordered bottom up
+    // the last layer is first for requests and last for responses
+    let router = router
         // Remove trailing slashes
+        // TODO: this isn't working for me. why?
         .layer(NormalizePathLayer::trim_trailing_slash())
         // Mark the `Authorization` request header as sensitive so it doesn't show in logs
         .layer(SetSensitiveRequestHeadersLayer::new(once(AUTHORIZATION)))
         // handle cors. we expect queries from all sorts of places
         .layer(CorsLayer::very_permissive())
-        // application state
-        .layer(Extension(app.clone()))
-        // frontend caches
-        .layer(Extension(Arc::new(response_cache)))
         // request id
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &Request<Body>| {
@@ -306,7 +311,20 @@ pub async fn serve(
             }), // .on_failure(|| todo!("on failure that has the request and response body so we can debug more easily")),
         )
         // 404 for any unknown routes
-        .fallback(errors::handler_404);
+        .fallback(errors::handler_404)
+        .with_state(app);
+
+    router
+}
+
+/// Start the frontend server.
+pub async fn serve(
+    app: Arc<App>,
+    mut shutdown_receiver: broadcast::Receiver<()>,
+    shutdown_complete_sender: broadcast::Sender<()>,
+) -> Web3ProxyResult<()> {
+    // TODO: read config for if fastest/versus should be available publicly. default off
+    let router = make_router(app.clone());
 
     // TODO: https://docs.rs/tower-http/latest/tower_http/propagate_header/index.html
 

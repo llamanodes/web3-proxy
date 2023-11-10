@@ -7,10 +7,10 @@ use crate::globals::{global_db_conn, global_db_replica_conn};
 use crate::premium::{get_user_and_tier_from_address, grant_premium_tier};
 use anyhow::Context;
 use axum::{
-    extract::Path,
+    extract::{Path, State},
     headers::{authorization::Bearer, Authorization},
     response::IntoResponse,
-    Extension, Json, TypedHeader,
+    Json, TypedHeader,
 };
 use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
@@ -41,7 +41,7 @@ use tracing::{debug, error, info, trace, warn};
 /// - show deposits history (currency, amounts, transaction id)
 #[debug_handler]
 pub async fn user_balance_get(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
     let user = app.bearer_is_authorized(bearer).await?;
@@ -61,7 +61,7 @@ pub async fn user_balance_get(
 /// - shows a list of all deposits, including their chain-id, amount and tx-hash
 #[debug_handler]
 pub async fn user_chain_deposits_get(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
     let user = app.bearer_is_authorized(bearer).await?;
@@ -100,7 +100,7 @@ pub async fn user_chain_deposits_get(
 /// - shows a list of all deposits done through stripe
 #[debug_handler]
 pub async fn user_stripe_deposits_get(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
     let user = app.bearer_is_authorized(bearer).await?;
@@ -143,7 +143,7 @@ pub async fn user_stripe_deposits_get(
 /// - shows a list of all deposits done by admins
 #[debug_handler]
 pub async fn user_admin_deposits_get(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
     let user = app.bearer_is_authorized(bearer).await?;
@@ -181,7 +181,7 @@ pub async fn user_admin_deposits_get(
 /// `POST /user/balance/:tx_hash` -- Process a confirmed txid to update a user's balance.
 #[debug_handler]
 pub async fn user_balance_post(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     ip: Option<InsecureClientIp>,
     Path(mut params): Path<HashMap<String, String>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
@@ -441,7 +441,7 @@ pub async fn user_balance_post(
 /// `POST /user/balance_uncle/:uncle_hash` -- Process an uncle block to potentially update a user's balance.
 #[debug_handler]
 pub async fn user_balance_uncle_post(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     ip: Option<InsecureClientIp>,
     Path(mut params): Path<HashMap<String, String>>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,

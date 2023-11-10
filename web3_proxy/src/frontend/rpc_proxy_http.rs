@@ -5,11 +5,11 @@ use super::rpc_proxy_ws::ProxyMode;
 use crate::errors::Web3ProxyError;
 use crate::{app::App, jsonrpc::JsonRpcRequestEnum};
 use axum::extract::rejection::JsonRejection;
-use axum::extract::Path;
+use axum::extract::{Path, State};
 use axum::headers::{Origin, Referer, UserAgent};
 use axum::response::Response;
 use axum::TypedHeader;
-use axum::{response::IntoResponse, Extension, Json};
+use axum::{response::IntoResponse, Json};
 use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use http::HeaderMap;
@@ -23,7 +23,7 @@ use std::time::Duration;
 /// If possible, please use a WebSocket instead.
 #[debug_handler]
 pub async fn proxy_web3_rpc(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     payload: Result<Json<JsonRpcRequestEnum>, JsonRejection>,
@@ -33,7 +33,7 @@ pub async fn proxy_web3_rpc(
 
 #[debug_handler]
 pub async fn fastest_proxy_web3_rpc(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     payload: Result<Json<JsonRpcRequestEnum>, JsonRejection>,
@@ -45,7 +45,7 @@ pub async fn fastest_proxy_web3_rpc(
 
 #[debug_handler]
 pub async fn versus_proxy_web3_rpc(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     payload: Result<Json<JsonRpcRequestEnum>, JsonRejection>,
@@ -126,7 +126,7 @@ async fn _proxy_web3_rpc(
 /// If possible, please use a WebSocket instead.
 #[debug_handler]
 pub async fn proxy_web3_rpc_with_key(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
@@ -151,7 +151,7 @@ pub async fn proxy_web3_rpc_with_key(
 #[debug_handler]
 #[allow(clippy::too_many_arguments)]
 pub async fn debug_proxy_web3_rpc_with_key(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
@@ -195,7 +195,7 @@ pub async fn debug_proxy_web3_rpc_with_key(
 
 #[debug_handler]
 pub async fn fastest_proxy_web3_rpc_with_key(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
@@ -218,7 +218,7 @@ pub async fn fastest_proxy_web3_rpc_with_key(
 
 #[debug_handler]
 pub async fn versus_proxy_web3_rpc_with_key(
-    Extension(app): Extension<Arc<App>>,
+    State(app): State<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,

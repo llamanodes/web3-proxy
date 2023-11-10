@@ -1,7 +1,8 @@
+use axum::extract::State;
 use axum::headers::HeaderName;
 use axum::http::HeaderValue;
 use axum::response::{IntoResponse, Response};
-use axum::{routing::get, Extension, Router};
+use axum::{routing::get, Router};
 use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -17,9 +18,7 @@ pub async fn serve(
     mut shutdown_receiver: broadcast::Receiver<()>,
 ) -> Web3ProxyResult<()> {
     // routes should be ordered most to least common
-    let router = Router::new()
-        .route("/", get(root))
-        .layer(Extension(app.clone()));
+    let router = Router::new().route("/", get(root)).with_state(app.clone());
 
     // note: the port here might be 0
     let port = app.prometheus_port.load(Ordering::SeqCst);
@@ -44,7 +43,7 @@ pub async fn serve(
         .map_err(Into::into)
 }
 
-async fn root(Extension(app): Extension<Arc<App>>) -> Response {
+async fn root(State(app): State<Arc<App>>) -> Response {
     let serialized = app.prometheus_metrics().await;
 
     let mut r = serialized.into_response();
