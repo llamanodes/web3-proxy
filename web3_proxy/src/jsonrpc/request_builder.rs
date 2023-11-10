@@ -404,19 +404,12 @@ impl ValidatedRequest {
     ) -> Web3ProxyResult<Arc<Self>> {
         #[cfg(feature = "rdkafka")]
         let kafka_debug_logger = if matches!(authorization.checks.proxy_mode, ProxyMode::Debug) {
-            let request_ulid = request_id
-                .map(|s| Ulid::from_string(&s))
-                .transpose()
-                .ok()
-                .flatten()
-                .unwrap_or_else(Ulid::new);
-
             KafkaDebugLogger::try_new(
                 app,
                 authorization.clone(),
                 head_block.as_ref().map(|x| x.number()),
                 "web3_proxy:rpc",
-                request_ulid,
+                &request_id,
             )
         } else {
             None
