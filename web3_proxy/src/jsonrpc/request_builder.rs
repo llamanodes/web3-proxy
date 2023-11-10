@@ -175,6 +175,7 @@ impl RequestBuilder {
             permit,
             self.request_or_method.clone(),
             self.head_block.clone(),
+            None,
         )
         .await;
 
@@ -257,6 +258,9 @@ pub struct ValidatedRequest {
 
     /// limit the number of concurrent requests from a given user.
     pub permit: Option<OwnedSemaphorePermit>,
+
+    /// RequestId from x-amzn-trace-id or generated
+    pub request_id: Option<String>,
 }
 
 impl Display for ValidatedRequest {
@@ -322,6 +326,7 @@ impl ValidatedRequest {
         permit: Option<OwnedSemaphorePermit>,
         mut request: RequestOrMethod,
         usd_per_cu: Decimal,
+        request_id: Option<String>,
     ) -> Web3ProxyResult<Arc<Self>> {
         let start_instant = Instant::now();
 
@@ -390,6 +395,7 @@ impl ValidatedRequest {
             stat_sender,
             usd_per_cu,
             user_error_response: false.into(),
+            request_id,
         };
 
         Ok(Arc::new(x))
@@ -403,18 +409,16 @@ impl ValidatedRequest {
         permit: Option<OwnedSemaphorePermit>,
         request: RequestOrMethod,
         head_block: Option<Web3ProxyBlock>,
+        request_id: Option<String>,
     ) -> Web3ProxyResult<Arc<Self>> {
         #[cfg(feature = "rdkafka")]
         let kafka_debug_logger = if matches!(authorization.checks.proxy_mode, ProxyMode::Debug) {
-            // TODO: get this out of tracing instead (where we have a String from Amazon's LB)
-            let request_ulid = Ulid::new();
-
             KafkaDebugLogger::try_new(
                 app,
                 authorization.clone(),
                 head_block.as_ref().map(|x| x.number()),
                 "web3_proxy:rpc",
-                request_ulid,
+                &request_id,
             )
         } else {
             None
@@ -435,6 +439,7 @@ impl ValidatedRequest {
             permit,
             request,
             usd_per_cu,
+            request_id,
         )
         .await
     }
@@ -461,6 +466,7 @@ impl ValidatedRequest {
                 None,
                 request.into(),
                 head_block,
+                None,
             )
             .await
         } else {
@@ -475,6 +481,7 @@ impl ValidatedRequest {
                 None,
                 request.into(),
                 Default::default(),
+                None,
             )
             .await
         }

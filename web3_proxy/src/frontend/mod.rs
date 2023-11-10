@@ -11,6 +11,7 @@ pub mod rpc_proxy_http;
 pub mod rpc_proxy_ws;
 pub mod status;
 pub mod users;
+pub mod request_id;
 
 use crate::app::App;
 use crate::errors::Web3ProxyResult;
@@ -18,6 +19,7 @@ use axum::{
     routing::{get, post},
     Extension, Router,
 };
+use request_id::RequestId;
 use http::{header::AUTHORIZATION, Request, StatusCode};
 use hyper::Body;
 
@@ -30,7 +32,6 @@ use tokio::{process::Command, sync::broadcast};
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 use tower_http::{cors::CorsLayer, normalize_path::NormalizePathLayer, trace::TraceLayer};
 use tracing::{error, error_span, info, trace_span};
-use ulid::Ulid;
 
 #[cfg(feature = "listenfd")]
 use listenfd::ListenFd;
@@ -283,12 +284,15 @@ pub fn make_router(app: Arc<App>) -> Router<()> {
                 // We get the request id from the header
                 // If no header, a new Ulid is created
                 // TODO: move this header name to config
+                /*
                 let request_id = request
                     .headers()
                     .get("x-amzn-trace-id")
                     .and_then(|x| x.to_str().ok())
                     .map(ToString::to_string)
                     .unwrap_or_else(|| Ulid::new().to_string());
+                */
+                let request_id = &request.extensions().get::<RequestId>().unwrap().0;
 
                 // And then we put it along with other information into the `request` span
                 // TODO: what other info should we attach? how can we attach an error and a tracing span here?
@@ -310,6 +314,7 @@ pub fn make_router(app: Arc<App>) -> Router<()> {
                 }
             }), // .on_failure(|| todo!("on failure that has the request and response body so we can debug more easily")),
         )
+        .layer(request_id::RequestIdLayer)
         // 404 for any unknown routes
         .fallback(errors::handler_404)
         .with_state(app);

@@ -209,7 +209,17 @@ impl OpenRequestHandle {
                 .jsonrpc_request()
                 .context("there should always be a request here")?;
 
-            let response = client.post(url).json(request).send().await?;
+            let mut request_builder = client.post(url).json(request);
+            if request.method == "eth_sendRawTransaction" {
+                if let Some(ref request_id) = self.web3_request.request_id {
+                    let mut headers = reqwest::header::HeaderMap::with_capacity(1);
+                    let request_id = reqwest::header::HeaderValue::from_str(&request_id)
+                        .expect("request id should be a valid header");
+                    headers.insert("x-amzn-trace-id", request_id);
+                    request_builder = request_builder.headers(headers);
+                }
+            }
+            let response = request_builder.send().await?;
 
             if response.status() == StatusCode::TOO_MANY_REQUESTS {
                 // TODO: how much should we actually rate limit?

@@ -129,6 +129,7 @@ impl JsonRpcRequestEnum {
             None,
             RequestOrMethod::Method("invalid_method".into(), size),
             None,
+            None,
         )
         .await
         .unwrap();

@@ -6703,6 +6703,8 @@ dependencies = [
  "tokio-stream",
  "toml 0.8.8",
  "tower-http",
+ "tower-layer",
+ "tower-service",
  "tracing",
  "tracing-subscriber",
  "ulid",

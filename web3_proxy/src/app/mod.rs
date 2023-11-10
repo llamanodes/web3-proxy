@@ -957,7 +957,8 @@ impl App {
     ) -> Web3ProxyResult<R> {
         let authorization = Arc::new(Authorization::internal()?);
 
-        self.authorized_request(method, params, authorization).await
+        self.authorized_request(method, params, authorization, None)
+            .await
     }
 
     /// this is way more round-a-bout than we want, but it means stats are emitted and caches are used
@@ -966,12 +967,15 @@ impl App {
         method: &str,
         params: P,
         authorization: Arc<Authorization>,
+        request_id: Option<String>,
     ) -> Web3ProxyResult<R> {
         // TODO: proper ids
         let request =
             SingleRequest::new(LooseId::Number(1), method.to_string().into(), json!(params))?;
 
-        let (_, response, _) = self.proxy_request(request, authorization, None).await;
+        let (_, response, _) = self
+            .proxy_request(request, authorization, None, request_id)
+            .await;
 
         // TODO: error handling?
         match response.parsed().await?.payload {
@@ -987,20 +991,21 @@ impl App {
         self: &Arc<Self>,
         authorization: Arc<Authorization>,
         request: JsonRpcRequestEnum,
+        request_id: Option<String>,
     ) -> Web3ProxyResult<(StatusCode, jsonrpc::Response, Vec<Arc<Web3Rpc>>)> {
         // trace!(?request, "proxy_web3_rpc");
 
         let response = match request {
             JsonRpcRequestEnum::Single(request) => {
                 let (status_code, response, rpcs) = self
-                    .proxy_request(request, authorization.clone(), None)
+                    .proxy_request(request, authorization.clone(), None, request_id)
                     .await;
 
                 (status_code, jsonrpc::Response::Single(response), rpcs)
             }
             JsonRpcRequestEnum::Batch(requests) => {
                 let (responses, rpcs) = self
-                    .proxy_web3_rpc_requests(&authorization, requests)
+                    .proxy_web3_rpc_requests(&authorization, requests, request_id)
                     .await?;
 
                 // TODO: real status code. if an error happens, i don't think we are following the spec here
@@ -1017,6 +1022,7 @@ impl App {
         self: &Arc<Self>,
         authorization: &Arc<Authorization>,
         requests: Vec<SingleRequest>,
+        request_id: Option<String>,
     ) -> Web3ProxyResult<(Vec<jsonrpc::ParsedResponse>, Vec<Arc<Web3Rpc>>)> {
         // TODO: we should probably change ethers-rs to support this directly. they pushed this off to v2 though
         let num_requests = requests.len();
@@ -1037,7 +1043,12 @@ impl App {
             requests
                 .into_iter()
                 .map(|request| {
-                    self.proxy_request(request, authorization.clone(), Some(head_block.clone()))
+                    self.proxy_request(
+                        request,
+                        authorization.clone(),
+                        Some(head_block.clone()),
+                        request_id.clone(),
+                    )
                 })
                 .collect::<Vec<_>>(),
         )
@@ -1237,6 +1248,7 @@ impl App {
         request: SingleRequest,
         authorization: Arc<Authorization>,
         head_block: Option<Web3ProxyBlock>,
+        request_id: Option<String>,
     ) -> (StatusCode, jsonrpc::SingleResponse, Vec<Arc<Web3Rpc>>) {
         // TODO: this clone is only for an error response. refactor to not need it
         let error_id = request.id.clone();
@@ -1251,6 +1263,7 @@ impl App {
             None,
             request.into(),
             head_block.clone(),
+            request_id,
         )
         .await
         {

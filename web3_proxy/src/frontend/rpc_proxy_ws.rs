@@ -327,6 +327,7 @@ async fn websocket_proxy_web3_rpc(
                 None,
                 json_request.into(),
                 None,
+                None,
             )
             .await?;
 
@@ -360,6 +361,7 @@ async fn websocket_proxy_web3_rpc(
                 None,
                 None,
                 json_request.into(),
+                None,
                 None,
             )
             .await?;
@@ -405,7 +407,7 @@ async fn websocket_proxy_web3_rpc(
             Ok(response.into())
         }
         _ => app
-            .proxy_web3_rpc(authorization, json_request.into())
+            .proxy_web3_rpc(authorization, json_request.into(), None)
             .await
             .map(|(_, response, _)| response),
     }

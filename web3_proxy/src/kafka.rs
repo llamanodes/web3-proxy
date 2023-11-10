@@ -37,7 +37,7 @@ impl KafkaDebugLogger {
         authorization: Arc<Authorization>,
         head_block_num: Option<U64>,
         kafka_topic: &str,
-        request_ulid: Ulid,
+        request_id: &str,
     ) -> Option<Arc<Self>> {
         let kafka_producer = app.kafka_producer.clone()?;
 
@@ -74,7 +74,7 @@ impl KafkaDebugLogger {
             })
             .insert(KafkaHeader {
                 key: "request_ulid",
-                value: Some(&request_ulid.to_string()),
+                value: Some(request_id),
             })
             .insert(KafkaHeader {
                 key: "head_block_num",
