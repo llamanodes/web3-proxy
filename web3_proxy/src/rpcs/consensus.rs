@@ -402,13 +402,20 @@ impl ConsensusFinder {
         rpc: Option<&Arc<Web3Rpc>>,
         new_block: Option<Web3ProxyBlock>,
     ) -> Web3ProxyResult<bool> {
+        let rpc_block_sender = rpc.and_then(|x| x.head_block_sender.as_ref());
+
         let new_ranked_rpcs = match self
             .rank_rpcs(web3_rpcs)
             .await
             .web3_context("error while finding consensus head block!")?
         {
             None => {
-                warn!("no ranked rpcs found!");
+                warn!(?rpc, ?new_block, "no ranked rpcs found!");
+
+                if let Some(rpc_block_sender) = rpc_block_sender {
+                    rpc_block_sender.send_replace(new_block);
+                }
+
                 return Ok(false);
             }
             Some(x) => x,
@@ -427,6 +434,10 @@ impl ConsensusFinder {
         let total_rpcs = web3_rpcs.len();
 
         let new_ranked_rpcs = Arc::new(new_ranked_rpcs);
+
+        if let Some(rpc_block_sender) = rpc_block_sender {
+            rpc_block_sender.send_replace(new_block.clone());
+        }
 
         let old_ranked_rpcs = web3_rpcs
             .watch_ranked_rpcs
@@ -672,7 +683,7 @@ impl ConsensusFinder {
             0 => {}
             1 => {
                 for rpc in self.rpc_heads.keys() {
-                    rpc.tier.store(1, atomic::Ordering::Release)
+                    rpc.tier.store(1, atomic::Ordering::SeqCst)
                 }
             }
             _ => {
@@ -752,7 +763,7 @@ impl ConsensusFinder {
 
                     trace!("{} - p50_sec: {}, tier {}", rpc, median_latency_sec, tier);
 
-                    rpc.tier.store(tier, atomic::Ordering::Release);
+                    rpc.tier.store(tier, atomic::Ordering::SeqCst);
                 }
             }
         }
@@ -810,7 +821,7 @@ impl ConsensusFinder {
             HashMap::with_capacity(num_known);
 
         for (rpc, rpc_head) in self.rpc_heads.iter() {
-            if !rpc.healthy.load(atomic::Ordering::Acquire) {
+            if !rpc.healthy.load(atomic::Ordering::SeqCst) {
                 // TODO: should unhealthy servers get a vote? they were included in minmax_block. i think that is enough
                 continue;
             }
@@ -878,14 +889,14 @@ impl ConsensusFinder {
     pub fn best_tier(&self) -> Option<u32> {
         self.rpc_heads
             .iter()
-            .map(|(x, _)| x.tier.load(atomic::Ordering::Acquire))
+            .map(|(x, _)| x.tier.load(atomic::Ordering::SeqCst))
             .min()
     }
 
     pub fn worst_tier(&self) -> Option<u32> {
         self.rpc_heads
             .iter()
-            .map(|(x, _)| x.tier.load(atomic::Ordering::Acquire))
+            .map(|(x, _)| x.tier.load(atomic::Ordering::SeqCst))
             .max()
     }
 }

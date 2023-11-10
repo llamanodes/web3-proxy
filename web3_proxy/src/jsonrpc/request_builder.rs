@@ -361,8 +361,17 @@ impl ValidatedRequest {
             _ => CacheMode::Never,
         };
 
+        // TODO: what should we do if we want a really short max_wait?
         let connect_timeout = Duration::from_secs(10);
-        let expire_timeout = max_wait.unwrap_or_else(|| Duration::from_secs(295));
+
+        let expire_timeout = if let Some(max_wait) = max_wait {
+            max_wait
+        } else if authorization.active_premium().await {
+            Duration::from_secs(295)
+        } else {
+            Duration::from_secs(60)
+        }
+        .max(connect_timeout);
 
         let x = Self {
             archive_request: false.into(),

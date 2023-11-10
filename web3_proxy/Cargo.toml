@@ -1,6 +1,6 @@
 [package]
 name = "web3_proxy"
-version = "1.43.83"
+version = "1.43.87"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -73,12 +73,12 @@ once_cell = { version = "1.18.0" }
 ordered-float = {version = "4.1.1" }
 pagerduty-rs = { version = "0.1.6", default-features = false, features = ["async", "rustls", "sync"] }
 parking_lot = { version = "0.12.1", features = ["arc_lock", "nightly"] }
-rdkafka = { version = "0.34.0", default-features = false, features = ["tokio", "tracing"], optional = true }
+rdkafka = { version = "0.36.0", default-features = false, features = ["tokio", "tracing"], optional = true }
 reqwest = { version = "0.11.22", default-features = false, features = ["json", "rustls"] }
 rust_decimal = { version = "1.32.0" }
 sentry = { version = "0.31.7", default-features = false, features = ["anyhow", "backtrace", "contexts", "panic", "reqwest", "rustls", "serde_json", "tracing"] }
 sentry-tracing = "0.31.7"
-serde = { version = "1.0.190" }
+serde = { version = "1.0.192" }
 serde-inline-default = "0.1.1"
 serde_json = { version = "1.0.108", default-features = false, features = ["raw_value"] }
 serde_prometheus = "0.2.4"
@@ -86,7 +86,7 @@ strum = { version = "0.25.0", features = ["derive"] }
 time = { version = "0.3" }
 tokio = { version = "1.33.0", features = ["full", "tracing"] }
 tokio-stream = { version = "0.1.14", features = ["sync"] }
-toml = "0.8.6"
+toml = "0.8.8"
 tower-http = { version = "0.4.4", features = ["cors", "normalize-path", "sensitive-headers", "trace"] }
 tower-layer = "0.3.2"
 tower-service = "0.3.2"
