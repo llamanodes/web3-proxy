@@ -213,9 +213,12 @@ impl OpenRequestHandle {
             if request.method == "eth_sendRawTransaction" {
                 if let Some(ref request_id) = self.web3_request.request_id {
                     let mut headers = reqwest::header::HeaderMap::with_capacity(1);
-                    let request_id = reqwest::header::HeaderValue::from_str(&request_id)
+                    let request_id = reqwest::header::HeaderValue::from_str(request_id)
                         .expect("request id should be a valid header");
                     headers.insert("x-amzn-trace-id", request_id);
+
+                    // TODO: more headers for the various rpc protection modes
+
                     request_builder = request_builder.headers(headers);
                 }
             }

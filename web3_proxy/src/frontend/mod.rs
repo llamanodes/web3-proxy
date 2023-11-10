@@ -7,11 +7,11 @@
 pub mod admin;
 pub mod authorization;
 pub mod errors;
+pub mod request_id;
 pub mod rpc_proxy_http;
 pub mod rpc_proxy_ws;
 pub mod status;
 pub mod users;
-pub mod request_id;
 
 use crate::app::App;
 use crate::errors::Web3ProxyResult;
@@ -19,9 +19,9 @@ use axum::{
     routing::{get, post},
     Extension, Router,
 };
-use request_id::RequestId;
 use http::{header::AUTHORIZATION, Request, StatusCode};
 use hyper::Body;
+use request_id::RequestId;
 
 use moka::future::{Cache, CacheBuilder};
 use std::sync::Arc;
@@ -60,7 +60,8 @@ pub fn make_router(app: Arc<App>) -> Router<()> {
 
     let response_cache = Arc::new(response_cache);
 
-    let mut router = Router::new()
+    #[allow(unused_mut)]
+    let mut router = Router::<Arc<App>>::new()
         // TODO: i think these routes could be done a lot better
         //
         // HTTP RPC (POST)
@@ -270,7 +271,7 @@ pub fn make_router(app: Arc<App>) -> Router<()> {
     // Axum layers
     // layers are ordered bottom up
     // the last layer is first for requests and last for responses
-    let router = router
+    let router: Router<(), _> = router
         // Remove trailing slashes
         // TODO: this isn't working for me. why?
         .layer(NormalizePathLayer::trim_trailing_slash())

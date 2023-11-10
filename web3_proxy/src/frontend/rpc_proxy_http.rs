@@ -9,8 +9,8 @@ use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, State};
 use axum::headers::{Origin, Referer, UserAgent};
 use axum::response::Response;
-use axum::TypedHeader;
 use axum::{response::IntoResponse, Json};
+use axum::{Extension, TypedHeader};
 use axum_client_ip::InsecureClientIp;
 use axum_macros::debug_handler;
 use http::HeaderMap;
@@ -154,14 +154,16 @@ async fn _proxy_web3_rpc(
 /// Can optionally authorized based on origin, referer, or user agent.
 /// If possible, please use a WebSocket instead.
 #[debug_handler]
+#[allow(clippy::too_many_arguments)]
 pub async fn proxy_web3_rpc_with_key(
     State(app): State<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
-    user_agent: Option<TypedHeader<UserAgent>>,
-    Path(rpc_key): Path<String>,
     Extension(RequestId(request_id)): Extension<RequestId>,
+    Path(rpc_key): Path<String>,
+    user_agent: Option<TypedHeader<UserAgent>>,
+    // body extractors always have to be last
     payload: Result<Json<JsonRpcRequestEnum>, JsonRejection>,
 ) -> Result<Response, Response> {
     _proxy_web3_rpc_with_key(
@@ -190,6 +192,7 @@ pub async fn debug_proxy_web3_rpc_with_key(
     request_headers: HeaderMap,
     Path(rpc_key): Path<String>,
     Extension(RequestId(request_id)): Extension<RequestId>,
+    // body extractors always have to be last
     payload: Result<Json<JsonRpcRequestEnum>, JsonRejection>,
 ) -> Result<Response, Response> {
     let mut response = match _proxy_web3_rpc_with_key(
@@ -227,14 +230,16 @@ pub async fn debug_proxy_web3_rpc_with_key(
 }
 
 #[debug_handler]
+#[allow(clippy::too_many_arguments)]
 pub async fn fastest_proxy_web3_rpc_with_key(
     State(app): State<Arc<App>>,
     InsecureClientIp(ip): InsecureClientIp,
     origin: Option<TypedHeader<Origin>>,
     referer: Option<TypedHeader<Referer>>,
-    user_agent: Option<TypedHeader<UserAgent>>,
     Path(rpc_key): Path<String>,
     Extension(RequestId(request_id)): Extension<RequestId>,
+    user_agent: Option<TypedHeader<UserAgent>>,
+    // body extractors always have to be last
     payload: Result<Json<JsonRpcRequestEnum>, JsonRejection>,
 ) -> Result<Response, Response> {
     _proxy_web3_rpc_with_key(
@@ -251,6 +256,7 @@ pub async fn fastest_proxy_web3_rpc_with_key(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 #[debug_handler]
 pub async fn versus_proxy_web3_rpc_with_key(
     State(app): State<Arc<App>>,
