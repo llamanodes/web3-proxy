@@ -196,23 +196,23 @@ async fn it_matches_anvil() {
 
     let gas_price: U256 = quorum_provider.request("eth_gasPrice", ()).await.unwrap();
 
-    let tx = TypedTransaction::Eip1559(Eip1559TransactionRequest {
+    let fund_tx = TypedTransaction::Eip1559(Eip1559TransactionRequest {
         chain_id: Some(chain_id),
         to: Some(singleton_deploy_from.into()),
         gas: Some(21000.into()),
-        value: Some("24700000000000000".parse().unwrap()),
+        value: Some("1024700000000000000".parse().unwrap()),
         max_fee_per_gas: Some(gas_price * U256::from(2)),
         ..Default::default()
     });
 
-    let sig = wallet.sign_transaction_sync(&tx).unwrap();
+    let fund_sig = wallet.sign_transaction_sync(&fund_tx).unwrap();
 
-    let raw_tx = tx.rlp_signed(&sig);
+    let fund_tx = fund_tx.rlp_signed(&fund_sig);
 
     // fund singleton deployer
     // TODO: send through the quorum provider. it should detect that its already confirmed
     let fund_tx_hash: H256 = proxy_provider
-        .request("eth_sendRawTransaction", [raw_tx])
+        .request("eth_sendRawTransaction", [fund_tx])
         .await
         .unwrap();
     info!(%fund_tx_hash);
