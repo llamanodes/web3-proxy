@@ -115,6 +115,7 @@ enum Referrer {
     ReferralCode,
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Iden)]
 enum Referee {
     Table,

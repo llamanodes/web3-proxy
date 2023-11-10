@@ -60,6 +60,7 @@ enum User {
     Id,
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Iden)]
 enum Balance {
     Table,

@@ -8,7 +8,7 @@ use web3_proxy::prelude::tokio;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // install global collector configured based on RUST_LOG env var.
-    fdlimit::raise_fd_limit();
+    fdlimit::raise_fd_limit()?;
 
     // erigon
     let url = "ws://10.11.12.16:8548";

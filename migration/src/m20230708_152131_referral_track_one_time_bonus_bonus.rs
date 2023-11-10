@@ -39,7 +39,7 @@ impl MigrationTrait for Migration {
     }
 }
 
-/// Learn more at https://docs.rs/sea-query#iden
+#[allow(clippy::enum_variant_names)]
 #[derive(Iden)]
 enum Referee {
     Table,
