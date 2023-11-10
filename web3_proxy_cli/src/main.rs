@@ -90,7 +90,7 @@ enum SubCommand {
 
 fn main() -> anyhow::Result<()> {
     // this probably won't matter for us in docker, but better safe than sorry
-    fdlimit::raise_fd_limit();
+    fdlimit::raise_fd_limit()?;
 
     #[cfg(feature = "deadlock_detection")]
     {

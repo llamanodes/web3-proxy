@@ -50,7 +50,7 @@ impl CreateUserSubCommand {
             let bytes = address.as_bytes();
 
             // convert the slice to a Vec
-            bytes.try_into().expect("Bytes can always be a Vec<u8>")
+            bytes.into()
         };
 
         // TODO: get existing or create a new one

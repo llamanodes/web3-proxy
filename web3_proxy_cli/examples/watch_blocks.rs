@@ -7,7 +7,7 @@ use web3_proxy::prelude::tokio;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    fdlimit::raise_fd_limit();
+    fdlimit::raise_fd_limit()?;
 
     // erigon does not support most filters
     // let url = "http://10.11.12.16:8545";

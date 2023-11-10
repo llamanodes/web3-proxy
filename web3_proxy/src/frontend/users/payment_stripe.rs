@@ -3,7 +3,7 @@ use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
 use crate::globals::global_db_conn;
 use crate::premium::grant_premium_tier;
 use anyhow::Context;
-use axum::{response::IntoResponse, Extension};
+use axum::{extract::State, response::IntoResponse};
 use axum_macros::debug_handler;
 use entities::{stripe_increase_balance_receipt, user, user_tier};
 use http::HeaderMap;
