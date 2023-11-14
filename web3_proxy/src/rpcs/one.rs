@@ -1286,8 +1286,20 @@ impl Web3Rpc {
 
         // TODO: if we are inside the health checks and we aren't healthy yet. we need some sort of flag to force try_handle to not error
 
-        self.authorized_request(&web3_request, error_handler, true)
-            .await
+        let response = self
+            .authorized_request(&web3_request, error_handler, true)
+            .await;
+
+        match &response {
+            Ok(x) => {
+                // TODO: this is not efficient :(
+                let x = json!(x);
+                web3_request.add_response(&x)
+            }
+            Err(e) => web3_request.add_error_response(e),
+        }
+
+        response
     }
 
     pub async fn authorized_request<R: JsonRpcResultData>(

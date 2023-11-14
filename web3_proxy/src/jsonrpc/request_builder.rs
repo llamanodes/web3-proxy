@@ -2,7 +2,7 @@ use super::{JsonRpcParams, LooseId, SingleRequest};
 use crate::{
     app::App,
     block_number::CacheMode,
-    errors::Web3ProxyResult,
+    errors::{Web3ProxyError, Web3ProxyResult},
     frontend::{
         authorization::{key_is_authorized, Authorization, RequestOrMethod, ResponseOrBytes},
         rpc_proxy_ws::ProxyMode,
@@ -568,6 +568,13 @@ impl ValidatedRequest {
         }
 
         Ok(())
+    }
+
+    pub fn add_error_response(&self, _err: &Web3ProxyError) {
+        self.error_response.store(true, atomic::Ordering::SeqCst);
+
+        // TODO: add actual response size
+        self.add_response(0);
     }
 
     pub fn add_response<'a, R: Into<ResponseOrBytes<'a>>>(&'a self, response: R) {
