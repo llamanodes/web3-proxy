@@ -1001,8 +1001,6 @@ impl Web3Rpc {
                     )
                     .await;
 
-                info!(?block_result, "tick on {}", self);
-
                 self.send_head_block_result(block_result).await?;
 
                 // TODO: should this select be at the start or end of the loop?
@@ -1280,8 +1278,8 @@ impl Web3Rpc {
         error_handler: Option<RequestErrorHandler>,
         max_wait: Option<Duration>,
     ) -> Web3ProxyResult<R> {
-        // TODO: should this be the app, or this RPC's head block?
-        let head_block = self.head_block_sender.as_ref().unwrap().borrow().clone();
+        // TODO: should this be the app, or this RPC's head block? i think we want None so that "latest" gets left alone
+        let head_block = None;
 
         let web3_request =
             ValidatedRequest::new_internal(method, params, head_block, max_wait).await?;
