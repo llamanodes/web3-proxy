@@ -320,7 +320,7 @@ impl ValidatedRequest {
         app: Option<&App>,
         authorization: Arc<Authorization>,
         chain_id: u64,
-        mut head_block: Option<Web3ProxyBlock>,
+        head_block: Option<Web3ProxyBlock>,
         #[cfg(feature = "rdkafka")] kafka_debug_logger: Option<Arc<KafkaDebugLogger>>,
         max_wait: Option<Duration>,
         permit: Option<OwnedSemaphorePermit>,
@@ -346,19 +346,16 @@ impl ValidatedRequest {
         #[cfg(not(feature = "rdkafka"))]
         let kafka_debug_logger = None;
 
-        if head_block.is_none() {
-            if let Some(app) = app {
-                head_block = app.head_block_receiver().borrow().clone();
-            }
-        }
-
         // now that kafka has logged the user's original params, we can calculate the cache key
-        // calculating the cache key might alter the params
-
-        // TODO: modify CacheMode::new to wait for a future block if one is requested! be sure to update head_block too!
-        let cache_mode = match &mut request {
-            RequestOrMethod::Request(x) => CacheMode::new(x, head_block.as_ref(), app).await?,
-            _ => CacheMode::Never,
+        // calculating the CacheMode might alter the params
+        let cache_mode = if head_block.is_none() {
+            CacheMode::Never
+        } else {
+            // TODO: modify CacheMode::new to wait for a future block if one is requested! be sure to update head_block too!
+            match &mut request {
+                RequestOrMethod::Request(x) => CacheMode::new(x, head_block.as_ref(), app).await?,
+                _ => CacheMode::Never,
+            }
         };
 
         // TODO: what should we do if we want a really short max_wait?
