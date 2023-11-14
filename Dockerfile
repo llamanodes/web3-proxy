@@ -1,3 +1,32 @@
+FROM debian:bullseye-slim as mold
+
+ENV SHELL /bin/bash
+SHELL [ "/bin/bash", "-c" ]
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    set -eux -o pipefail; \
+    \
+    apt-get update; \
+    apt-get install --no-install-recommends --yes \
+    ca-certificates \
+    git \
+    ;
+
+RUN { set -eux; \
+    \
+    git clone https://github.com/rui314/mold.git; \
+    mkdir mold/build; \
+    cd mold/build; \
+    git checkout v2.3.3; \
+    ../install-build-deps.sh; \
+    cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=c++ ..; \
+    cmake --build . -j $(nproc); \
+    cmake --build . --target install; \
+    }
+
+COPY ./docker/cargo-config.toml /root/.cargo/config.toml
+
 FROM debian:bullseye-slim as rust
 
 WORKDIR /app
@@ -10,6 +39,7 @@ ENV SHELL /bin/bash
 SHELL [ "/bin/bash", "-c" ]
 
 # install rustup dependencies
+# install clang for mold
 # also install web3-proxy system dependencies. most things are rust-only, but not everything
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
@@ -19,6 +49,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get install --no-install-recommends --yes \
     build-essential \
     ca-certificates \
+    clang \
     cmake \
     curl \
     git \
@@ -52,6 +83,10 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     [ -e /app/target_test/rust-toolchain.toml ] && [ "$(cat /app/target_test/rust-toolchain.toml)" != "$(cat ./rust-toolchain.toml)" ] && rm -rf /app/target_test/*; \
     cp ./rust-toolchain.toml /app/target/rust-toolchain.toml; \
     cp ./rust-toolchain.toml /app/target_test/rust-toolchain.toml
+
+# install mold (a faster linker)
+COPY --link --from=mold /usr/local/bin/mold /usr/local/bin/mold
+COPY --link --from=mold /root/.cargo/config.toml /root/.cargo/config.toml
 
 # cargo binstall makes it fast to install binaries
 RUN --mount=type=cache,target=/root/.cargo/git \

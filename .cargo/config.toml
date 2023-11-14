@@ -1,5 +1,7 @@
 [build]
 rustflags = [
+    # potentially faster. https://github.com/aws/aws-graviton-getting-started/blob/main/rust.md
+    "-C", "target-feature=+lse",
     # potentially faster. https://nnethercote.github.io/perf-book/build-configuration.html
     "-C", "target-cpu=native",
     # tokio unstable is needed for tokio-console
@@ -8,6 +10,8 @@ rustflags = [
     "--cfg", "uuid_unstable",
 ]
 rustdocflags = [
+    # potentially faster. https://github.com/aws/aws-graviton-getting-started/blob/main/rust.md
+    "-C", "target-feature=+lse",
     # potentially faster. https://nnethercote.github.io/perf-book/build-configuration.html
     "-C", "target-cpu=native",
     # tokio unstable is needed for tokio-console

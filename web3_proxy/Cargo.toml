@@ -57,12 +57,12 @@ futures-util = "0.3.29"
 glob = "0.3.1"
 handlebars = "4.5.0"
 hashbrown = { version = "0.14.2", features = ["serde", "nightly"] }
-hdrhistogram = "7.5.2"
+hdrhistogram = "7.5.3"
 hostname = "0.3.1"
-http = "0.2.9"
+http = "0.2.11"
 hyper = { version = "0.14.27", features = ["full", "nightly"] }
 ipnet = { version = "2.9.0" }
-itertools = "0.11.0"
+itertools = "0.12.0"
 listenfd = { version = "1.0.1", optional = true }
 mimalloc = { version = "0.1.39", optional = true }
 moka = { version = "0.12.1", default-features = false, features = ["atomic64", "future", "quanta"] }
@@ -75,9 +75,9 @@ pagerduty-rs = { version = "0.1.6", default-features = false, features = ["async
 parking_lot = { version = "0.12.1", features = ["arc_lock", "nightly"] }
 rdkafka = { version = "0.36.0", default-features = false, features = ["tokio", "tracing"], optional = true }
 reqwest = { version = "0.11.22", default-features = false, features = ["json", "rustls"] }
-rust_decimal = { version = "1.32.0" }
-sentry = { version = "0.31.7", default-features = false, features = ["anyhow", "backtrace", "contexts", "panic", "reqwest", "rustls", "serde_json", "tracing"] }
-sentry-tracing = "0.31.7"
+rust_decimal = { version = "1.33.0" }
+sentry = { version = "0.31.8", default-features = false, features = ["anyhow", "backtrace", "contexts", "panic", "reqwest", "rustls", "serde_json", "tracing"] }
+sentry-tracing = "0.31.8"
 serde = { version = "1.0.192" }
 serde-inline-default = "0.1.1"
 serde_json = { version = "1.0.108", default-features = false, features = ["raw_value"] }
