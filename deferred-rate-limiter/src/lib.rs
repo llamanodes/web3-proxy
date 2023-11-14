@@ -141,7 +141,7 @@ where
             Ok(deferred_rate_limit_result)
         } else {
             // we have a cached amount here
-            let cached_key_count = local_key_count.fetch_add(count, Ordering::AcqRel);
+            let cached_key_count = local_key_count.fetch_add(count, Ordering::SeqCst);
 
             // assuming no other parallel futures incremented this key, this is the count that redis has
             let expected_key_count = cached_key_count + count;
@@ -168,11 +168,11 @@ where
                             .await
                         {
                             Ok(RedisRateLimitResult::Allowed(count)) => {
-                                local_key_count.store(count, Ordering::Release);
+                                local_key_count.store(count, Ordering::SeqCst);
                                 DeferredRateLimitResult::Allowed
                             }
                             Ok(RedisRateLimitResult::RetryAt(retry_at, count)) => {
-                                local_key_count.store(count, Ordering::Release);
+                                local_key_count.store(count, Ordering::SeqCst);
                                 DeferredRateLimitResult::RetryAt(retry_at)
                             }
                             Ok(RedisRateLimitResult::RetryNever) => {

@@ -952,7 +952,7 @@ impl Web3Rpc {
 
     /// Subscribe to new block headers.
     async fn subscribe_new_heads(self: &Arc<Self>) -> Web3ProxyResult<()> {
-        trace!("subscribing to new heads on {}", self);
+        info!("subscribing to new heads on {}", self);
 
         let error_handler = if self.backup {
             Some(Level::DEBUG.into())
@@ -1000,6 +1000,8 @@ impl Web3Rpc {
                         Some(Duration::from_secs(5)),
                     )
                     .await;
+
+                info!(?block_result, "tick on {}", self);
 
                 self.send_head_block_result(block_result).await?;
 

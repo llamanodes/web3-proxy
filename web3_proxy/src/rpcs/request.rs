@@ -318,17 +318,17 @@ impl OpenRequestHandle {
         let authorization = &self.web3_request.authorization;
 
         match &authorization.authorization_type {
-            AuthorizationType::Frontend => {
+            AuthorizationType::Remote | AuthorizationType::Local => {
                 // this is just a debug counter, so Relaxed is probably fine
                 self.rpc
                     .external_requests
-                    .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             }
             AuthorizationType::Internal => {
                 // this is just a debug counter, so Relaxed is probably fine
                 self.rpc
                     .internal_requests
-                    .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             }
         }
 

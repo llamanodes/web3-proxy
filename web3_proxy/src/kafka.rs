@@ -137,7 +137,7 @@ impl KafkaDebugLogger {
             serde_json::to_vec(&request).expect("requests should always serialize with rmp");
 
         // this is just a debug counter so Relaxed is probably fine
-        self.num_requests.fetch_add(1, atomic::Ordering::AcqRel);
+        self.num_requests.fetch_add(1, atomic::Ordering::SeqCst);
 
         self.background_log(payload)
     }
@@ -150,7 +150,7 @@ impl KafkaDebugLogger {
             serde_json::to_vec(&response).expect("requests should always serialize with rmp");
 
         // this is just a debug counter so Relaxed is probably fine
-        self.num_responses.fetch_add(1, atomic::Ordering::AcqRel);
+        self.num_responses.fetch_add(1, atomic::Ordering::SeqCst);
 
         self.background_log(payload)
     }

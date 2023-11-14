@@ -1318,22 +1318,22 @@ impl App {
 
         let (code, response) = match last_response {
             Ok(response_data) => {
-                web3_request.error_response.store(false, Ordering::Release);
+                web3_request.error_response.store(false, Ordering::SeqCst);
 
                 // TODO: is it true that all jsonrpc errors are user errors?
                 web3_request
                     .user_error_response
-                    .store(response_data.is_jsonrpc_err(), Ordering::Release);
+                    .store(response_data.is_jsonrpc_err(), Ordering::SeqCst);
 
                 (StatusCode::OK, response_data)
             }
             Err(err) => {
                 // max tries exceeded. return the error
 
-                web3_request.error_response.store(true, Ordering::Release);
+                web3_request.error_response.store(true, Ordering::SeqCst);
                 web3_request
                     .user_error_response
-                    .store(false, Ordering::Release);
+                    .store(false, Ordering::SeqCst);
 
                 err.as_json_response_parts(web3_request.id())
             }
@@ -1539,7 +1539,7 @@ impl App {
                     // TODO: only charge for archive if it gave a result
                     web3_request
                         .archive_request
-                        .store(true, atomic::Ordering::Release);
+                        .store(true, atomic::Ordering::SeqCst);
 
                     // TODO: we don't actually want try_send_all. we want the first non-null, non-error response
                     self

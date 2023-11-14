@@ -54,9 +54,9 @@ pub enum RateLimitResult {
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 pub enum AuthorizationType {
-    /// TODO: sometimes localhost should be internal and other times it should be Frontend. make a better separatation
     Internal,
-    Frontend,
+    Local,
+    Remote,
 }
 
 /// TODO: move this
@@ -319,7 +319,7 @@ impl Authorization {
             origin,
             referer,
             user_agent,
-            AuthorizationType::Frontend,
+            AuthorizationType::Remote,
         )
     }
 
@@ -919,7 +919,7 @@ impl App {
             origin,
             referer,
             user_agent,
-            AuthorizationType::Frontend,
+            AuthorizationType::Remote,
         )?;
 
         // user key is valid. now check rate limits

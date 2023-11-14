@@ -136,7 +136,7 @@ impl JsonRpcRequestEnum {
 
         request
             .user_error_response
-            .store(true, atomic::Ordering::Release);
+            .store(true, atomic::Ordering::SeqCst);
 
         let response = Web3ProxyError::BadRequest("request failed validation".into());
 

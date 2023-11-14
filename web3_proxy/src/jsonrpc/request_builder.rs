@@ -181,7 +181,7 @@ impl RequestBuilder {
 
         if let Ok(x) = &x {
             if self.archive_request {
-                x.archive_request.store(true, atomic::Ordering::Release);
+                x.archive_request.store(true, atomic::Ordering::SeqCst);
             }
         }
 
@@ -283,7 +283,7 @@ impl Serialize for ValidatedRequest {
 
         state.serialize_field(
             "archive_request",
-            &self.archive_request.load(atomic::Ordering::Acquire),
+            &self.archive_request.load(atomic::Ordering::SeqCst),
         )?;
 
         state.serialize_field("chain_id", &self.chain_id)?;
@@ -306,7 +306,7 @@ impl Serialize for ValidatedRequest {
 
         state.serialize_field(
             "response_bytes",
-            &self.response_bytes.load(atomic::Ordering::Acquire),
+            &self.response_bytes.load(atomic::Ordering::SeqCst),
         )?;
 
         state.end()
@@ -526,7 +526,7 @@ impl ValidatedRequest {
 
     #[inline]
     pub fn min_block_needed(&self) -> Option<U64> {
-        if self.archive_request.load(atomic::Ordering::Acquire) {
+        if self.archive_request.load(atomic::Ordering::SeqCst) {
             Some(U64::zero())
         } else {
             self.cache_mode.from_block().map(|x| x.num())
@@ -580,16 +580,16 @@ impl ValidatedRequest {
         let num_bytes = response.num_bytes();
 
         self.response_bytes
-            .fetch_add(num_bytes, atomic::Ordering::AcqRel);
+            .fetch_add(num_bytes, atomic::Ordering::SeqCst);
 
         self.response_millis.fetch_add(
             self.start_instant.elapsed().as_millis() as u64,
-            atomic::Ordering::AcqRel,
+            atomic::Ordering::SeqCst,
         );
 
         // TODO: record first or last timestamp? really, we need multiple
         self.response_timestamp
-            .store(Utc::now().timestamp(), atomic::Ordering::Release);
+            .store(Utc::now().timestamp(), atomic::Ordering::SeqCst);
 
         // TODO: set user_error_response and error_response here instead of outside this function
 
