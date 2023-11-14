@@ -276,7 +276,7 @@ where
     let mut interval = interval(Duration::from_secs(seconds));
 
     // TODO: should we warn if there are delays?
-    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
     loop {
         interval.tick().await;
