@@ -23,7 +23,8 @@ pub type BlocksByHashCache = Cache<H256, Web3ProxyBlock>;
 pub type BlocksByNumberCache = Cache<U64, H256>;
 
 /// A block and its age with a less verbose serialized format
-#[derive(Clone, Debug, Default)]
+/// This does **not** implement Default. We rarely want a block with number 0 and hash 0.
+#[derive(Clone, Debug)]
 pub struct Web3ProxyBlock(pub ArcBlock);
 
 impl Serialize for Web3ProxyBlock {
