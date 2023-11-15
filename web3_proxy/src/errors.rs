@@ -1038,7 +1038,9 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "parse message error!".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -1074,6 +1076,7 @@ impl Web3ProxyError {
                         data: Some(json!({
                             "from": from,
                             "to": to,
+                            "request": request_for_error,
                         })),
                     },
                 )
@@ -1095,6 +1098,7 @@ impl Web3ProxyError {
                             "to": to,
                             "requested": requested,
                             "allowed": allowed,
+                            "request": request_for_error,
                         })),
                     },
                 )
@@ -1112,9 +1116,9 @@ impl Web3ProxyError {
 
                 // create a string with either the IP or the rpc_key_id
                 let retry_data = if authorization.checks.rpc_secret_key_id.is_none() {
-                    json!({"retry_after": retry_after, "ip": authorization.ip})
+                    json!({"retry_after": retry_after, "ip": authorization.ip, "request": request_for_error,})
                 } else {
-                    json!({"retry_after": retry_after, "ip": authorization.ip, "key_id": authorization.checks.rpc_secret_key_id.unwrap()})
+                    json!({"retry_after": retry_after, "ip": authorization.ip, "key_id": authorization.checks.rpc_secret_key_id.unwrap(), "request": request_for_error,})
                 };
 
                 (
@@ -1133,7 +1137,9 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "redis error!".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -1145,7 +1151,9 @@ impl Web3ProxyError {
                         // TODO: is it safe to expose our io error strings?
                         message: "redis pool error".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -1178,7 +1186,9 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "reqwest error!".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -1190,7 +1200,9 @@ impl Web3ProxyError {
                         // TODO: is it safe to expose all of our anyhow strings?
                         message: "semaphore acquire error".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -1201,7 +1213,9 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "de/serialization error!".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -1212,7 +1226,9 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "siwe verification error".into(),
                         code: StatusCode::UNAUTHORIZED.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -1248,7 +1264,9 @@ impl Web3ProxyError {
                         message: "stripe webhook error".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         // TODO: include the stripe signature? anything else?
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -1282,7 +1300,10 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "ulid decode error".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "err": err.to_string(),
+                            "request": request_for_error,
+                        })),
                     },
                 )
             }
@@ -1301,6 +1322,7 @@ impl Web3ProxyError {
                         code: -32000,
                         data: Some(json!({
                             "hash": hash,
+                            "request": request_for_error,
                         })),
                     },
                 )
@@ -1315,6 +1337,7 @@ impl Web3ProxyError {
                         data: Some(json!({
                             "unknown": unknown,
                             "known": known,
+                            "request": request_for_error,
                         })),
                     },
                 )
@@ -1379,7 +1402,9 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "watch recv error!".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -1417,7 +1442,9 @@ impl Web3ProxyError {
                         JsonRpcErrorData {
                             message: msg.clone(),
                             code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                            data: None,
+                            data: Some(json!({
+                                "request": request_for_error,
+                            })),
                         },
                     )
                 }
