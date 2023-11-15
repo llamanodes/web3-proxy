@@ -9,7 +9,7 @@ rustflags = [
     # uuid unstable is needed for zerocopy deserialize
     "--cfg", "uuid_unstable",
     # parallel build frontend
-    "-Z", "threads=0",
+    "-Z", "threads=8",
 ]
 rustdocflags = [
     # potentially faster. https://github.com/aws/aws-graviton-getting-started/blob/main/rust.md
@@ -21,7 +21,7 @@ rustdocflags = [
     # uuid unstable is needed for zerocopy deserialize
     "--cfg", "uuid_unstable",
     # parallel build frontend
-    "-Z", "threads=0",
+    "-Z", "threads=8",
 ]
 
 [registries.crates-io]

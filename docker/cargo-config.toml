@@ -10,7 +10,7 @@ rustflags = [
     # uuid unstable is needed for zerocopy deserialize
     "--cfg", "uuid_unstable",
     # parallel build frontend
-    "-Z", "threads=0",
+    "-Z", "threads=8",
 ]
 
 [target.aarch64-unknown-linux-gnu]
@@ -27,5 +27,5 @@ rustflags = [
     # uuid unstable is needed for zerocopy deserialize
     "--cfg", "uuid_unstable",
     # parallel build frontend
-    "-Z", "threads=0",
+    "-Z", "threads=8",
 ]
