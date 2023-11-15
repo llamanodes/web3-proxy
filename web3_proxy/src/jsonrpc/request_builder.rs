@@ -214,6 +214,10 @@ pub struct ValidatedRequest {
 
     pub inner: RequestOrMethod,
 
+    /// if the rpc key used for this request is premium (at the start of the request)
+    pub started_active_premium: bool,
+
+    // TODO: everything under here should be behind a single lock. all these atomics need to be updated together!
     /// Instant that the request was received (or at least close to it)
     /// We use Instant and not timestamps to avoid problems with leap seconds and similar issues
     #[derivative(Default(value = "Instant::now()"))]
@@ -332,7 +336,7 @@ impl ValidatedRequest {
 
         let stat_sender = app.and_then(|x| x.stat_sender.clone());
 
-        // let request: RequestOrMethod = request.into();
+        let started_active_premium = authorization.active_premium().await;
 
         // we VERY INTENTIONALLY log to kafka BEFORE calculating the cache key
         // this is because calculating the cache_key may modify the params!
@@ -389,6 +393,7 @@ impl ValidatedRequest {
             response_millis: 0.into(),
             response_timestamp: 0.into(),
             start_instant,
+            started_active_premium,
             stat_sender,
             usd_per_cu,
             user_error_response: false.into(),

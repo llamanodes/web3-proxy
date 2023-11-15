@@ -210,6 +210,7 @@ impl MigrateStatsToV2SubCommand {
                         response_timestamp: x.period_datetime.timestamp().into(),
                         response_millis: int_response_millis.into(),
                         stat_sender: Some(stat_sender.clone()),
+                        started_active_premium: false,
                         user_error_response: false.into(),
                         usd_per_cu: top_config.app.usd_per_cu.unwrap_or_default(),
                         cache_mode: Default::default(),

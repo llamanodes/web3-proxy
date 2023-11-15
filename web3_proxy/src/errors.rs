@@ -221,16 +221,29 @@ pub enum Web3ProxyError {
 #[derive(Default, From, Serialize)]
 pub enum RequestForError<'a> {
     /// sometimes we don't have a request object at all
+    /// TODO: attach Authorization to this, too
     #[default]
     None,
     /// sometimes parsing the request fails. Give them the original string
+    /// TODO: attach Authorization to this, too
     Unparsed(&'a str),
     /// sometimes we have json
+    /// TODO: attach Authorization to this, too
     SingleRequest(&'a SingleRequest),
     // sometimes we have json for a batch of requests
     // Batch(&'a BatchRequest),
     /// assuming things went well, we have a validated request
     Validated(&'a ValidatedRequest),
+}
+
+impl RequestForError<'_> {
+    pub fn started_active_premium(&self) -> bool {
+        match self {
+            Self::Validated(x) => x.started_active_premium,
+            // TODO: check authorization on more types
+            _ => false,
+        }
+    }
 }
 
 impl Web3ProxyError {
@@ -759,7 +772,10 @@ impl Web3ProxyError {
                         // TODO: different messages of cancelled or not?
                         message: "Unable to complete request".into(),
                         code: code.as_u16().into(),
-                        data: Some(serde_json::Value::String(err.to_string())),
+                        data: Some(json!({
+                            "request": request_for_error,
+                            "err": err.to_string(),
+                        })),
                     },
                 )
             }
@@ -795,7 +811,7 @@ impl Web3ProxyError {
                 // TODO: do this without clone? the Arc needed it though
                 (StatusCode::OK, jsonrpc_error_data.clone())
             }
-            Self::MdbxPanic(rpc, msg) => {
+            Self::MdbxPanic(rpc_name, msg) => {
                 error!(%msg, "mdbx panic");
 
                 // TODO: this is bad enough that we should send something to pager duty
@@ -805,7 +821,11 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "mdbx panic".into(),
                         code: StatusCode::INTERNAL_SERVER_ERROR.as_u16().into(),
-                        data: Some(json!({"rpc": rpc})),
+                        data: Some(json!({
+                            "err": msg,
+                            "request": request_for_error,
+                            "rpc": rpc_name,
+                        })),
                     },
                 )
             }
@@ -833,6 +853,7 @@ impl Web3ProxyError {
                         data: Some(json!({
                             "err": "Blocks here must have a number or hash",
                             "extra": "you found a bug. please contact us if you see this and we can help figure out what happened. https://discord.llamanodes.com/",
+                            "request": request_for_error,
                         })),
                     },
                 )
@@ -844,7 +865,9 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "no blocks known".into(),
                         code: StatusCode::BAD_GATEWAY.as_u16().into(),
-                        data: None,
+                        data: Some(json!({
+                            "request": request_for_error,
+                        })),
                     },
                 )
             }
@@ -855,7 +878,9 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "no consensus head block".into(),
                         code: StatusCode::BAD_GATEWAY.as_u16().into(),
-                        data: None,
+                        data: Some(json!({
+                            "request": request_for_error,
+                        })),
                     },
                 )
             }
@@ -878,7 +903,9 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "unable to retry for request handle".into(),
                         code: StatusCode::BAD_GATEWAY.as_u16().into(),
-                        data: None,
+                        data: Some(json!({
+                            "request": request_for_error,
+                        })),
                     },
                 )
             }
@@ -900,7 +927,9 @@ impl Web3ProxyError {
                     JsonRpcErrorData {
                         message: "no servers synced".into(),
                         code: StatusCode::BAD_GATEWAY.as_u16().into(),
-                        data: None,
+                        data: Some(json!({
+                            "request": request_for_error,
+                        })),
                     },
                 )
             }
@@ -912,13 +941,13 @@ impl Web3ProxyError {
                 (
                     StatusCode::BAD_GATEWAY,
                     JsonRpcErrorData {
-                        message: format!(
-                            "not enough rpcs connected {}/{}",
-                            num_known, min_head_rpcs
-                        )
-                        .into(),
+                        message: "not enough rpcs connected".into(),
                         code: StatusCode::BAD_GATEWAY.as_u16().into(),
-                        data: None,
+                        data: Some(json!({
+                            "known": num_known,
+                            "needed": min_head_rpcs,
+                            "request": request_for_error,
+                        })),
                     },
                 )
             }
@@ -932,6 +961,7 @@ impl Web3ProxyError {
                         data: Some(json!({
                             "available": available,
                             "needed": needed,
+                            "request": request_for_error,
                         })),
                     },
                 )
@@ -956,8 +986,9 @@ impl Web3ProxyError {
                         message: "RPC is lagged".into(),
                         code: StatusCode::BAD_REQUEST.as_u16().into(),
                         data: Some(json!({
-                            "rpc": rpc.name,
                             "head": old_head,
+                            "request": request_for_error,
+                            "rpc": rpc.name,
                         })),
                     },
                 )
@@ -1222,7 +1253,7 @@ impl Web3ProxyError {
                 )
             }
             Self::Timeout(x) => {
-                let data = if request_for_error.active_premium() {
+                let data = if request_for_error.started_active_premium() {
                     json!({
                         "duration": x.as_ref().map(|x| x.as_secs_f32()),
                         "request": request_for_error,

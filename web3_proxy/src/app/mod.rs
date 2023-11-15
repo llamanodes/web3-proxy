@@ -2,7 +2,7 @@ mod ws;
 
 use crate::caches::{RegisteredUserRateLimitKey, RpcSecretKeyCache, UserBalanceCache};
 use crate::config::{AppConfig, TopConfig};
-use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
+use crate::errors::{RequestForError, Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::Authorization;
 use crate::globals::{global_db_conn, DatabaseError, APP, DB_CONN, DB_REPLICA};
 use crate::jsonrpc::{
@@ -1269,7 +1269,8 @@ impl App {
         {
             Ok(x) => x,
             Err(err) => {
-                let (a, b) = err.as_json_response_parts(error_id);
+                // TODO: pass the original request into as_json_response_parts
+                let (a, b) = err.as_json_response_parts(error_id, None::<RequestForError>);
 
                 let rpcs = vec![];
 
@@ -1288,7 +1289,7 @@ impl App {
             // TODO: refresh the request here?
 
             // turn some of the Web3ProxyErrors into Ok results
-            match self._proxy_request_with_caching(web3_request).await {
+            match self._proxy_request_with_caching(&web3_request).await {
                 Ok(response_data) => {
                     last_success = Some(response_data);
                     break;
@@ -1309,29 +1310,8 @@ impl App {
                 }
             }
 
-            // TODO: refresh the request instead of making new each time. then we need less clones
-            web3_request_result = ValidatedRequest::new_with_app(
-                self,
-                authorization.clone(),
-                None,
-                None,
-                request.clone().into(),
-                head_block.clone(),
-            )
-            .await;
+            // TODO: refresh the request?
         }
-
-        let web3_request = match web3_request_result {
-            Ok(x) => x,
-            Err(err) => {
-                // i don't think we can get here, but just in case
-                let (a, b) = err.as_json_response_parts(error_id, Some(&request));
-
-                let rpcs = vec![];
-
-                return (a, b, rpcs);
-            }
-        };
 
         let last_response = if let Some(last_success) = last_success {
             Ok(last_success)
