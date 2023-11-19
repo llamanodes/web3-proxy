@@ -49,7 +49,7 @@ bytes = "1.5.0"
 chrono = { version = "0.4.31" }
 derivative = "2.2.0"
 derive_more = { version = "0.99.17", features = ["nightly"] }
-ethers = { version = "2.0.10", default-features = false, features = ["rustls", "ws"] }
+ethers = { version = "2.0.11", default-features = false, features = ["rustls", "ws"] }
 fdlimit = "0.3.0"
 fstrings = "0.2"
 futures = { version = "0.3.29" }
@@ -57,7 +57,7 @@ futures-util = "0.3.29"
 glob = "0.3.1"
 handlebars = "4.5.0"
 hashbrown = { version = "0.14.2", features = ["serde", "nightly"] }
-hdrhistogram = "7.5.3"
+hdrhistogram = "7.5.4"
 hostname = "0.3.1"
 http = "0.2.11"
 hyper = { version = "0.14.27", features = ["full", "nightly"] }
@@ -75,7 +75,7 @@ pagerduty-rs = { version = "0.1.6", default-features = false, features = ["async
 parking_lot = { version = "0.12.1", features = ["arc_lock", "nightly"] }
 rdkafka = { version = "0.36.0", default-features = false, features = ["tokio", "tracing"], optional = true }
 reqwest = { version = "0.11.22", default-features = false, features = ["json", "rustls"] }
-rust_decimal = { version = "1.33.0" }
+rust_decimal = { version = "1.33.1" }
 sentry = { version = "0.31.8", default-features = false, features = ["anyhow", "backtrace", "contexts", "panic", "reqwest", "rustls", "serde_json", "tracing"] }
 sentry-tracing = "0.31.8"
 serde = { version = "1.0.192" }
