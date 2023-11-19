@@ -150,6 +150,9 @@ pub struct AppConfig {
     /// percentage to increase eth_estimateGas results. 100 == 100%
     pub gas_increase_percent: Option<U256>,
 
+    /// bearer token for internal requests. keep this secret
+    pub internal_bearer_token: Option<String>,
+
     /// Restrict user registration.
     /// None = no code needed
     pub invite_code: Option<String>,

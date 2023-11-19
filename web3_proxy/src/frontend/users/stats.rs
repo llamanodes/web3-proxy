@@ -1,6 +1,6 @@
 //! Handle registration, logins, and managing account data.
 use crate::app::App;
-use crate::errors::{Web3ProxyErrorContext, Web3ProxyResponse};
+use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResponse};
 use crate::globals::global_db_replica_conn;
 use crate::http_params::{
     get_chain_id_from_params, get_page_from_params, get_query_start_from_params,
@@ -32,7 +32,10 @@ pub async fn user_revert_logs_get(
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
-    let user = app.bearer_is_authorized(bearer).await?;
+    let user = app
+        .bearer_is_authorized(bearer)
+        .await?
+        .ok_or(Web3ProxyError::InvalidUserKey)?;
 
     let chain_id = get_chain_id_from_params(app.as_ref(), &params)?;
     let query_start = get_query_start_from_params(&params)?;
@@ -140,7 +143,10 @@ pub async fn user_mysql_stats_get(
     State(app): State<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
-    let user = app.bearer_is_authorized(bearer).await?;
+    let user = app
+        .bearer_is_authorized(bearer)
+        .await?
+        .ok_or(Web3ProxyError::InvalidUserKey)?;
     let db_replica = global_db_replica_conn()?;
 
     // Fetch everything from mysql, joined

@@ -1,5 +1,5 @@
 //! Handle registration, logins, and managing account data.
-use crate::errors::Web3ProxyResponse;
+use crate::errors::{Web3ProxyError, Web3ProxyResponse};
 use crate::globals::global_db_conn;
 use crate::referral_code::ReferralCode;
 use crate::{app::App, globals::global_db_replica_conn};
@@ -34,7 +34,10 @@ pub async fn user_referral_link_get(
     Query(_params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
     // First get the bearer token and check if the user is logged in
-    let user = app.bearer_is_authorized(bearer).await?;
+    let user = app
+        .bearer_is_authorized(bearer)
+        .await?
+        .ok_or(Web3ProxyError::InvalidUserKey)?;
 
     let db_replica = global_db_replica_conn()?;
 
@@ -79,7 +82,10 @@ pub async fn user_used_referral_stats(
     Query(_params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
     // First get the bearer token and check if the user is logged in
-    let user = app.bearer_is_authorized(bearer).await?;
+    let user = app
+        .bearer_is_authorized(bearer)
+        .await?
+        .ok_or(Web3ProxyError::InvalidUserKey)?;
 
     let db_replica = global_db_replica_conn()?;
 
@@ -137,7 +143,10 @@ pub async fn user_shared_referral_stats(
     Query(_params): Query<HashMap<String, String>>,
 ) -> Web3ProxyResponse {
     // First get the bearer token and check if the user is logged in
-    let user = app.bearer_is_authorized(bearer).await?;
+    let user = app
+        .bearer_is_authorized(bearer)
+        .await?
+        .ok_or(Web3ProxyError::InvalidUserKey)?;
 
     let db_replica = global_db_replica_conn()?;
 

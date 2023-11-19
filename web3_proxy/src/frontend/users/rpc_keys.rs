@@ -31,7 +31,10 @@ pub async fn rpc_keys_get(
     State(app): State<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
-    let user = app.bearer_is_authorized(bearer).await?;
+    let user = app
+        .bearer_is_authorized(bearer)
+        .await?
+        .ok_or(Web3ProxyError::InvalidUserKey)?;
 
     let db_replica = global_db_replica_conn()?;
 
@@ -160,7 +163,10 @@ pub async fn rpc_keys_management(
 ) -> Web3ProxyResponse {
     // TODO: is there a way we can know if this is a PUT or POST? right now we can modify or create keys with either. though that probably doesn't matter
 
-    let user = app.bearer_is_authorized(bearer).await?;
+    let user = app
+        .bearer_is_authorized(bearer)
+        .await?
+        .ok_or(Web3ProxyError::InvalidUserKey)?;
 
     let db_replica = global_db_replica_conn()?;
 

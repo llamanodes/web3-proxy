@@ -614,7 +614,16 @@ impl App {
     /// Verify that the given bearer token and address are allowed to take the specified action.
     /// This includes concurrent request limiting.
     /// keep the semaphore alive until the user's request is entirely complete
-    pub async fn bearer_is_authorized(&self, bearer: Bearer) -> Web3ProxyResult<user::Model> {
+    pub async fn bearer_is_authorized(
+        &self,
+        bearer: Bearer,
+    ) -> Web3ProxyResult<Option<user::Model>> {
+        if let Some(internal_token) = &self.config.internal_bearer_token {
+            if internal_token == bearer.token() {
+                return Ok(None);
+            }
+        }
+
         // get the user id for this bearer token
         let user_bearer_token = UserBearerToken::try_from(bearer)?;
 
@@ -631,7 +640,7 @@ impl App {
             .web3_context("fetching user from db by bearer token")?
             .web3_context("unknown bearer token")?;
 
-        Ok(user)
+        Ok(Some(user))
     }
 
     pub async fn rate_limit_login(

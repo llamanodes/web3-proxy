@@ -56,7 +56,10 @@ pub async fn admin_increase_balance(
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Json(payload): Json<AdminIncreaseBalancePost>,
 ) -> Web3ProxyResponse {
-    let caller = app.bearer_is_authorized(bearer).await?;
+    let caller = app
+        .bearer_is_authorized(bearer)
+        .await?
+        .ok_or(Web3ProxyError::InvalidUserKey)?;
 
     // Establish connections
     let db_conn = global_db_conn()?;

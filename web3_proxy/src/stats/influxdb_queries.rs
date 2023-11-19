@@ -34,7 +34,10 @@ pub async fn query_user_influx_stats<'a>(
 ) -> Web3ProxyResponse {
     let caller_user = match bearer {
         Some(TypedHeader(Authorization(bearer))) => {
-            let user = app.bearer_is_authorized(bearer).await?;
+            let user = app
+                .bearer_is_authorized(bearer)
+                .await?
+                .ok_or(Web3ProxyError::InvalidUserKey)?;
 
             Some(user)
         }

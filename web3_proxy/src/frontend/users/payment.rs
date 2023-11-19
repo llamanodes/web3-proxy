@@ -44,7 +44,10 @@ pub async fn user_balance_get(
     State(app): State<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
-    let user = app.bearer_is_authorized(bearer).await?;
+    let user = app
+        .bearer_is_authorized(bearer)
+        .await?
+        .ok_or(Web3ProxyError::InvalidUserKey)?;
 
     let db_replica = global_db_replica_conn()?;
 
@@ -64,7 +67,10 @@ pub async fn user_chain_deposits_get(
     State(app): State<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
-    let user = app.bearer_is_authorized(bearer).await?;
+    let user = app
+        .bearer_is_authorized(bearer)
+        .await?
+        .ok_or(Web3ProxyError::InvalidUserKey)?;
 
     let db_replica = global_db_replica_conn()?;
 
@@ -103,7 +109,10 @@ pub async fn user_stripe_deposits_get(
     State(app): State<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
-    let user = app.bearer_is_authorized(bearer).await?;
+    let user = app
+        .bearer_is_authorized(bearer)
+        .await?
+        .ok_or(Web3ProxyError::InvalidUserKey)?;
 
     let db_replica = global_db_replica_conn()?;
 
@@ -146,7 +155,10 @@ pub async fn user_admin_deposits_get(
     State(app): State<Arc<App>>,
     TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> Web3ProxyResponse {
-    let user = app.bearer_is_authorized(bearer).await?;
+    let user = app
+        .bearer_is_authorized(bearer)
+        .await?
+        .ok_or(Web3ProxyError::InvalidUserKey)?;
 
     let db_replica = global_db_replica_conn()?;
 

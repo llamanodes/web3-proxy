@@ -56,7 +56,10 @@ pub async fn user_post(
     TypedHeader(Authorization(bearer_token)): TypedHeader<Authorization<Bearer>>,
     Json(payload): Json<UserPost>,
 ) -> Web3ProxyResponse {
-    let user = app.bearer_is_authorized(bearer_token).await?;
+    let user = app
+        .bearer_is_authorized(bearer_token)
+        .await?
+        .ok_or(Web3ProxyError::InvalidUserKey)?;
 
     let user_id = user.id;
 
