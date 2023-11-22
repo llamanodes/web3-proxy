@@ -355,6 +355,11 @@ impl CacheMode {
                 // TODO: make sure re-orgs work properly!
                 Ok(Self::SuccessForever)
             }
+            "eth_blockNumber" => Ok(Self::Standard {
+                block_needed: head_block.into(),
+                cache_block: head_block.into(),
+                cache_errors: true,
+            }),
             "eth_gasPrice" => Ok(Self::Never),
             "eth_getBlockByHash" => {
                 // TODO: double check that any node can serve this
