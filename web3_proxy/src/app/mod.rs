@@ -307,7 +307,7 @@ impl App {
         let stat_sender = if let Some(spawned_stat_buffer) = StatBuffer::try_spawn(
             BILLING_PERIOD_SECONDS,
             top_config.app.chain_id,
-            30,
+            120,
             top_config.app.influxdb_bucket.clone(),
             influxdb_client.clone(),
             rpc_secret_key_cache.clone(),
