@@ -798,6 +798,9 @@ impl Web3Rpc {
 
                     let detailed_healthcheck = new_total_requests - old_total_requests < 5;
 
+                    // TODO: i think there is an erigon bug when fetching transactions from a fresh block. disable detailed health checks for now
+                    let detailed_healthcheck = false;
+
                     // TODO: if this fails too many times, reset the connection
                     if let Err(err) = rpc.check_health(detailed_healthcheck, error_handler).await {
                         rpc.healthy.store(false, atomic::Ordering::SeqCst);
