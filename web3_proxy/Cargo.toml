@@ -1,6 +1,6 @@
 [package]
 name = "web3_proxy"
-version = "1.43.91"
+version = "1.43.92"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -78,7 +78,7 @@ reqwest = { version = "0.11.22", default-features = false, features = ["json", "
 rust_decimal = { version = "1.33.1" }
 sentry = { version = "0.31.8", default-features = false, features = ["anyhow", "backtrace", "contexts", "panic", "reqwest", "rustls", "serde_json", "tracing"] }
 sentry-tracing = "0.31.8"
-serde = { version = "1.0.192" }
+serde = { version = "1.0.193" }
 serde-inline-default = "0.1.1"
 serde_json = { version = "1.0.108", default-features = false, features = ["raw_value"] }
 serde_prometheus = "0.2.4"
@@ -93,7 +93,7 @@ tower-service = "0.3.2"
 tracing = "0.1"
 ulid = { version = "1.1.0", features = ["rand", "uuid", "serde"] }
 url = { version = "2.4.1" }
-uuid = { version = "1.5.0", default-features = false }
+uuid = { version = "1.6.1", default-features = false }
 
 # TODO: why doesn't this work in dev-dependencies. i think because of how we split web3_proxy and web3_proxy_cli. im not sure that is even helping anymore
 test-log = { version = "0.2.13", default-features = false, features = ["trace"] }
