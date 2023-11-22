@@ -8,6 +8,7 @@ use moka::future::Cache;
 use serde::ser::SerializeStruct;
 use serde::Serialize;
 use serde_json::json;
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::time::Duration;
 use std::{fmt::Display, sync::Arc};
@@ -24,8 +25,17 @@ pub type BlocksByNumberCache = Cache<U64, H256>;
 
 /// A block and its age with a less verbose serialized format
 /// This does **not** implement Default. We rarely want a block with number 0 and hash 0.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Web3ProxyBlock(pub ArcBlock);
+
+impl Debug for Web3ProxyBlock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Web3ProxyBlock")
+            .field("number", &self.number())
+            .field("hash", &self.hash())
+            .finish()
+    }
+}
 
 impl Serialize for Web3ProxyBlock {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
