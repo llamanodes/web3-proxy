@@ -804,6 +804,7 @@ impl ConsensusFinder {
         Ok(())
     }
 
+    /// TODO: this is probably way too slow and buggy
     pub async fn rank_rpcs(&mut self, web3_rpcs: &Web3Rpcs) -> Web3ProxyResult<Option<RankedRpcs>> {
         self.update_tiers().await?;
 
@@ -839,11 +840,6 @@ impl ConsensusFinder {
 
         trace!("max_lag_block_number: {}", max_lag_block_number);
 
-        let lowest_block_number = lowest_block.number().max(max_lag_block_number);
-
-        // TODO: should lowest block number be set such that the rpc won't ever go backwards?
-        trace!("safe lowest_block_number: {}", lowest_block_number);
-
         let num_known = self.rpc_heads.len();
 
         // TODO: also track the sum of *available* hard_limits? if any servers have no hard limits, use their soft limit or no limit?
@@ -861,7 +857,7 @@ impl ConsensusFinder {
 
             let mut block_to_check = rpc_head.clone();
 
-            while block_to_check.number() >= lowest_block_number {
+            while block_to_check.number() >= max_lag_block_number {
                 if let Some(max_age) = self.max_head_block_age {
                     if block_to_check.age() > max_age {
                         break;
