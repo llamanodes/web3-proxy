@@ -232,7 +232,7 @@ impl<T> IntoResponse for StreamResponse<T> {
             .map_ok(move |x| {
                 let len = x.len() as u64;
 
-                self.web3_request.add_response(len);
+                self.web3_request.set_response(len);
 
                 x
             });

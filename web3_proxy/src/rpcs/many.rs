@@ -443,15 +443,24 @@ impl Web3Rpcs {
         let web3_request =
             ValidatedRequest::new_internal(method, params, head_block, max_wait).await?;
 
-        let response = self.request_with_metadata(&web3_request).await?;
+        let response = self.request_with_metadata::<R>(&web3_request).await?;
 
         // the response might support streaming. we need to parse it
         let parsed = response.parsed().await?;
 
         match parsed.payload {
-            jsonrpc::ResponsePayload::Success { result } => Ok(result),
+            jsonrpc::ResponsePayload::Success { result } => {
+                // todo: i don't love this length
+                web3_request.set_response(0);
+
+                Ok(result)
+            }
             // TODO: confirm this error type is correct
-            jsonrpc::ResponsePayload::Error { error } => Err(error.into()),
+            jsonrpc::ResponsePayload::Error { error } => {
+                web3_request.set_error_response(&Web3ProxyError::JsonRpcErrorData(error.clone()));
+
+                Err(error.into())
+            }
         }
     }
 
@@ -478,7 +487,11 @@ impl Web3Rpcs {
             // TODO: i'd like to get rid of this clone
             let rpc = active_request_handle.clone_connection();
 
-            web3_request.backend_requests.lock().push(rpc);
+            {
+                let mut response_lock = web3_request.response.lock();
+
+                response_lock.backend_rpcs.push(rpc);
+            }
 
             match active_request_handle.request::<R>().await {
                 Ok(response) => {

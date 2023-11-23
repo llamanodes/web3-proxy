@@ -24,9 +24,7 @@ use migration::sea_orm::{
 };
 use migration::{Expr, LockType, OnConflict};
 use num_traits::ToPrimitive;
-use parking_lot::Mutex;
 use std::borrow::Cow;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tracing::{error, instrument, trace, warn};
 
@@ -37,8 +35,6 @@ pub enum StatType {
     Aggregated,
     Detailed,
 }
-
-pub type BackendRequests = Mutex<Vec<Arc<Web3Rpc>>>;
 
 #[derive(AddAssign, Copy, Clone, Debug, Default)]
 pub struct FlushedStats {
@@ -551,20 +547,23 @@ impl RpcQueryStats {
         // TODO: do this without a clone
         let authorization = metadata.authorization.clone();
 
-        let archive_request = metadata.archive_request.load(Ordering::SeqCst);
+        let request_bytes = metadata.inner.num_bytes() as u64;
+
+        let response_lock = metadata.response.lock();
+
+        let archive_request = response_lock.archive_request;
 
         // TODO: do this without cloning. we can take their vec
-        let backend_rpcs_used = metadata.backend_rpcs_used();
+        let backend_rpcs_used = response_lock.backend_rpcs.clone();
 
-        let request_bytes = metadata.inner.num_bytes() as u64;
-        let response_bytes = metadata.response_bytes.load(Ordering::SeqCst);
+        let response_bytes = response_lock.response_bytes;
 
-        let mut error_response = metadata.error_response.load(Ordering::SeqCst);
-        let mut response_millis = metadata.response_millis.load(Ordering::SeqCst);
+        let mut error_response = response_lock.error_response;
+        let mut response_millis = response_lock.response_millis;
 
-        let user_error_response = metadata.user_error_response.load(Ordering::SeqCst);
+        let user_error_response = response_lock.user_error_response;
 
-        let response_timestamp = match metadata.response_timestamp.load(Ordering::SeqCst) {
+        let response_timestamp = match response_lock.response_timestamp {
             0 => {
                 // no response timestamp!
                 if !error_response {

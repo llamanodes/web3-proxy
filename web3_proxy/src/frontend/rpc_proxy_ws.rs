@@ -401,7 +401,7 @@ async fn websocket_proxy_web3_rpc(
 
             let response = jsonrpc::SingleResponse::Parsed(response);
 
-            web3_request.add_response(&response);
+            web3_request.set_response(&response);
             let response = response.parsed().await.expect("Response already parsed");
 
             Ok(response.into())

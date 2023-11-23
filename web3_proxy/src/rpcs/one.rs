@@ -1307,9 +1307,9 @@ impl Web3Rpc {
             Ok(x) => {
                 // TODO: this is not efficient :(
                 let x = json!(x);
-                web3_request.add_response(&x)
+                web3_request.set_response(&x)
             }
-            Err(e) => web3_request.add_error_response(e),
+            Err(e) => web3_request.set_error_response(e),
         }
 
         response

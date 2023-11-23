@@ -11,13 +11,14 @@ use crate::{
     response_cache::JsonRpcQueryCacheKey,
     rpcs::{blockchain::Web3ProxyBlock, one::Web3Rpc},
     secrets::RpcSecretKey,
-    stats::{AppStat, BackendRequests},
+    stats::AppStat,
 };
 use anyhow::Context;
 use axum::headers::{Origin, Referer, UserAgent};
 use chrono::Utc;
 use derivative::Derivative;
 use ethers::types::U64;
+use parking_lot::Mutex;
 use rust_decimal::Decimal;
 use serde::{ser::SerializeStruct, Serialize};
 use serde_json::{json, value::RawValue};
@@ -26,11 +27,7 @@ use std::{
     fmt::{self, Display},
     net::IpAddr,
 };
-use std::{
-    mem,
-    sync::atomic::{self, AtomicBool, AtomicI64, AtomicU64},
-    time::Duration,
-};
+use std::{mem, time::Duration};
 use tokio::{
     sync::{mpsc, OwnedSemaphorePermit},
     time::Instant,
@@ -181,7 +178,9 @@ impl RequestBuilder {
 
         if let Ok(x) = &x {
             if self.archive_request {
-                x.archive_request.store(true, atomic::Ordering::SeqCst);
+                let mut response_lock = x.response.lock();
+
+                response_lock.archive_request = true;
             }
         }
 
@@ -191,15 +190,53 @@ impl RequestBuilder {
     }
 }
 
+#[derive(Debug, Default)]
+/// todo: better name.
+/// the inside bits for ValidatedRequest. It's usually in an Arc, so it's not mutable
+pub struct ValidatedResponse {
+    /// TODO: set archive_request during the new instead of after
+    /// TODO: this is more complex than "requires a block older than X height". different types of data can be pruned differently
+    pub archive_request: bool,
+
+    /// if this is empty, there was a cache_hit
+    /// otherwise, it is populated with any rpc servers that were used by this request
+    pub backend_rpcs: Vec<Arc<Web3Rpc>>,
+
+    /// The number of times the request got stuck waiting because no servers were synced
+    pub no_servers: u64,
+
+    /// If handling the request hit an application error
+    /// This does not count things like a transcation reverting or a malformed request
+    /// TODO: this will need more thought once we support other ProxyMode
+    pub error_response: bool,
+
+    /// Size in bytes of the JSON response. Does not include headers or things like that.
+    pub response_bytes: u64,
+
+    /// How many milliseconds it took to respond to the request
+    pub response_millis: u64,
+
+    /// What time the (first) response was proxied.
+    /// TODO: think about how to store response times for ProxyMode::Versus
+    pub response_timestamp: i64,
+
+    /// If the request is invalid or received a jsonrpc error response (excluding reverts)
+    pub user_error_response: bool,
+}
+
+impl ValidatedResponse {
+    /// True if the response required querying a backup RPC
+    /// RPC aggregators that query multiple providers to compare response may use this header to ignore our response.
+    pub fn response_from_backup_rpc(&self) -> bool {
+        self.backend_rpcs.last().map(|x| x.backup).unwrap_or(false)
+    }
+}
+
 /// TODO:
 /// TODO: instead of a bunch of atomics, this should probably use a RwLock. need to think more about how parallel requests are going to work though
 #[derive(Debug, Derivative)]
 #[derivative(Default)]
 pub struct ValidatedRequest {
-    /// TODO: set archive_request during the new instead of after
-    /// TODO: this is more complex than "requires a block older than X height". different types of data can be pruned differently
-    pub archive_request: AtomicBool,
-
     pub authorization: Arc<Authorization>,
 
     pub cache_mode: CacheMode,
@@ -212,6 +249,8 @@ pub struct ValidatedRequest {
     /// TODO: this should be in a global config. not copied to every single request
     pub usd_per_cu: Decimal,
 
+    pub response: Mutex<ValidatedResponse>,
+
     pub inner: RequestOrMethod,
 
     /// if the rpc key used for this request is premium (at the start of the request)
@@ -222,26 +261,6 @@ pub struct ValidatedRequest {
     /// We use Instant and not timestamps to avoid problems with leap seconds and similar issues
     #[derivative(Default(value = "Instant::now()"))]
     pub start_instant: Instant,
-    /// if this is empty, there was a cache_hit
-    /// otherwise, it is populated with any rpc servers that were used by this request
-    pub backend_requests: BackendRequests,
-    /// The number of times the request got stuck waiting because no servers were synced
-    pub no_servers: AtomicU64,
-    /// If handling the request hit an application error
-    /// This does not count things like a transcation reverting or a malformed request
-    pub error_response: AtomicBool,
-    /// Size in bytes of the JSON response. Does not include headers or things like that.
-    pub response_bytes: AtomicU64,
-    /// How many milliseconds it took to respond to the request
-    pub response_millis: AtomicU64,
-    /// What time the (first) response was proxied.
-    /// TODO: think about how to store response times for ProxyMode::Versus
-    pub response_timestamp: AtomicI64,
-    /// True if the response required querying a backup RPC
-    /// RPC aggregators that query multiple providers to compare response may use this header to ignore our response.
-    pub response_from_backup_rpc: AtomicBool,
-    /// If the request is invalid or received a jsonrpc error response (excluding reverts)
-    pub user_error_response: AtomicBool,
 
     #[cfg(feature = "rdkafka")]
     /// ProxyMode::Debug logs requests and responses with Kafka
@@ -283,12 +302,7 @@ impl Serialize for ValidatedRequest {
     where
         S: serde::Serializer,
     {
-        let mut state = serializer.serialize_struct("request", 7)?;
-
-        state.serialize_field(
-            "archive_request",
-            &self.archive_request.load(atomic::Ordering::SeqCst),
-        )?;
+        let mut state = serializer.serialize_struct("request", 6)?;
 
         state.serialize_field("chain_id", &self.chain_id)?;
 
@@ -297,10 +311,13 @@ impl Serialize for ValidatedRequest {
 
         state.serialize_field("elapsed", &self.start_instant.elapsed().as_secs_f32())?;
 
-        {
-            let backend_names = self.backend_requests.lock();
+        let response_lock = self.response.lock();
 
-            let backend_names = backend_names
+        state.serialize_field("archive_request", &response_lock.archive_request)?;
+
+        {
+            let backend_names = response_lock
+                .backend_rpcs
                 .iter()
                 .map(|x| x.name.as_str())
                 .collect::<Vec<_>>();
@@ -308,10 +325,9 @@ impl Serialize for ValidatedRequest {
             state.serialize_field("backend_requests", &backend_names)?;
         }
 
-        state.serialize_field(
-            "response_bytes",
-            &self.response_bytes.load(atomic::Ordering::SeqCst),
-        )?;
+        state.serialize_field("response_bytes", &response_lock.response_bytes)?;
+
+        drop(response_lock);
 
         state.end()
     }
@@ -375,28 +391,20 @@ impl ValidatedRequest {
         .max(connect_timeout);
 
         let x = Self {
-            archive_request: false.into(),
+            response: Mutex::new(Default::default()),
             authorization,
-            backend_requests: Default::default(),
             cache_mode,
             chain_id,
-            error_response: false.into(),
             connect_timeout,
             expire_timeout,
             head_block: head_block.clone(),
             kafka_debug_logger,
-            no_servers: 0.into(),
             inner: request,
             permit,
-            response_bytes: 0.into(),
-            response_from_backup_rpc: false.into(),
-            response_millis: 0.into(),
-            response_timestamp: 0.into(),
             start_instant,
             started_active_premium,
             stat_sender,
             usd_per_cu,
-            user_error_response: false.into(),
             request_id,
         };
 
@@ -491,7 +499,9 @@ impl ValidatedRequest {
 
     #[inline]
     pub fn backend_rpcs_used(&self) -> Vec<Arc<Web3Rpc>> {
-        self.backend_requests.lock().clone()
+        let response_lock = self.response.lock();
+
+        response_lock.backend_rpcs.clone()
     }
 
     pub fn cache_key(&self) -> Option<u64> {
@@ -528,10 +538,19 @@ impl ValidatedRequest {
 
     #[inline]
     pub fn min_block_needed(&self) -> Option<U64> {
-        if self.archive_request.load(atomic::Ordering::SeqCst) {
-            Some(U64::zero())
-        } else {
-            self.cache_mode.from_block().map(|x| x.num())
+        let min_block_needed = self.cache_mode.from_block().map(|x| x.num());
+
+        match min_block_needed {
+            Some(x) => Some(x),
+            None => {
+                let response_lock = self.response.lock();
+
+                if response_lock.archive_request {
+                    Some(U64::zero())
+                } else {
+                    None
+                }
+            }
         }
     }
 
@@ -575,32 +594,39 @@ impl ValidatedRequest {
         Ok(())
     }
 
-    pub fn add_error_response(&self, _err: &Web3ProxyError) {
-        self.error_response.store(true, atomic::Ordering::SeqCst);
+    pub fn set_error_response(&self, _err: &Web3ProxyError) {
+        {
+            let mut response_lock = self.response.lock();
 
-        // TODO: add actual response size
-        self.add_response(0);
+            response_lock.error_response = true;
+            response_lock.user_error_response = false;
+        }
+
+        // TODO: add the actual response size
+        self.set_response(0);
     }
 
-    pub fn add_response<'a, R: Into<ResponseOrBytes<'a>>>(&'a self, response: R) {
+    pub fn set_response<'a, R: Into<ResponseOrBytes<'a>>>(&'a self, response: R) {
         // TODO: fetch? set? should it be None in a Mutex? or a OnceCell?
         let response = response.into();
 
         let num_bytes = response.num_bytes();
 
-        self.response_bytes
-            .fetch_add(num_bytes, atomic::Ordering::SeqCst);
+        let response_millis = self.start_instant.elapsed().as_millis() as u64;
 
-        self.response_millis.fetch_add(
-            self.start_instant.elapsed().as_millis() as u64,
-            atomic::Ordering::SeqCst,
-        );
+        let now = Utc::now().timestamp();
 
-        // TODO: record first or last timestamp? really, we need multiple
-        self.response_timestamp
-            .store(Utc::now().timestamp(), atomic::Ordering::SeqCst);
+        {
+            let mut response_lock = self.response.lock();
 
-        // TODO: set user_error_response and error_response here instead of outside this function
+            // TODO: set user_error_response and error_response here instead of outside this function
+
+            response_lock.response_bytes = num_bytes;
+
+            response_lock.response_millis = response_millis;
+
+            response_lock.response_timestamp = now;
+        }
 
         #[cfg(feature = "rdkafka")]
         if let Some(kafka_debug_logger) = self.kafka_debug_logger.as_ref() {

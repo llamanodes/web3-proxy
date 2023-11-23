@@ -4,6 +4,7 @@ use tracing::{error, info};
 use web3_proxy::app::BILLING_PERIOD_SECONDS;
 use web3_proxy::config::TopConfig;
 use web3_proxy::frontend::authorization::{Authorization, RequestOrMethod};
+use web3_proxy::jsonrpc::request_builder::ValidatedResponse;
 use web3_proxy::jsonrpc::ValidatedRequest;
 use web3_proxy::prelude::anyhow::{self, Context};
 use web3_proxy::prelude::argh::{self, FromArgs};
@@ -191,27 +192,29 @@ impl MigrateStatsToV2SubCommand {
 
                     let request = RequestOrMethod::Method(method, int_request_bytes as usize);
 
+                    let web3_response = ValidatedResponse {
+                        archive_request: x.archive_request,
+                        backend_rpcs,
+                        error_response: x.error_response,
+                        // This is not relevant in the new version
+                        no_servers: 0,
+                        response_bytes: int_response_bytes,
+                        response_timestamp: x.period_datetime.timestamp(),
+                        response_millis: int_response_millis,
+                        user_error_response: false,
+                    };
+
                     // Create ValidatedRequest
                     let web3_request = ValidatedRequest {
-                        archive_request: x.archive_request.into(),
+                        response: Mutex::new(web3_response),
                         authorization: authorization.clone(),
-                        backend_requests: Mutex::new(backend_rpcs),
                         chain_id,
-                        error_response: x.error_response.into(),
                         head_block: None,
                         // debug data is in kafka, not mysql or influx
                         kafka_debug_logger: None,
                         inner: request,
-                        // This is not relevant in the new version
-                        no_servers: 0.into(),
-                        response_bytes: int_response_bytes.into(),
-                        // We did not initially record this data
-                        response_from_backup_rpc: false.into(),
-                        response_timestamp: x.period_datetime.timestamp().into(),
-                        response_millis: int_response_millis.into(),
                         stat_sender: Some(stat_sender.clone()),
                         started_active_premium: false,
-                        user_error_response: false.into(),
                         usd_per_cu: top_config.app.usd_per_cu.unwrap_or_default(),
                         cache_mode: Default::default(),
                         start_instant: Instant::now(),

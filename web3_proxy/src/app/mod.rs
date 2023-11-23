@@ -41,7 +41,7 @@ use std::fmt;
 use std::net::IpAddr;
 use std::num::NonZeroU64;
 use std::str::FromStr;
-use std::sync::atomic::{self, AtomicU16, Ordering};
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, oneshot, watch, Semaphore};
@@ -1326,28 +1326,37 @@ impl App {
 
         let (code, response) = match last_response {
             Ok(response_data) => {
-                web3_request.error_response.store(false, Ordering::SeqCst);
+                let user_error_response = response_data.is_jsonrpc_err();
+
+                let mut response_lock = web3_request.response.lock();
+
+                // TODO: i really don't like this logic here. it should be inside add_response
+                response_lock.error_response = false;
 
                 // TODO: is it true that all jsonrpc errors are user errors?
-                web3_request
-                    .user_error_response
-                    .store(response_data.is_jsonrpc_err(), Ordering::SeqCst);
+                response_lock.user_error_response = user_error_response;
+
+                drop(response_lock);
 
                 (StatusCode::OK, response_data)
             }
             Err(err) => {
                 // max tries exceeded. return the error
 
-                web3_request.error_response.store(true, Ordering::SeqCst);
-                web3_request
-                    .user_error_response
-                    .store(false, Ordering::SeqCst);
+                let mut response_lock = web3_request.response.lock();
+
+                // TODO: i really don't like this logic here. it should be inside add_error_response
+                // TODO: what if this is an ethers wrapped error? those should have already been handled, but our error types are too broad
+                response_lock.error_response = true;
+                response_lock.user_error_response = false;
+
+                drop(response_lock);
 
                 err.as_json_response_parts(web3_request.id(), Some(web3_request.as_ref()))
             }
         };
 
-        web3_request.add_response(&response);
+        web3_request.set_response(&response);
 
         let rpcs = web3_request.backend_rpcs_used();
 
@@ -1544,12 +1553,18 @@ impl App {
                 };
 
                 if try_archive {
-                    // TODO: only charge for archive if it gave a result
-                    web3_request
-                        .archive_request
-                        .store(true, atomic::Ordering::SeqCst);
+                    {
+                        let mut response_lock = web3_request.response.lock();
 
-                    // TODO: we don't actually want try_send_all. we want the first non-null, non-error response
+                        // TODO: this is a hack. we don't usually want an archive
+                        // we probably just hit a bug where a server said it had a block but it dosn't yet have all the transactions
+                        response_lock
+                            .archive_request
+                            = true;
+                    }
+
+                    // TODO: if the transaction wasn't found, set archive_request back to false?
+
                     self
                         .balanced_rpcs
                         .try_proxy_connection::<Arc<RawValue>>(

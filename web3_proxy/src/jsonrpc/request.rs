@@ -11,7 +11,7 @@ use serde_inline_default::serde_inline_default;
 use serde_json::value::RawValue;
 use std::borrow::Cow;
 use std::fmt;
-use std::sync::{atomic, Arc};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -134,13 +134,15 @@ impl JsonRpcRequestEnum {
         .await
         .unwrap();
 
-        request
-            .user_error_response
-            .store(true, atomic::Ordering::SeqCst);
+        {
+            let mut response_lock = request.response.lock();
+
+            response_lock.user_error_response = true;
+        }
 
         let response = Web3ProxyError::BadRequest("request failed validation".into());
 
-        request.add_response(&response);
+        request.set_response(&response);
 
         let response = response.into_response_with_id(Some(err_id), None::<RequestForError>);
 

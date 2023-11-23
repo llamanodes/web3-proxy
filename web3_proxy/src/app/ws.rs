@@ -137,7 +137,7 @@ impl App {
                                     break;
                                 };
 
-                                subscription_web3_request.add_response(response_bytes);
+                                subscription_web3_request.set_response(response_bytes);
                             }
                         }
                     }
@@ -217,7 +217,7 @@ impl App {
                                         // we could use ForwardedResponse::num_bytes() here, but since we already have the string, this is easier
                                         let response_bytes = response_str.len() as u64;
 
-                                        subscription_web3_request.add_response(response_bytes);
+                                        subscription_web3_request.set_response(response_bytes);
 
                                         // TODO: do clients support binary messages?
                                         // TODO: can we check a content type header?
@@ -260,7 +260,7 @@ impl App {
         // TODO: better way of passing in ParsedResponse
         let response = jsonrpc::SingleResponse::Parsed(response);
         // TODO: this serializes twice
-        web3_request.add_response(&response);
+        web3_request.set_response(&response);
         let response = response.parsed().await.expect("Response already parsed");
 
         // TODO: make a `SubscriptonHandle(AbortHandle, JoinHandle)` struct?
