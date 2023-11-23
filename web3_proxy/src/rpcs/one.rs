@@ -32,7 +32,6 @@ use std::sync::atomic::{self, AtomicBool, AtomicU32, AtomicU64, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
 use tokio::select;
 use tokio::sync::{mpsc, watch};
-use tokio::task::yield_now;
 use tokio::time::{interval, sleep, sleep_until, Duration, Instant, MissedTickBehavior};
 use tracing::{debug, error, info, trace, warn, Level};
 use url::Url;
@@ -772,9 +771,9 @@ impl Web3Rpc {
 
             // health check loop
             let f = async move {
-                // TODO: benchmark this and lock contention
-                let mut old_total_requests = 0;
-                let mut new_total_requests;
+                // // TODO: benchmark this and lock contention
+                // let mut old_total_requests = 0;
+                // let mut new_total_requests;
 
                 // errors here should not cause the loop to exit! only mark unhealthy
                 loop {
@@ -782,10 +781,10 @@ impl Web3Rpc {
                         break;
                     }
 
-                    new_total_requests = rpc.internal_requests.load(atomic::Ordering::SeqCst)
-                        + rpc.external_requests.load(atomic::Ordering::SeqCst);
+                    // new_total_requests = rpc.internal_requests.load(atomic::Ordering::SeqCst)
+                    //     + rpc.external_requests.load(atomic::Ordering::SeqCst);
 
-                    let detailed_healthcheck = new_total_requests - old_total_requests < 5;
+                    // let detailed_healthcheck = new_total_requests - old_total_requests < 5;
 
                     // TODO: i think there is an erigon bug when fetching transactions from a fresh block. disable detailed health checks for now
                     let detailed_healthcheck = false;
@@ -806,7 +805,7 @@ impl Web3Rpc {
                     }
 
                     // TODO: should we count the requests done inside this health check
-                    old_total_requests = new_total_requests;
+                    // old_total_requests = new_total_requests;
 
                     sleep(Duration::from_secs(health_sleep_seconds)).await;
                 }
