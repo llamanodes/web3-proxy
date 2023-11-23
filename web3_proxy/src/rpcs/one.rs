@@ -430,8 +430,6 @@ impl Web3Rpc {
             }
 
             limit = Some(block_data_limit);
-
-            yield_now().await;
         }
 
         if let Some(limit) = limit {
@@ -605,16 +603,6 @@ impl Web3Rpc {
                             .await;
 
                         // we are synced! yey!
-
-                        // TODO: checking this every time seems excessive
-                        if self.block_data_limit() == U64::zero() {
-                            if let Err(err) = self.check_block_data_limit().await {
-                                warn!(
-                                    "failed checking block limit after {} finished syncing. {:?}",
-                                    self, err
-                                );
-                            }
-                        }
 
                         Some(new_head_block)
                     }
