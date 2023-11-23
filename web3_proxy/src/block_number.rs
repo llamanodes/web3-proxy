@@ -394,11 +394,9 @@ impl CacheMode {
                             BlockNumber_to_U64(block_num, head_block.number());
 
                         // TODO: double check this. it scares me
-                        // if change {
-                        //     // TODO: include the hash instead of the number?
-                        //     trace!("changing fromBlock in eth_getLogs. {} -> {}", x, block_num);
-                        //     *x = json!(block_num);
-                        // }
+                        // we always change because some clients send U64 with padding and erigon doesn't like that
+                        trace!("changing fromBlock in eth_getLogs. {} -> {}", x, block_num);
+                        *x = json!(block_num);
 
                         BlockNumOrHash::Num(block_num)
                     } else {
@@ -418,10 +416,8 @@ impl CacheMode {
                         let (block_num, change) = BlockNumber_to_U64(block_num, latest_block);
 
                         // TODO: double check this. it scares me but i think we need it
-                        // if change {
-                        //     trace!("changing toBlock in eth_getLogs. {} -> {}", x, block_num);
-                        //     *x = json!(block_num);
-                        // }
+                        trace!("changing toBlock in eth_getLogs. {} -> {}", x, block_num);
+                        *x = json!(block_num);
 
                         if let Some(app) = app {
                             // TODO: make a jsonrpc query here? cache rates will be better but it adds a network request
@@ -574,7 +570,7 @@ mod test {
         jsonrpc::{LooseId, SingleRequest},
         rpcs::blockchain::BlockHeader,
     };
-    use ethers::types::{Block, H256};
+    use ethers::types::{Block, H256, U64};
     use serde_json::json;
     use std::sync::Arc;
 
@@ -686,6 +682,11 @@ mod test {
 
         // TODO: cache with the head block instead?
         matches!(x, CacheMode::Never);
+    }
+
+    #[test]
+    fn test_serializing_padded_ints() {
+        let x: U64 = "0x001234".parse().unwrap();
     }
 
     // TODO: tests for eth_getLogs
