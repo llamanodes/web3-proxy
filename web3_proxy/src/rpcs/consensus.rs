@@ -998,6 +998,7 @@ impl RpcsForRequest {
                 }
 
                 // if we got this far, no inner or outer rpcs are ready. thats suprising since an inner should have been ready. maybe it got rate limited
+                // TODO: log block needed and such
                 warn!(?earliest_retry_at, num_waits=%wait_for_sync.len(), %tried, %opened, "no rpcs ready");
 
                 let min_wait_until = Instant::now() + Duration::from_millis(10);
