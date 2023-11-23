@@ -891,13 +891,16 @@ impl Web3Rpc {
 
         // subscribe to new transactions
         if self.pending_txid_firehose.is_some() && self.ws_provider.load().is_some() {
-            let app = globals::APP.get().unwrap();
-            let permit = app.tx_subscriptions.acquire().await?;
             let clone = self.clone();
 
             let f = async move {
+                let app = globals::APP.get().unwrap();
+                let permit = app.tx_subscriptions.acquire().await?;
+
                 let result = clone.subscribe_new_transactions().await;
+
                 std::mem::drop(permit);
+
                 result
             };
 
