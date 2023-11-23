@@ -9,7 +9,7 @@ use crate::{
     },
     globals::APP,
     response_cache::JsonRpcQueryCacheKey,
-    rpcs::{blockchain::Web3ProxyBlock, one::Web3Rpc},
+    rpcs::{blockchain::BlockHeader, one::Web3Rpc},
     secrets::RpcSecretKey,
     stats::AppStat,
 };
@@ -46,7 +46,7 @@ use {
 pub struct RequestBuilder {
     app: Option<Arc<App>>,
     archive_request: bool,
-    head_block: Option<Web3ProxyBlock>,
+    head_block: Option<BlockHeader>,
     authorization: Option<Arc<Authorization>>,
     request_or_method: RequestOrMethod,
 }
@@ -244,7 +244,7 @@ pub struct ValidatedRequest {
     /// TODO: this should probably be in a global config. although maybe if we run multiple chains in one process this will be useful
     pub chain_id: u64,
 
-    pub head_block: Option<Web3ProxyBlock>,
+    pub head_block: Option<BlockHeader>,
 
     /// TODO: this should be in a global config. not copied to every single request
     pub usd_per_cu: Decimal,
@@ -340,7 +340,7 @@ impl ValidatedRequest {
         app: Option<&App>,
         authorization: Arc<Authorization>,
         chain_id: u64,
-        head_block: Option<Web3ProxyBlock>,
+        head_block: Option<BlockHeader>,
         #[cfg(feature = "rdkafka")] kafka_debug_logger: Option<Arc<KafkaDebugLogger>>,
         max_wait: Option<Duration>,
         permit: Option<OwnedSemaphorePermit>,
@@ -418,7 +418,7 @@ impl ValidatedRequest {
         max_wait: Option<Duration>,
         permit: Option<OwnedSemaphorePermit>,
         request: RequestOrMethod,
-        head_block: Option<Web3ProxyBlock>,
+        head_block: Option<BlockHeader>,
         request_id: Option<String>,
     ) -> Web3ProxyResult<Arc<Self>> {
         #[cfg(feature = "rdkafka")]
@@ -457,7 +457,7 @@ impl ValidatedRequest {
     pub async fn new_internal<P: JsonRpcParams>(
         method: Cow<'static, str>,
         params: &P,
-        head_block: Option<Web3ProxyBlock>,
+        head_block: Option<BlockHeader>,
         max_wait: Option<Duration>,
     ) -> Web3ProxyResult<Arc<Self>> {
         let authorization = Arc::new(Authorization::internal().unwrap());

@@ -11,7 +11,7 @@ use crate::jsonrpc::{
 };
 use crate::relational_db::{connect_db, migrate_db};
 use crate::response_cache::{ForwardedResponse, JsonRpcResponseCache, JsonRpcResponseWeigher};
-use crate::rpcs::blockchain::Web3ProxyBlock;
+use crate::rpcs::blockchain::BlockHeader;
 use crate::rpcs::consensus::RankedRpcs;
 use crate::rpcs::many::Web3Rpcs;
 use crate::rpcs::one::Web3Rpc;
@@ -85,7 +85,7 @@ pub struct App {
     /// rpc clients that subscribe to newHeads use this channel
     /// don't drop this or the sender will stop working
     /// TODO: broadcast channel instead?
-    pub watch_consensus_head_receiver: watch::Receiver<Option<Web3ProxyBlock>>,
+    pub watch_consensus_head_receiver: watch::Receiver<Option<BlockHeader>>,
     /// rpc clients that subscribe to newPendingTransactions use this channel
     pub pending_txid_firehose: Arc<DedupedBroadcaster<TxHash>>,
     pub hostname: Option<String>,
@@ -751,7 +751,7 @@ impl App {
         Ok(())
     }
 
-    pub fn head_block_receiver(&self) -> watch::Receiver<Option<Web3ProxyBlock>> {
+    pub fn head_block_receiver(&self) -> watch::Receiver<Option<BlockHeader>> {
         self.watch_consensus_head_receiver.clone()
     }
 
@@ -1038,7 +1038,7 @@ impl App {
 
         // get the head block now so that any requests that need it all use the same block
         // TODO: this still has an edge condition if there is a reorg in the middle of the request!!!
-        let head_block: Web3ProxyBlock = self
+        let head_block: BlockHeader = self
             .balanced_rpcs
             .head_block()
             .ok_or(Web3ProxyError::NoServersSynced)?;
@@ -1252,14 +1252,22 @@ impl App {
         self: &Arc<Self>,
         request: SingleRequest,
         authorization: Arc<Authorization>,
-        head_block: Option<Web3ProxyBlock>,
+        head_block: Option<BlockHeader>,
         request_id: Option<String>,
     ) -> (StatusCode, jsonrpc::SingleResponse, Vec<Arc<Web3Rpc>>) {
         // TODO: this clone is only for an error response. refactor to not need it
         let error_id = request.id.clone();
 
         // TODO: think more about how to handle retries without hammering our servers with errors
-        let mut ranked_rpcs = self.balanced_rpcs.watch_ranked_rpcs.subscribe();
+        let mut ranked_rpcs_recv = self.balanced_rpcs.watch_ranked_rpcs.subscribe();
+
+        let ranked_rpcs = ranked_rpcs_recv.borrow_and_update().clone();
+
+        let head_block = if head_block.is_none() {
+            ranked_rpcs.and_then(|x| x.head_block.clone())
+        } else {
+            head_block
+        };
 
         let web3_request = match ValidatedRequest::new_with_app(
             self,
@@ -1267,7 +1275,7 @@ impl App {
             None,
             None,
             request.into(),
-            head_block.clone(),
+            head_block,
             request_id,
         )
         .await
@@ -1305,9 +1313,9 @@ impl App {
             }
 
             select! {
-                _ = ranked_rpcs.changed() => {
+                _ = ranked_rpcs_recv.changed() => {
                     // TODO: pass these RankedRpcs to ValidatedRequest::new_with_app
-                    ranked_rpcs.borrow_and_update();
+                    ranked_rpcs_recv.borrow_and_update();
                 }
                 _ = &mut latest_start => {
                     // do not retry if we've already been trying for 3 seconds

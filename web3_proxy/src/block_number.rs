@@ -3,7 +3,7 @@ use crate::app::App;
 use crate::jsonrpc::SingleRequest;
 use crate::{
     errors::{Web3ProxyError, Web3ProxyResult},
-    rpcs::blockchain::Web3ProxyBlock,
+    rpcs::blockchain::BlockHeader,
 };
 use anyhow::Context;
 use derive_more::From;
@@ -57,8 +57,8 @@ impl BlockNumAndHash {
     }
 }
 
-impl From<&Web3ProxyBlock> for BlockNumAndHash {
-    fn from(value: &Web3ProxyBlock) -> Self {
+impl From<&BlockHeader> for BlockNumAndHash {
+    fn from(value: &BlockHeader) -> Self {
         let n = value.number();
         let h = *value.hash();
 
@@ -71,7 +71,7 @@ impl From<&Web3ProxyBlock> for BlockNumAndHash {
 pub async fn clean_block_number<'a>(
     params: &'a mut serde_json::Value,
     block_param_id: usize,
-    head_block: &'a Web3ProxyBlock,
+    head_block: &'a BlockHeader,
     app: Option<&'a App>,
 ) -> Web3ProxyResult<BlockNumOrHash> {
     match params.as_array_mut() {
@@ -216,8 +216,8 @@ impl BlockNumOrHash {
     }
 }
 
-impl From<&Web3ProxyBlock> for BlockNumOrHash {
-    fn from(value: &Web3ProxyBlock) -> Self {
+impl From<&BlockHeader> for BlockNumOrHash {
+    fn from(value: &BlockHeader) -> Self {
         Self::And(value.into())
     }
 }
@@ -279,7 +279,7 @@ impl CacheMode {
     /// returns None if this request should not be cached
     pub async fn new<'a>(
         request: &'a mut SingleRequest,
-        head_block: Option<&'a Web3ProxyBlock>,
+        head_block: Option<&'a BlockHeader>,
         app: Option<&'a App>,
     ) -> Web3ProxyResult<Self> {
         match Self::try_new(request, head_block, app).await {
@@ -318,7 +318,7 @@ impl CacheMode {
 
     pub async fn try_new(
         request: &mut SingleRequest,
-        head_block: Option<&Web3ProxyBlock>,
+        head_block: Option<&BlockHeader>,
         app: Option<&App>,
     ) -> Web3ProxyResult<Self> {
         let params = &mut request.params;
@@ -572,7 +572,7 @@ mod test {
     use crate::{
         errors::Web3ProxyError,
         jsonrpc::{LooseId, SingleRequest},
-        rpcs::blockchain::Web3ProxyBlock,
+        rpcs::blockchain::BlockHeader,
     };
     use ethers::types::{Block, H256};
     use serde_json::json;
@@ -589,7 +589,7 @@ mod test {
             ..Default::default()
         };
 
-        let head_block = Web3ProxyBlock::try_new(Arc::new(head_block)).unwrap();
+        let head_block = BlockHeader::try_new(Arc::new(head_block)).unwrap();
 
         let id = LooseId::Number(9);
 
@@ -625,7 +625,7 @@ mod test {
             ..Default::default()
         };
 
-        let head_block = Web3ProxyBlock::try_new(Arc::new(head_block)).unwrap();
+        let head_block = BlockHeader::try_new(Arc::new(head_block)).unwrap();
 
         let id = LooseId::Number(99);
 
@@ -663,7 +663,7 @@ mod test {
             ..Default::default()
         };
 
-        let head_block = Web3ProxyBlock::try_new(Arc::new(head_block)).unwrap();
+        let head_block = BlockHeader::try_new(Arc::new(head_block)).unwrap();
 
         let mut request = SingleRequest::new(99.into(), method.into(), params).unwrap();
 

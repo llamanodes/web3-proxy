@@ -1,4 +1,4 @@
-use super::blockchain::Web3ProxyBlock;
+use super::blockchain::BlockHeader;
 use super::many::Web3Rpcs;
 use super::one::Web3Rpc;
 use super::request::OpenRequestHandle;
@@ -86,7 +86,7 @@ enum SortMethod {
 /// TODO: make serializing work. the key needs to be a string. I think we need `serialize_with`
 #[derive(Clone, Debug, Serialize)]
 pub struct RankedRpcs {
-    pub head_block: Option<Web3ProxyBlock>,
+    pub head_block: Option<BlockHeader>,
     pub num_synced: usize,
     pub backups_needed: bool,
     pub check_block_data: bool,
@@ -107,7 +107,7 @@ pub struct RpcsForRequest {
 impl RankedRpcs {
     pub fn from_rpcs(
         rpcs: Vec<Arc<Web3Rpc>>,
-        head_block: Option<Web3ProxyBlock>,
+        head_block: Option<BlockHeader>,
         check_block_data: bool,
     ) -> Self {
         // we don't need to sort the rpcs now. we will sort them when a request neds them
@@ -135,8 +135,8 @@ impl RankedRpcs {
         min_synced_rpcs: usize,
         min_sum_soft_limit: u32,
         max_lag_block: U64,
-        votes: HashMap<Web3ProxyBlock, (HashSet<&Arc<Web3Rpc>>, u32)>,
-        heads: HashMap<Arc<Web3Rpc>, Web3ProxyBlock>,
+        votes: HashMap<BlockHeader, (HashSet<&Arc<Web3Rpc>>, u32)>,
+        heads: HashMap<Arc<Web3Rpc>, BlockHeader>,
     ) -> Option<Self> {
         // find the blocks that meets our min_sum_soft_limit and min_synced_rpcs
         let mut votes: Vec<_> = votes
@@ -319,7 +319,7 @@ impl RankedRpcs {
 // TODO: move this to many.rs
 impl Web3Rpcs {
     #[inline]
-    pub fn head_block(&self) -> Option<Web3ProxyBlock> {
+    pub fn head_block(&self) -> Option<BlockHeader> {
         self.watch_head_block
             .as_ref()
             .and_then(|x| x.borrow().clone())
@@ -357,7 +357,7 @@ type FirstSeenCache = Cache<H256, Instant>;
 
 /// A ConsensusConnections builder that tracks all connection heads across multiple groups of servers
 pub struct ConsensusFinder {
-    rpc_heads: HashMap<Arc<Web3Rpc>, Web3ProxyBlock>,
+    rpc_heads: HashMap<Arc<Web3Rpc>, BlockHeader>,
     /// no consensus if the best known block is too old
     max_head_block_age: Option<Duration>,
     /// no consensus if the best consensus block is too far behind the best known
@@ -397,7 +397,7 @@ impl ConsensusFinder {
         &mut self,
         web3_rpcs: &Web3Rpcs,
         rpc: Option<&Arc<Web3Rpc>>,
-        new_block: Option<Web3ProxyBlock>,
+        new_block: Option<BlockHeader>,
     ) -> Web3ProxyResult<bool> {
         let rpc_block_sender = rpc.and_then(|x| x.head_block_sender.as_ref());
 
@@ -477,7 +477,7 @@ impl ConsensusFinder {
                 let consensus_head_block = if let Some(consensus_head_block) = consensus_head_block
                 {
                     let consensus_head_block = web3_rpcs
-                        .try_cache_block(consensus_head_block, true)
+                        .try_cache_block_header(consensus_head_block, true)
                         .await?;
 
                     Some(consensus_head_block)
@@ -538,7 +538,7 @@ impl ConsensusFinder {
                                 consensus_head_block
                             {
                                 let consensus_head_block = web3_rpcs
-                                    .try_cache_block(consensus_head_block, true)
+                                    .try_cache_block_header(consensus_head_block, true)
                                     .await
                                     .web3_context("save consensus_head_block as heaviest chain")?;
 
@@ -578,7 +578,7 @@ impl ConsensusFinder {
                         let consensus_head_block =
                             if let Some(consensus_head_block) = consensus_head_block {
                                 let consensus_head_block = web3_rpcs
-                                    .try_cache_block(consensus_head_block, true)
+                                    .try_cache_block_header(consensus_head_block, true)
                                     .await
                                     .web3_context(
                                         "save_block sending consensus_head_block as heaviest chain",
@@ -617,7 +617,7 @@ impl ConsensusFinder {
                             if let Some(consensus_head_block) = consensus_head_block {
                                 Some(
                                     web3_rpcs
-                                        .try_cache_block(consensus_head_block, true)
+                                        .try_cache_block_header(consensus_head_block, true)
                                         .await?,
                                 )
                             } else {
@@ -638,7 +638,7 @@ impl ConsensusFinder {
     pub(super) async fn process_block_from_rpc(
         &mut self,
         web3_rpcs: &Web3Rpcs,
-        new_block: Option<Web3ProxyBlock>,
+        new_block: Option<BlockHeader>,
         rpc: Arc<Web3Rpc>,
     ) -> Web3ProxyResult<bool> {
         // TODO: how should we handle an error here?
@@ -655,11 +655,11 @@ impl ConsensusFinder {
         self.refresh(web3_rpcs, Some(&rpc), new_block).await
     }
 
-    fn remove(&mut self, rpc: &Arc<Web3Rpc>) -> Option<Web3ProxyBlock> {
+    fn remove(&mut self, rpc: &Arc<Web3Rpc>) -> Option<BlockHeader> {
         self.rpc_heads.remove(rpc)
     }
 
-    async fn insert(&mut self, rpc: Arc<Web3Rpc>, block: Web3ProxyBlock) -> Option<Web3ProxyBlock> {
+    async fn insert(&mut self, rpc: Arc<Web3Rpc>, block: BlockHeader) -> Option<BlockHeader> {
         let first_seen = self
             .first_seen
             .get_with_by_ref(block.hash(), async { Instant::now() })
@@ -678,7 +678,7 @@ impl ConsensusFinder {
     /// Update our tracking of the rpc and return true if something changed
     pub(crate) async fn update_rpc(
         &mut self,
-        rpc_head_block: Option<Web3ProxyBlock>,
+        rpc_head_block: Option<BlockHeader>,
         rpc: Arc<Web3Rpc>,
         // we need this so we can save the block to caches. i don't like it though. maybe we should use a lazy_static Cache wrapper that has a "save_block" method?. i generally dislike globals but i also dislike all the types having to pass eachother around
         web3_connections: &Web3Rpcs,
@@ -688,7 +688,7 @@ impl ConsensusFinder {
             Some(mut rpc_head_block) => {
                 // we don't know if its on the heaviest chain yet
                 rpc_head_block = web3_connections
-                    .try_cache_block(rpc_head_block, false)
+                    .try_cache_block_header(rpc_head_block, false)
                     .await
                     .web3_context("failed caching block")?;
 
@@ -844,9 +844,9 @@ impl ConsensusFinder {
 
         // TODO: also track the sum of *available* hard_limits? if any servers have no hard limits, use their soft limit or no limit?
         // TODO: struct for the value of the votes hashmap?
-        let mut primary_votes: HashMap<Web3ProxyBlock, (HashSet<&Arc<Web3Rpc>>, u32)> =
+        let mut primary_votes: HashMap<BlockHeader, (HashSet<&Arc<Web3Rpc>>, u32)> =
             HashMap::with_capacity(num_known);
-        let mut backup_votes: HashMap<Web3ProxyBlock, (HashSet<&Arc<Web3Rpc>>, u32)> =
+        let mut backup_votes: HashMap<BlockHeader, (HashSet<&Arc<Web3Rpc>>, u32)> =
             HashMap::with_capacity(num_known);
 
         for (rpc, rpc_head) in self.rpc_heads.iter() {
@@ -1049,7 +1049,7 @@ impl RpcsForRequest {
     }
 }
 
-struct MaybeBlock<'a>(pub &'a Option<Web3ProxyBlock>);
+struct MaybeBlock<'a>(pub &'a Option<BlockHeader>);
 
 impl std::fmt::Display for MaybeBlock<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

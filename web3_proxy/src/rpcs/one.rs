@@ -1,5 +1,5 @@
 //! Rate-limited communication with a web3 provider.
-use super::blockchain::{ArcBlock, BlocksByHashCache, Web3ProxyBlock};
+use super::blockchain::{ArcBlock, BlockHeader, BlocksByHashCache};
 use super::provider::{connect_ws, EthersWsProvider};
 use super::request::{OpenRequestHandle, OpenRequestResult};
 use crate::app::Web3ProxyJoinHandle;
@@ -78,7 +78,7 @@ pub struct Web3Rpc {
     /// TODO: have an enum for this so that "no limit" prints pretty?
     pub(super) block_data_limit: AtomicU64,
     /// head_block is only inside an Option so that the "Default" derive works. it will always be set.
-    pub(super) head_block_sender: Option<watch::Sender<Option<Web3ProxyBlock>>>,
+    pub(super) head_block_sender: Option<watch::Sender<Option<BlockHeader>>>,
     /// Track head block latency.
     /// TODO: This is in a sync lock, but writes are infrequent and quick. Is this actually okay? Set from a spawned task and read an atomic instead?
     pub(super) head_delay: RwLock<EwmaLatency>,
@@ -575,7 +575,7 @@ impl Web3Rpc {
 
         let new_head_block = match new_head_block {
             Ok(x) => {
-                let x = x.and_then(Web3ProxyBlock::try_new);
+                let x = x.and_then(BlockHeader::try_new);
 
                 match x {
                     None => {
@@ -1515,7 +1515,7 @@ mod tests {
 
         let random_block = Arc::new(random_block);
 
-        let head_block = Web3ProxyBlock::try_new(random_block).unwrap();
+        let head_block = BlockHeader::try_new(random_block).unwrap();
         let block_data_limit = u64::MAX;
 
         let (tx, _) = watch::channel(Some(head_block.clone()));
@@ -1541,7 +1541,7 @@ mod tests {
     fn test_pruned_node_has_block_data() {
         let now = chrono::Utc::now().timestamp().into();
 
-        let head_block: Web3ProxyBlock = Arc::new(Block {
+        let head_block: BlockHeader = Arc::new(Block {
             hash: Some(H256::random()),
             number: Some(1_000_000.into()),
             timestamp: now,

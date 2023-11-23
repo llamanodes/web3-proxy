@@ -20,15 +20,16 @@ use tracing::{debug, error, warn};
 // TODO: type for Hydrated Blocks with their full transactions?
 pub type ArcBlock = Arc<Block<TxHash>>;
 
-pub type BlocksByHashCache = Cache<H256, Web3ProxyBlock>;
+pub type BlocksByHashCache = Cache<H256, BlockHeader>;
 pub type BlocksByNumberCache = Cache<U64, H256>;
 
 /// A block and its age with a less verbose serialized format
 /// This does **not** implement Default. We rarely want a block with number 0 and hash 0.
+/// TODO: make a newtype for this? it doesn't have all the same fields as a block
 #[derive(Clone)]
-pub struct Web3ProxyBlock(pub ArcBlock);
+pub struct BlockHeader(pub ArcBlock);
 
-impl Debug for Web3ProxyBlock {
+impl Debug for BlockHeader {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Web3ProxyBlock")
             .field("number", &self.number())
@@ -37,7 +38,7 @@ impl Debug for Web3ProxyBlock {
     }
 }
 
-impl Serialize for Web3ProxyBlock {
+impl Serialize for BlockHeader {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -60,7 +61,7 @@ impl Serialize for Web3ProxyBlock {
     }
 }
 
-impl PartialEq for Web3ProxyBlock {
+impl PartialEq for BlockHeader {
     fn eq(&self, other: &Self) -> bool {
         match (self.0.hash, other.0.hash) {
             (None, None) => true,
@@ -71,15 +72,15 @@ impl PartialEq for Web3ProxyBlock {
     }
 }
 
-impl Eq for Web3ProxyBlock {}
+impl Eq for BlockHeader {}
 
-impl Hash for Web3ProxyBlock {
+impl Hash for BlockHeader {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.0.hash.hash(state);
     }
 }
 
-impl Web3ProxyBlock {
+impl BlockHeader {
     /// A new block has arrived over a subscription. skip it if its empty
     pub fn try_new(block: ArcBlock) -> Option<Self> {
         if block.number.is_none() || block.hash.is_none() {
@@ -131,7 +132,7 @@ impl Web3ProxyBlock {
     }
 }
 
-impl Display for Web3ProxyBlock {
+impl Display for BlockHeader {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -143,7 +144,7 @@ impl Display for Web3ProxyBlock {
     }
 }
 
-impl TryFrom<ArcBlock> for Web3ProxyBlock {
+impl TryFrom<ArcBlock> for BlockHeader {
     type Error = Web3ProxyError;
 
     fn try_from(block: ArcBlock) -> Result<Self, Self::Error> {
@@ -153,11 +154,11 @@ impl TryFrom<ArcBlock> for Web3ProxyBlock {
 
 impl Web3Rpcs {
     /// add a block to our mappings and track the heaviest chain
-    pub async fn try_cache_block(
+    pub async fn try_cache_block_header(
         &self,
-        block: Web3ProxyBlock,
+        block: BlockHeader,
         consensus_head: bool,
-    ) -> Web3ProxyResult<Web3ProxyBlock> {
+    ) -> Web3ProxyResult<BlockHeader> {
         let block_hash = *block.hash();
 
         // TODO: i think we can rearrange this function to make it faster on the hot path

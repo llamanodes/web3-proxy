@@ -1,5 +1,5 @@
 //! Load balanced communication with a group of web3 rpc providers
-use super::blockchain::{BlocksByHashCache, BlocksByNumberCache, Web3ProxyBlock};
+use super::blockchain::{BlockHeader, BlocksByHashCache, BlocksByNumberCache};
 use super::consensus::{RankedRpcs, RpcsForRequest};
 use super::one::Web3Rpc;
 use crate::app::{App, Web3ProxyJoinHandle};
@@ -35,7 +35,7 @@ pub struct Web3Rpcs {
     pub(crate) name: Cow<'static, str>,
     pub(crate) chain_id: u64,
     /// if watch_head_block is some, Web3Rpc inside self will send blocks here when they get them
-    pub(crate) block_and_rpc_sender: mpsc::UnboundedSender<(Option<Web3ProxyBlock>, Arc<Web3Rpc>)>,
+    pub(crate) block_and_rpc_sender: mpsc::UnboundedSender<(Option<BlockHeader>, Arc<Web3Rpc>)>,
     /// any requests will be forwarded to one (or more) of these connections
     /// TODO: hopefully this not being an async lock will be okay. if you need it across awaits, clone the arc
     pub(crate) by_name: RwLock<HashMap<String, Arc<Web3Rpc>>>,
@@ -46,7 +46,7 @@ pub struct Web3Rpcs {
     pub(crate) watch_ranked_rpcs: watch::Sender<Option<Arc<RankedRpcs>>>,
     /// this head receiver makes it easy to wait until there is a new block
     /// this is None if none of the child Rpcs are subscribed to newHeads
-    pub(super) watch_head_block: Option<watch::Sender<Option<Web3ProxyBlock>>>,
+    pub(super) watch_head_block: Option<watch::Sender<Option<BlockHeader>>>,
     /// TODO: this map is going to grow forever unless we do some sort of pruning. maybe store pruned in redis?
     /// all blocks, including uncles
     /// TODO: i think uncles should be excluded
@@ -102,7 +102,7 @@ impl Web3Rpcs {
         min_head_rpcs: usize,
         min_sum_soft_limit: u32,
         name: Cow<'static, str>,
-        watch_consensus_head_sender: Option<watch::Sender<Option<Web3ProxyBlock>>>,
+        watch_consensus_head_sender: Option<watch::Sender<Option<BlockHeader>>>,
         pending_txid_firehose: Option<Arc<DedupedBroadcaster<TxHash>>>,
     ) -> anyhow::Result<(
         Arc<Self>,
@@ -688,7 +688,7 @@ mod tests {
 
     use super::*;
     use crate::block_number::{BlockNumAndHash, CacheMode};
-    use crate::rpcs::blockchain::Web3ProxyBlock;
+    use crate::rpcs::blockchain::BlockHeader;
     use crate::rpcs::consensus::ConsensusFinder;
     use arc_swap::ArcSwap;
     use ethers::types::H256;
@@ -726,7 +726,7 @@ mod tests {
 
         let blocks: Vec<_> = [block_0, block_1, block_2]
             .into_iter()
-            .map(|x| Web3ProxyBlock::try_new(Arc::new(x)).unwrap())
+            .map(|x| BlockHeader::try_new(Arc::new(x)).unwrap())
             .collect();
 
         let (tx_a, _) = watch::channel(None);

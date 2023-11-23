@@ -1,6 +1,6 @@
 use crate::app::Web3ProxyJoinHandle;
 use crate::compute_units::default_usd_per_cu;
-use crate::rpcs::blockchain::{BlocksByHashCache, Web3ProxyBlock};
+use crate::rpcs::blockchain::{BlockHeader, BlocksByHashCache};
 use crate::rpcs::one::Web3Rpc;
 use argh::FromArgs;
 use deduped_broadcast::DedupedBroadcaster;
@@ -18,7 +18,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::warn;
 
-pub type BlockAndRpc = (Option<Web3ProxyBlock>, Arc<Web3Rpc>);
+pub type BlockAndRpc = (Option<BlockHeader>, Arc<Web3Rpc>);
 pub type TxHashAndRpc = (TxHash, Arc<Web3Rpc>);
 
 #[derive(Debug, FromArgs)]

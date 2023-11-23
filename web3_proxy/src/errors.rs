@@ -6,7 +6,7 @@ use crate::jsonrpc::{
     self, JsonRpcErrorData, ParsedResponse, SingleRequest, StreamResponse, ValidatedRequest,
 };
 use crate::response_cache::ForwardedResponse;
-use crate::rpcs::blockchain::Web3ProxyBlock;
+use crate::rpcs::blockchain::BlockHeader;
 use crate::rpcs::one::Web3Rpc;
 use crate::rpcs::provider::EthersHttpProvider;
 use axum::extract::rejection::JsonRejection;
@@ -144,7 +144,7 @@ pub enum Web3ProxyError {
     #[error(ignore)]
     #[from(ignore)]
     #[display(fmt = "{} @ {}", _0, _1)]
-    OldHead(Arc<Web3Rpc>, Web3ProxyBlock),
+    OldHead(Arc<Web3Rpc>, BlockHeader),
     OriginRequired,
     #[error(ignore)]
     #[from(ignore)]

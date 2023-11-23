@@ -570,8 +570,9 @@ impl RpcQueryStats {
                     // force error_response to true
                     // this can happen when a try operator escapes and metadata.add_response() isn't called
                     warn!(
-                        "no response known, but no errors logged. investigate. {:?}",
-                        metadata
+                        ?response_lock,
+                        ?metadata,
+                        "no response known, but no errors logged. investigate",
                     );
                     error_response = true;
                 }
