@@ -127,6 +127,8 @@ pub struct App {
     pub stat_sender: Option<mpsc::UnboundedSender<AppStat>>,
     /// when the app started
     pub start: Instant,
+    /// limit the number of tx subscriptions
+    pub tx_subscriptions: Semaphore,
 
     /// Optional time series database for making pretty graphs that load quickly
     influxdb_client: Option<influxdb2::Client>,
@@ -490,6 +492,8 @@ impl App {
             .name("jsonrpc_response_failed_cache_keys")
             .build();
 
+        let tx_subscriptions = Semaphore::new(1);
+
         let app = Self {
             balanced_rpcs,
             bonus_frontend_public_rate_limiter,
@@ -522,6 +526,7 @@ impl App {
             user_semaphores,
             vredis_pool,
             watch_consensus_head_receiver,
+            tx_subscriptions,
         };
 
         let app = Arc::new(app);

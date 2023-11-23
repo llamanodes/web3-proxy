@@ -5,6 +5,7 @@ use super::request::{OpenRequestHandle, OpenRequestResult};
 use crate::app::Web3ProxyJoinHandle;
 use crate::config::{BlockAndRpc, Web3RpcConfig};
 use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
+use crate::globals;
 use crate::jsonrpc::ValidatedRequest;
 use crate::jsonrpc::{self, JsonRpcParams, JsonRpcResultData};
 use crate::rpcs::request::RequestErrorHandler;
@@ -895,7 +896,16 @@ impl Web3Rpc {
         if self.pending_txid_firehose.is_some() && self.ws_provider.load().is_some() {
             let clone = self.clone();
 
-            let f = async move { clone.subscribe_new_transactions().await };
+            let f = async move {
+                let app = globals::APP.get().unwrap();
+                let permit = app.tx_subscriptions.acquire().await?;
+
+                let result = clone.subscribe_new_transactions().await;
+
+                std::mem::drop(permit);
+
+                result
+            };
 
             // TODO: this is waking itself alot
             let h = tokio::spawn(f);
