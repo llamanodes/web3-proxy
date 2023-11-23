@@ -687,6 +687,10 @@ mod test {
     #[test]
     fn test_serializing_padded_ints() {
         let x: U64 = "0x001234".parse().unwrap();
+
+        let y: U64 = "0x1234".parse().unwrap();
+
+        assert_eq!(x, y);
     }
 
     // TODO: tests for eth_getLogs
