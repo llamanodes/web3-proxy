@@ -838,7 +838,7 @@ impl Web3ProxyError {
                         code: -32601,
                         data: Some(json!({
                             "method": method,
-                            "extra": "contact us if you need this. https://discord.llamanodes.com/",
+                            "extra": "this method is not currently supported. Come to discord and we can give you options. https://discord.llamanodes.com/",
                         })),
                     },
                 )
