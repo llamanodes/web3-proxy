@@ -1,6 +1,6 @@
 [package]
 name = "web3_proxy"
-version = "1.43.98"
+version = "1.43.99"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -56,7 +56,7 @@ futures = { version = "0.3.29" }
 futures-util = "0.3.29"
 glob = "0.3.1"
 handlebars = "4.5.0"
-hashbrown = { version = "0.14.2", features = ["serde", "nightly"] }
+hashbrown = { version = "0.14.3", features = ["serde", "nightly"] }
 hdrhistogram = "7.5.4"
 hostname = "0.3.1"
 http = "0.2.11"
