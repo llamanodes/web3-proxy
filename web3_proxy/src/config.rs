@@ -12,6 +12,7 @@ use sentry::types::Dsn;
 use serde::{de, Deserialize, Deserializer};
 use serde_inline_default::serde_inline_default;
 use std::fmt;
+use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
@@ -392,21 +393,17 @@ impl From<BlockDataLimit> for AtomicU64 {
 #[serde_inline_default]
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct Web3RpcConfig {
+    /// only use this rpc if everything else is lagging too far. this allows us to ignore fast but very low limit rpcs
+    #[serde(default = "Default::default")]
+    pub backup: bool,
+    /// block data limit. If None, will be queried
+    #[serde(default = "Default::default")]
+    pub block_data_limit: BlockDataLimit,
     /// simple way to disable a connection without deleting the row
     #[serde(default = "Default::default")]
     pub disabled: bool,
     /// a name used in /status and other user facing messages
     pub display_name: Option<String>,
-    /// while not absolutely required, a ws:// or wss:// connection will be able to subscribe to head blocks
-    pub ws_url: Option<String>,
-    /// while not absolutely required, a http:// or https:// connection will allow erigon to stream JSON
-    pub http_url: Option<String>,
-    /// block data limit. If None, will be queried
-    #[serde(default = "Default::default")]
-    pub block_data_limit: BlockDataLimit,
-    /// the requests per second at which the server starts slowing down
-    #[serde_inline_default(1u32)]
-    pub soft_limit: u32,
     /// the requests per period at which the server throws errors (rate limit or otherwise)
     pub hard_limit: Option<u64>,
     /// the number of seconds in a rate limiting period
@@ -416,13 +413,19 @@ pub struct Web3RpcConfig {
     /// if hard limits are applied per server or per endpoint. default is per server
     #[serde(default = "Default::default")]
     pub hard_limit_per_endpoint: bool,
-    /// only use this rpc if everything else is lagging too far. this allows us to ignore fast but very low limit rpcs
-    #[serde(default = "Default::default")]
-    pub backup: bool,
+    /// while not absolutely required, a http:// or https:// connection will allow erigon to stream JSON
+    pub http_url: Option<String>,
+    /// while not absolutely required, a ipc connection should be fastest
+    pub ipc_path: Option<PathBuf>,
+    /// the requests per second at which the server starts slowing down
+    #[serde_inline_default(1u32)]
+    pub soft_limit: u32,
     /// Subscribe to the firehose of pending transactions
     /// Don't do this with free rpcs
     #[serde(default = "Default::default")]
     pub subscribe_txs: bool,
+    /// while not absolutely required, a ws:// or wss:// connection will be able to subscribe to head blocks
+    pub ws_url: Option<String>,
     /// unknown config options get put here
     #[serde(flatten, default = "HashMap::default")]
     pub extra: HashMap<String, serde_json::Value>,

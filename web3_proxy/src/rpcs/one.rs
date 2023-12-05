@@ -28,6 +28,7 @@ use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::fmt;
 use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
 use std::sync::atomic::{self, AtomicBool, AtomicU32, AtomicU64, AtomicUsize};
 use std::{cmp::Ordering, sync::Arc};
 use tokio::select;
@@ -53,13 +54,16 @@ pub struct Web3Rpc {
     pub(super) block_map: Option<BlocksByHashCache>,
     /// created_at is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) created_at: Option<Instant>,
-    /// most all requests prefer use the http_provider
+    /// if no ipc_stream, most all requests prefer to use the http_provider
     pub(super) http_client: Option<reqwest::Client>,
     pub(super) http_url: Option<Url>,
     /// the websocket url is only used for subscriptions
     pub(super) ws_url: Option<Url>,
     /// the websocket provider is only used for subscriptions
     pub(super) ws_provider: ArcSwapOption<EthersWsProvider>,
+    /// most all requests prefer the ipc provider.
+    /// TODO: ArcSwapOption?
+    pub(super) ipc_path: Option<PathBuf>,
     /// keep track of hard limits
     /// hard_limit_until is only inside an Option so that the "Default" derive works. it will always be set.
     pub(super) hard_limit_until: Option<watch::Sender<Instant>>,
@@ -227,6 +231,7 @@ impl Web3Rpc {
             head_block_sender: Some(head_block),
             http_url,
             http_client,
+            ipc_path: config.ipc_path,
             max_head_block_age,
             name,
             peak_latency: Some(peak_latency),

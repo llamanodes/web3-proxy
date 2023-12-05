@@ -3,7 +3,7 @@ use crate::errors::{Web3ProxyError, Web3ProxyErrorContext, Web3ProxyResult};
 use crate::frontend::authorization::{Authorization, AuthorizationType};
 use crate::globals::{global_db_conn, DB_CONN};
 use crate::jsonrpc::{
-    self, JsonRpcErrorData, JsonRpcResultData, ResponsePayload, ValidatedRequest,
+    self, JsonRpcErrorData, JsonRpcResultData, ParsedResponse, ResponsePayload, ValidatedRequest,
 };
 use anyhow::Context;
 use chrono::Utc;
@@ -20,6 +20,8 @@ use serde_json::json;
 use std::pin::Pin;
 use std::sync::atomic;
 use std::sync::Arc;
+use tokio::io::AsyncWriteExt;
+use tokio::net::UnixStream;
 use tokio::time::{Duration, Instant};
 use tracing::{debug, error, info, trace, warn, Level};
 
@@ -199,10 +201,36 @@ impl OpenRequestHandle {
     async fn _request<R: JsonRpcResultData + serde::Serialize>(
         &self,
     ) -> Web3ProxyResult<jsonrpc::SingleResponse<R>> {
-        // TODO: replace ethers-rs providers with our own that supports streaming the responses
-        // TODO: replace ethers-rs providers with our own that handles "id" being null
-        if let (Some(url), Some(ref client)) = (self.rpc.http_url.clone(), &self.rpc.http_client) {
-            // prefer the http provider
+        if let Some(ipc_path) = self.rpc.ipc_path.as_ref() {
+            // first, prefer the unix stream
+            let request = self
+                .web3_request
+                .inner
+                .jsonrpc_request()
+                .context("there should always be a request here")?;
+
+            // TODO: instead of connecting every time, use a connection pool
+            let mut ipc_stream = UnixStream::connect(ipc_path).await?;
+
+            ipc_stream.writable().await?;
+
+            let x = serde_json::to_vec(request)?;
+
+            let _ = ipc_stream.write(&x).await?;
+
+            ipc_stream.readable().await?;
+
+            let mut buf = Vec::new();
+
+            let n = ipc_stream.try_read(&mut buf)?;
+
+            let x: ParsedResponse<R> = serde_json::from_slice(&buf[..n])?;
+
+            Ok(x.into())
+        } else if let (Some(url), Some(ref client)) =
+            (self.rpc.http_url.clone(), &self.rpc.http_client)
+        {
+            // second, prefer the http provider
             let request = self
                 .web3_request
                 .inner
@@ -234,7 +262,7 @@ impl OpenRequestHandle {
             // cache 128kb responses
             jsonrpc::SingleResponse::read_if_short(response, 131_072, &self.web3_request).await
         } else if let Some(p) = self.rpc.ws_provider.load().as_ref() {
-            // use the websocket provider if no http provider is available
+            // use the websocket provider if no other provider is available
             let method = self.web3_request.inner.method();
             let params = self.web3_request.inner.params();
 
